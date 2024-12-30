@@ -1,3 +1,4 @@
+use comemo::Track;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -14,7 +15,7 @@ pub struct TypstWorld {
         parking_lot::Mutex<HashMap<typst::syntax::FileId, SlotCell<typst::syntax::Source>>>,
     file_slots:
         parking_lot::Mutex<HashMap<typst::syntax::FileId, SlotCell<typst::foundations::Bytes>>>,
-    text: String,
+    //text: String,
 }
 
 impl TypstWorld {
@@ -62,42 +63,67 @@ impl TypstWorld {
             main_id: typst::syntax::FileId::new_fake(typst::syntax::VirtualPath::new("<main>")),
             source_slots: parking_lot::Mutex::new(HashMap::new()),
             file_slots: parking_lot::Mutex::new(HashMap::new()),
-            text: String::new(),
+            // text: String::new(),
         })
     }
 
-    pub fn set_text(&mut self, text: String) {
+    pub fn document(&self, text: String) -> typst::model::Document {
         self.source_slots
-            .get_mut()
+            .lock()
             .values_mut()
             .for_each(SlotCell::reset);
         self.file_slots
-            .get_mut()
+            .lock()
             .values_mut()
             .for_each(SlotCell::reset);
-        self.text = text;
+
+        let source = typst::syntax::Source::new(self.main_id, text);
+        let styles = typst::foundations::StyleChain::new(&self.library().styles);
+        let traced = typst::engine::Traced::default();
+        let introspector = typst::introspection::Introspector::default();
+        let world = self.track();
+        let traced = traced.track();
+        let introspector = introspector.track();
+
+        let mut sink = typst::engine::Sink::new();
+        let content = typst::eval::eval(
+            world,
+            traced,
+            sink.track_mut(),
+            typst::engine::Route::default().track(),
+            &source,
+        )
+        .unwrap()
+        .content();
+
+        let mut engine = typst::engine::Engine {
+            world,
+            introspector,
+            traced,
+            sink: sink.track_mut(),
+            route: typst::engine::Route::default(),
+        };
+        let document = typst::layout::layout_document(&mut engine, &content, styles).unwrap();
+        println!("{document:?}");
+        document
     }
 
     fn read(&self, id: typst::syntax::FileId) -> typst::diag::FileResult<Vec<u8>> {
-        if id == self.main_id {
-            Ok(self.text.clone().into_bytes())
-        } else {
-            let root = match id.package() {
-                Some(spec) => &self
-                    .package_storage
-                    .prepare_package(spec, &mut typst_kit::download::ProgressSink)?,
-                None => &self.root,
-            };
-            let path = id
-                .vpath()
-                .resolve(root)
-                .ok_or(typst::diag::FileError::AccessDenied)?;
-            std::fs::metadata(path.clone())
-                .map_err(|_| typst::diag::FileError::AccessDenied)?
-                .is_file()
-                .then(|| std::fs::read(path).map_err(|_| typst::diag::FileError::AccessDenied))
-                .unwrap_or(Err(typst::diag::FileError::IsDirectory))
-        }
+        let root = match id.package() {
+            Some(spec) => &self
+                .package_storage
+                .prepare_package(spec, &mut typst_kit::download::ProgressSink)?,
+            None => &self.root,
+        };
+        let path = id
+            .vpath()
+            .resolve(root)
+            .ok_or(typst::diag::FileError::AccessDenied)?;
+        std::fs::metadata(path.clone())
+            .map_err(|_| typst::diag::FileError::AccessDenied)?
+            .is_file()
+            .then(|| std::fs::read(path).map_err(|_| typst::diag::FileError::AccessDenied))
+            .unwrap_or(Err(typst::diag::FileError::IsDirectory))
     }
 }
 
@@ -160,6 +186,14 @@ impl typst::World for TypstWorld {
 
     fn today(&self, _: Option<i64>) -> Option<typst::foundations::Datetime> {
         None
+    }
+}
+
+impl std::ops::Deref for TypstWorld {
+    type Target = dyn typst::World;
+
+    fn deref(&self) -> &Self::Target {
+        self
     }
 }
 

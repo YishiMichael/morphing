@@ -2,10 +2,15 @@ pub mod world;
 
 use world::TypstWorld;
 
-fn main() {
-    let mut world = TypstWorld::default();
-    world.set_text("text".to_string());
+fn main() -> () {
+    let world = TypstWorld::default();
 
-    let document = typst::compile(&world);
-    dbg!(document.warnings);
+    let text = "text".to_string();
+
+    world.document(text);
+
+    // println!("{content:?}");
+    // println!("{document:?}");
+    // let svg = typst_svg::svg_merged(&document, typst::layout::Abs::zero());
+    // println!("{svg}");
 }
