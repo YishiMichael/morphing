@@ -6,46 +6,6 @@ pub struct Path(pub lyon::path::Path);
 #[derive(Clone)]
 pub struct Subpaths(pub Vec<bezier_rs::Subpath<ManipulatorGroupId>>);
 
-impl Path {
-    // fn from_bezier_subpaths(subpaths: Vec<bezier_rs::Subpath<ManipulatorGroupId>>) -> Self {
-    //     subpaths.into_iter()
-    // }
-
-    // fn into_to_bezier_subpaths(self) -> Vec<bezier_rs::Subpath<ManipulatorGroupId>> {
-    //     SubpathIter(self.0.into_iter()).collect()
-    // }
-
-    // fn to_bezier_subpaths(&self) -> Vec<bezier_rs::Subpath<ManipulatorGroupId>> {
-    //     SubpathIter(self.0.iter()).collect()
-    // }
-
-    // fn fill_triangulation(
-    //     &self,
-    //     options: &lyon::tessellation::FillOptions,
-    // ) -> lyon::tessellation::VertexBuffers<lyon::math::Point, u16> {
-    //     let mut buffers = lyon::tessellation::VertexBuffers::new();
-    //     lyon::tessellation::FillTessellator::new().tessellate(
-    //         &self.0,
-    //         options,
-    //         &mut lyon::tessellation::geometry_builder::simple_builder(&mut buffers),
-    //     ); // TODO: handle err
-    //     buffers
-    // }
-
-    // fn stroke_triangulation(
-    //     &self,
-    //     options: &lyon::tessellation::StrokeOptions,
-    // ) -> lyon::tessellation::VertexBuffers<lyon::math::Point, u16> {
-    //     let mut buffers = lyon::tessellation::VertexBuffers::new();
-    //     lyon::tessellation::StrokeTessellator::new().tessellate(
-    //         &self.0,
-    //         options,
-    //         &mut lyon::tessellation::geometry_builder::simple_builder(&mut buffers),
-    //     ); // TODO: handle err
-    //     buffers
-    // }
-}
-
 impl From<&Subpaths> for Path {
     fn from(subpaths: &Subpaths) -> Self {
         #[inline]
@@ -168,6 +128,13 @@ impl From<Path> for Subpaths {
     #[inline]
     fn from(path: Path) -> Self {
         Self::from(&path)
+    }
+}
+
+impl From<bezier_rs::Subpath<ManipulatorGroupId>> for Subpaths {
+    #[inline]
+    fn from(subpath: bezier_rs::Subpath<ManipulatorGroupId>) -> Self {
+        Self(vec![subpath])
     }
 }
 

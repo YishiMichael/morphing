@@ -15,46 +15,51 @@ use world::TypstWorld;
 
 fn typst_path_to_subpath(path: typst::visualize::Path) -> bezier_rs::Subpath<ManipulatorGroupId> {
     #[inline]
-    fn convert_point(point: typst::layout::Point) -> lyon::math::Point {
-        lyon::math::point(point.x.to_raw() as f32, point.y.to_raw() as f32)
+    fn convert_point(typst::layout::Point { x, y }: typst::layout::Point) -> (f64, f64) {
+        (x.to_raw(), y.to_raw())
     }
 
-    let (mut builder, closed) = path.0.into_iter().fold(
-        (lyon::path::Path::builder(), false),
-        |(mut builder, closed), path_item| match path_item {
-            typst::visualize::PathItem::MoveTo(at) => {
-                if !closed {
-                    builder.end(false);
-                }
-                builder.begin(convert_point(at));
-                (builder, false)
+    let mut anchor = None;
+    let mut closed = false;
+    let beziers = path
+        .0
+        .into_iter()
+        .filter_map(|path_item| match path_item {
+            typst::visualize::PathItem::MoveTo(start) => {
+                assert!(anchor.replace(convert_point(start)).is_none());
+                None
             }
-            typst::visualize::PathItem::LineTo(to) => {
-                builder.line_to(convert_point(to));
-                (builder, false)
+            typst::visualize::PathItem::LineTo(end) => {
+                let end = convert_point(end);
+                Some(bezier_rs::Bezier {
+                    start: anchor.replace(end).unwrap().into(),
+                    end: end.into(),
+                    handles: bezier_rs::BezierHandles::Linear,
+                })
             }
-            typst::visualize::PathItem::CubicTo(ctrl1, ctrl2, to) => {
-                builder.cubic_bezier_to(
-                    convert_point(ctrl1),
-                    convert_point(ctrl2),
-                    convert_point(to),
-                );
-                (builder, false)
+            typst::visualize::PathItem::CubicTo(handle_start, handle_end, end) => {
+                let end = convert_point(end);
+                Some(bezier_rs::Bezier {
+                    start: anchor.replace(end).unwrap().into(),
+                    end: end.into(),
+                    handles: bezier_rs::BezierHandles::Cubic {
+                        handle_start: convert_point(handle_start).into(),
+                        handle_end: convert_point(handle_end).into(),
+                    },
+                })
             }
             typst::visualize::PathItem::ClosePath => {
-                builder.end(true);
-                (builder, true)
+                assert!(anchor.take().is_some());
+                closed = true;
+                None
             }
-        },
-    );
-    if !closed {
-        builder.end(false);
-    }
-    Path(builder.build())
+        })
+        .collect_vec();
+    bezier_rs::Subpath::from_beziers(&beziers, closed)
 }
 
-fn typst_shape_to_mobjects(shape: typst::visualize::Shape) -> Vec<Box<dyn Mobject>> {
-    let path = typst_path_to_path(match shape.geometry {
+pub fn typst_shape_to_mobjects(shape: typst::visualize::Shape) -> Vec<Box<dyn Mobject>> {
+    let subpath = typst_path_to_subpath(match shape.geometry {
         typst::visualize::Geometry::Line(point) => {
             let mut path = typst::visualize::Path::new();
             path.line_to(point);
@@ -68,7 +73,7 @@ fn typst_shape_to_mobjects(shape: typst::visualize::Shape) -> Vec<Box<dyn Mobjec
     if let Some(fill) = shape.fill {
         if let typst::visualize::Paint::Solid(color) = fill {
             mobjects.push(Box::new(Fill {
-                path: path.clone(),
+                path: Path::from(Subpaths::from(subpath.clone())),
                 color: rgb::Rgba::from(color.to_vec4()),
                 options: match shape.fill_rule {
                     typst::visualize::FillRule::NonZero => {
@@ -97,14 +102,45 @@ fn typst_shape_to_mobjects(shape: typst::visualize::Shape) -> Vec<Box<dyn Mobjec
             };
             mobjects.push(Box::new(Stroke {
                 path: if let Some(dash_pattern) = stroke.dash {
-                    Path::from(
-                        Subpaths::from(path)
-                            .0
-                            .iter()
-                            .map(|subpath| Subpaths::flatten(iter)),
-                    )
+                    let total_length = subpath.length(None);
+                    let phase = dash_pattern.phase.to_raw() / total_length;
+                    let mut alphas = dash_pattern
+                        .array
+                        .into_iter()
+                        .map(|length| length.to_raw() / total_length)
+                        .scan(0.0, |alpha_acc, alpha| {
+                            *alpha_acc += alpha;
+                            Some(*alpha_acc)
+                        })
+                        .collect_vec();
+                    alphas.rotate_right(1);
+                    let alpha_period = alphas
+                        .get_mut(0)
+                        .map(|alpha| std::mem::take(alpha))
+                        .unwrap_or_default();
+                    Path::from(Subpaths(
+                        (-(phase / alpha_period).ceil() as i32
+                            ..((1.0 - phase) / alpha_period).ceil() as i32)
+                            .flat_map(|i| {
+                                alphas
+                                    .iter()
+                                    .tuples()
+                                    .filter_map(move |(&alpha_0, &alpha_1)| {
+                                        let alpha_0 = (i as f64 * alpha_period + alpha_0).max(0.0);
+                                        let alpha_1 = (i as f64 * alpha_period + alpha_1).min(1.0);
+                                        (alpha_0 < alpha_1).then_some((alpha_0, alpha_1))
+                                    })
+                            })
+                            .map(|(alpha_0, alpha_1)| {
+                                subpath.trim(
+                                    bezier_rs::SubpathTValue::GlobalEuclidean(alpha_0),
+                                    bezier_rs::SubpathTValue::GlobalEuclidean(alpha_1),
+                                )
+                            })
+                            .collect(),
+                    ))
                 } else {
-                    path
+                    Path::from(Subpaths::from(subpath))
                 },
                 color: rgb::Rgba::from(color.to_vec4()),
                 options: lyon::tessellation::StrokeOptions::default()
