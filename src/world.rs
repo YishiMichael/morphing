@@ -2,7 +2,7 @@ use comemo::Track;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-// Modified from typst-cli/src/world.rs
+// Modified from typst/lib.rs, typst-cli/src/world.rs
 
 pub struct TypstWorld {
     root: PathBuf,
@@ -60,7 +60,7 @@ impl TypstWorld {
             book: typst::utils::LazyHash::new(fonts.book),
             fonts: fonts.fonts,
             package_storage,
-            main_id: typst::syntax::FileId::new_fake(typst::syntax::VirtualPath::new("<main>")),
+            main_id: typst::syntax::FileId::new_fake(typst::syntax::VirtualPath::new("main.typ")),
             source_slots: parking_lot::Mutex::new(HashMap::new()),
             file_slots: parking_lot::Mutex::new(HashMap::new()),
             // text: String::new(),
@@ -85,6 +85,7 @@ impl TypstWorld {
         let traced = traced.track();
         let introspector = introspector.track();
 
+        // TODO: handle unwrap
         let mut sink = typst::engine::Sink::new();
         let content = typst::eval::eval(
             world,

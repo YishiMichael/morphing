@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bezier-rs = "0.4.0"
 comemo = "0.4.0"
 itertools = "0.13.0"
+lyon = "1.0.1"
 parking_lot = "0.12.3"
+rgb = "0.8.50"
 typst = "0.12.0"
 typst-kit = { version = "0.12.0", features = ["embed-fonts"] }
 typst-svg = "0.12.0"
