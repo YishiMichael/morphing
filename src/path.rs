@@ -35,7 +35,7 @@ impl Path {
                 .map(|alpha| std::mem::take(alpha))
                 .unwrap_or_default();
             (-(phase / alpha_period).ceil() as i32..((1.0 - phase) / alpha_period).ceil() as i32)
-                .map(move |i| i as f64 * alpha_period)
+                .map(move |i| i as f64 * alpha_period + phase)
                 .flat_map(move |alpha_offset| {
                     alphas
                         .clone()
@@ -223,72 +223,6 @@ impl ttf_parser::OutlineBuilder for PathBuilder {
         self.builder.end(true);
     }
 }
-
-// struct EventIter<I> {
-//     subpath_iter: I,
-//     remaining_event_iter: Option<?>,
-// }
-
-// impl<'a, I: 'a + Iterator<Item = bezier_rs::Subpath<ManipulatorGroupId>>> Iterator for EventIter<I> {
-//     type Item = lyon::path::PathEvent;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         self.subpath_iter.next().map(||)
-//     }
-// }
-
-// struct SubpathIter<I> {
-//     event_iter: I,
-// }
-
-// impl<'a, I: 'a + Iterator<Item = lyon::path::PathEvent> + Clone> Iterator for SubpathIter<I> {
-//     type Item = bezier_rs::Subpath<ManipulatorGroupId>;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         fn convert_point(lyon::geom::Point { x, y, .. }: lyon::geom::Point<f32>) -> (f64, f64) {
-//             (x as f64, y as f64)
-//         }
-
-//         self.event_iter.next().map(|_| {
-//             let beziers = self
-//                 .event_iter
-//                 .take_while_ref(|event| !matches!(event, &lyon::path::PathEvent::End { .. }))
-//                 .map(|event| match event {
-//                     lyon::path::PathEvent::Line { from, to } => {
-//                         bezier_rs::Bezier::from_linear_dvec2(
-//                             convert_point(from).into(),
-//                             convert_point(to).into(),
-//                         )
-//                     }
-//                     lyon::path::PathEvent::Quadratic { from, ctrl, to } => {
-//                         bezier_rs::Bezier::from_quadratic_dvec2(
-//                             convert_point(from).into(),
-//                             convert_point(ctrl).into(),
-//                             convert_point(to).into(),
-//                         )
-//                     }
-//                     lyon::path::PathEvent::Cubic {
-//                         from,
-//                         ctrl1,
-//                         ctrl2,
-//                         to,
-//                     } => bezier_rs::Bezier::from_cubic_dvec2(
-//                         convert_point(from).into(),
-//                         convert_point(ctrl1).into(),
-//                         convert_point(ctrl2).into(),
-//                         convert_point(to).into(),
-//                     ),
-//                     _ => unreachable!(),
-//                 })
-//                 .collect_vec();
-//             let closed = match self.0.next() {
-//                 Some(lyon::path::PathEvent::End { close, .. }) => close,
-//                 _ => unreachable!(),
-//             };
-//             bezier_rs::Subpath::from_beziers(&beziers, closed)
-//         })
-//     }
-// }
 
 #[derive(Clone, Hash, PartialEq)]
 pub struct ManipulatorGroupId(usize);
