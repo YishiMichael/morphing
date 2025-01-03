@@ -228,8 +228,8 @@ fn typst_frame_to_mobjects(
                 &typst::layout::FrameItem::Image(_, _, _) => {
                     panic!("Unsopported item: image")
                 }
-                &typst::layout::FrameItem::Link(..) => panic!("Unsopported item: link"),
-                &typst::layout::FrameItem::Tag(..) => panic!("Unsopported item: tag"),
+                &typst::layout::FrameItem::Link(..) => Vec::new(),
+                &typst::layout::FrameItem::Tag(..) => Vec::new(),
             }
         })
         .collect()
@@ -419,7 +419,7 @@ mod world {
                 Vec::new(),
                 Vec::new(),
                 true,
-                false,
+                true,
                 None,
                 None,
             )
