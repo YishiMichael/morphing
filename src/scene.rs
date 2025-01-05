@@ -4,6 +4,8 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::world::WORLD;
+
 #[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct Worldline {
     data: u32,
@@ -17,6 +19,7 @@ pub struct BakedWorldline {
 impl Worldline {
     pub(crate) fn bake(&self) -> BakedWorldline {
         // demo baking: 3 |-> "0,1,2"
+        println!("Baking... {}", self.data);
         BakedWorldline {
             data: (0..self.data).map(|i| i.to_string()).join(","),
         }
@@ -40,18 +43,10 @@ impl Scene {
         self
     }
 
-    pub(crate) fn bake(&self) -> BakedScene {
-        BakedScene {
-            baked_worldlines: self.worldlines.iter().map(Worldline::bake).collect(),
-        }
-    }
-
-    pub(crate) fn bake_with_cache(
-        &self,
-        in_cache: &HashMap<Worldline, BakedWorldline>,
-        out_cache: &mut HashMap<Worldline, BakedWorldline>,
-    ) -> BakedScene {
-        BakedScene {
+    pub fn run(&self) {
+        let in_cache = WORLD.read_cache();
+        let mut out_cache = HashMap::new();
+        let baked_scene = BakedScene {
             baked_worldlines: self
                 .worldlines
                 .iter()
@@ -64,7 +59,9 @@ impl Scene {
                     baked_worldline
                 })
                 .collect(),
-        }
+        };
+        WORLD.write_cache(out_cache);
+        baked_scene.render();
     }
 }
 
@@ -74,10 +71,9 @@ pub(crate) struct BakedScene {
 }
 
 impl BakedScene {
-    pub(crate) fn render(self) -> anyhow::Result<()> {
+    pub(crate) fn render(self) {
         self.baked_worldlines
             .into_iter()
             .for_each(|baked_worldline| println!("{:?}", baked_worldline.data));
-        Ok(())
     }
 }
