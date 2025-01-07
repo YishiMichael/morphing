@@ -1,7 +1,8 @@
-use comemo::Track;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::LazyLock;
+
+use comemo::Track;
 
 use super::scene::BakedWorldline;
 use super::scene::Worldline;

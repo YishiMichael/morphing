@@ -1,8 +1,6 @@
-pub mod fill;
-pub mod mobject;
-pub mod path;
+pub mod components;
+pub mod mobjects;
 pub mod scene;
-pub mod stroke;
-pub mod typst;
+pub mod timelines;
 
 pub(crate) mod world;

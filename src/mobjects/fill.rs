@@ -1,5 +1,5 @@
+use super::super::components::path::Path;
 use super::mobject::Mobject;
-use super::path::Path;
 
 #[derive(Clone)]
 pub struct Fill {

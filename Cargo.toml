@@ -17,7 +17,3 @@ ttf-parser = "0.24.1"
 typst = "0.12.0"
 typst-kit = { version = "0.12.0", features = ["embed-fonts"] }
 typst-svg = "0.12.0"
-
-[[bin]]
-name = "morph"
-path = "src/main.rs"

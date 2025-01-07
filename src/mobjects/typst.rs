@@ -1,14 +1,15 @@
-use itertools::Itertools;
 use std::borrow::Cow;
 use std::ops::Range;
+
+use itertools::Itertools;
 use ttf_parser::OutlineBuilder;
 
+use super::super::components::path::Path;
+use super::super::components::path::PathBuilder;
+use super::super::world::WORLD;
 use super::fill::Fill;
 use super::mobject::Mobject;
-use super::path::Path;
-use super::path::PathBuilder;
 use super::stroke::Stroke;
-use super::world::WORLD;
 
 fn typst_path_to_path(path: &typst::visualize::Path) -> Path {
     let mut builder = PathBuilder::new();

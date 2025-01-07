@@ -4,20 +4,20 @@ use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::world::WORLD;
+use super::world::WORLD;
 
 #[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub struct Worldline {
+pub(crate) struct Worldline {
     data: u32,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-pub struct BakedWorldline {
+pub(crate) struct BakedWorldline {
     data: String,
 }
 
 impl Worldline {
-    pub(crate) fn bake(&self) -> BakedWorldline {
+    fn bake(&self) -> BakedWorldline {
         // demo baking: 3 |-> "0,1,2"
         println!("Baking... {}", self.data);
         BakedWorldline {
@@ -44,6 +44,10 @@ impl Scene {
     }
 
     pub fn run(&self) {
+        self.bake().render();
+    }
+
+    fn bake(&self) -> BakedScene {
         let in_cache = WORLD.read_cache();
         let mut out_cache = HashMap::new();
         let baked_scene = BakedScene {
@@ -61,7 +65,7 @@ impl Scene {
                 .collect(),
         };
         WORLD.write_cache(out_cache);
-        baked_scene.render();
+        baked_scene
     }
 }
 
@@ -71,7 +75,7 @@ pub(crate) struct BakedScene {
 }
 
 impl BakedScene {
-    pub(crate) fn render(self) {
+    fn render(self) {
         self.baked_worldlines
             .into_iter()
             .for_each(|baked_worldline| println!("{:?}", baked_worldline.data));
