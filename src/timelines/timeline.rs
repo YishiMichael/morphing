@@ -1,92 +1,93 @@
-use std::marker::PhantomData;
-
 use super::super::mobjects::mobject::Mobject;
 use super::rates::Rate;
 use super::rates::WithRate;
 
 pub trait Timeline {}
 
-trait DynamicTimelineContent {
-    type Mobject: Mobject;
+trait DynamicTimelineNode {
+    // type Mobject: Mobject;
 }
 
-struct ContinuousTimelineContent<T, R>
+struct ContinuousTimelineNode<T>
 where
     T: Mobject,
 {
     mobject: T,
     diff: T::Diff,
-    rate: R,
 }
 
-impl<T, R> DynamicTimelineContent for ContinuousTimelineContent<T, R>
+impl<T> DynamicTimelineNode for ContinuousTimelineNode<T>
 where
     T: Mobject,
 {
-    type Mobject = T;
+    // type Mobject = T;
 }
 
-impl<T, R> WithRate<R> for ContinuousTimelineContent<T, R>
-where
-    T: Mobject,
-    R: Rate,
-{
-    type Output<RO> = ContinuousTimelineContent<T, RO> where RO: Rate;
-
-    fn with_rate<F, RO>(self, f: F) -> Self::Output<RO>
-    where
-        RO: super::rates::Rate,
-        F: FnOnce(R) -> RO,
-    {
-        ContinuousTimelineContent {
-            mobject: self.mobject,
-            diff: self.diff,
-            rate: f(self.rate),
-        }
-    }
-}
-
-struct DiscreteTimelineContent<T, R>
+struct DiscreteTimelineNode<T>
 where
     T: Mobject,
 {
     mobject: T,
     children: Vec<Box<dyn Timeline>>,
-    rate: R,
 }
 
-impl<T, R> DynamicTimelineContent for DiscreteTimelineContent<T, R>
+impl<T> DynamicTimelineNode for DiscreteTimelineNode<T>
 where
     T: Mobject,
 {
-    type Mobject = T;
+    // type Mobject = T;
 }
 
-trait DynamicTimelineScale {}
+trait DynamicTimelineMetric {}
 
-struct RelativeTimelineScale;
+struct RelativeTimelineMetric;
 
-impl DynamicTimelineScale for RelativeTimelineScale {}
+impl DynamicTimelineMetric for RelativeTimelineMetric {}
 
-struct AbsoluteTimelineScale;
+struct AbsoluteTimelineMetric;
 
-impl DynamicTimelineScale for AbsoluteTimelineScale {}
+impl DynamicTimelineMetric for AbsoluteTimelineMetric {}
 
-struct DynamicTimeline<C, S> {
-    timeline_content: C,
-    timeline_scale: S,
+struct DynamicTimeline<N, M, R> {
+    node: N,
+    metric: M,
+    rate: R,
 }
 
-impl<C, S> Timeline for DynamicTimeline<C, S>
+impl<N, M, R> WithRate<R> for DynamicTimeline<N, M, R>
 where
-    C: DynamicTimelineContent,
-    S: DynamicTimelineScale,
+    N: DynamicTimelineNode,
+    M: DynamicTimelineMetric,
+    R: Rate,
+{
+    type Output<RO> = DynamicTimeline<N, M, RO>
+    where
+        RO: Rate;
+
+    fn with_rate<F, RO>(self, f: F) -> Self::Output<RO>
+    where
+        RO: Rate,
+        F: FnOnce(R) -> RO,
+    {
+        DynamicTimeline {
+            node: self.node,
+            metric: self.metric,
+            rate: f(self.rate),
+        }
+    }
+}
+
+impl<N, M, R> Timeline for DynamicTimeline<N, M, R>
+where
+    N: DynamicTimelineNode,
+    M: DynamicTimelineMetric,
+    R: Rate,
 {
 }
 
-struct DynamicTimelineBuilder<T, S> {
+struct DynamicTimelineBuilder<T, M> {
     mobject: T,
-    _phantom: PhantomData<S>,
+    metric: M,
 }
 
 struct StaticTimeline<T> {
@@ -97,17 +98,17 @@ impl<T> StaticTimeline<T>
 where
     T: Mobject,
 {
-    pub fn animate(self) -> DynamicTimelineBuilder<T, RelativeTimelineScale> {
+    pub fn animate(self) -> DynamicTimelineBuilder<T, RelativeTimelineMetric> {
         DynamicTimelineBuilder {
             mobject: self.mobject,
-            _phantom: PhantomData,
+            metric: RelativeTimelineMetric,
         }
     }
 
-    pub fn animating(self) -> DynamicTimelineBuilder<T, AbsoluteTimelineScale> {
+    pub fn animating(self) -> DynamicTimelineBuilder<T, AbsoluteTimelineMetric> {
         DynamicTimelineBuilder {
             mobject: self.mobject,
-            _phantom: PhantomData,
+            metric: AbsoluteTimelineMetric,
         }
     }
 }
