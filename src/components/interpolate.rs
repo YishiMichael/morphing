@@ -11,30 +11,29 @@ pub(crate) trait InterpolatableField: Interpolate {
     }
 }
 
-pub(crate) enum Interpolator<T: InterpolatableField> {
-    Static(T),
-    Dynamic(T, T::Diff),
+pub(crate) struct Interpolator<T: InterpolatableField> {
+    src: T,
+    diff: Option<T::Diff>,
 }
 
 impl<T: InterpolatableField> Interpolator<T> {
-    pub(crate) fn new(source: T, target: T) -> Self {
-        let diff = source.difference(&target);
-        if T::is_negligible(&diff) {
-            Self::Static(source)
-        } else {
-            Self::Dynamic(source, diff)
+    pub(crate) fn new(src: T, target: T) -> Self {
+        let diff = src.difference(&target);
+        Self {
+            src,
+            diff: (!T::is_negligible(&diff)).then_some(diff),
         }
     }
 
     pub(crate) fn interpolate_zero(&mut self, dst: &mut T) {
-        if let Self::Static(source) = self {
-            std::mem::swap(dst, source);
-        }
+        if self.diff.is_none() {
+            std::mem::swap(dst, &mut self.src);
+        } // TODO: correct?
     }
 
     pub(crate) fn interpolate(&self, alpha: f32, dst: &mut T) {
-        if let Self::Dynamic(source, diff) = self {
-            dst.interpolate(source, diff, alpha);
+        if let Some(diff) = &self.diff {
+            dst.interpolate(&self.src, &diff, alpha);
         }
     }
 }
