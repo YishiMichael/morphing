@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-pub trait WithRate<R>: Sized
+pub trait ApplyRate<R>: Sized
 where
     R: Rate,
 {
@@ -14,62 +14,31 @@ where
     fn combine<RO>(rate: RO, partial: Self::Partial) -> Self::Output<RO>
     where
         RO: Rate;
-}
 
-pub trait ApplyRate<R>: WithRate<R>
-where
-    R: Rate,
-{
-    fn apply_rate<RI>(self, applied_rate: RI) -> Self::Output<Compose<RI, R>>
+    fn apply_rate<RI>(self, applied_rate: RI) -> Self::Output<ComposeRate<RI, R>>
     where
         RI: Rate,
     {
         let (rate, partial) = self.split();
-        Self::combine(Compose(applied_rate, rate), partial)
+        Self::combine(ComposeRate(applied_rate, rate), partial)
     }
-    // {
-    //     self.with_rate(|rate| Compose(applied_rate, rate))
-    // }
-
-    fn clamp(self, range: Range<f32>) -> Self::Output<Compose<Clamp, R>> {
-        self.apply_rate(Clamp(range))
-    }
-
-    fn speed(self, speed: f32) -> Self::Output<Compose<Speed, R>> {
-        self.apply_rate(Speed(speed))
-    }
-
-    fn smooth(self) -> Self::Output<Compose<Smooth, R>> {
-        self.apply_rate(Smooth)
-    }
-
-    fn smoother(self) -> Self::Output<Compose<Smoother, R>> {
-        self.apply_rate(Smoother)
-    }
-}
-
-impl<T, R> ApplyRate<R> for T
-where
-    T: WithRate<R>,
-    R: Rate,
-{
 }
 
 pub trait Rate {
     fn eval(&self, t: f32) -> f32;
 }
 
-pub struct Identity;
+pub struct IdentityRate;
 
-impl Rate for Identity {
+impl Rate for IdentityRate {
     fn eval(&self, t: f32) -> f32 {
         t
     }
 }
 
-pub struct Compose<R0, R1>(R0, R1);
+pub struct ComposeRate<R0, R1>(R0, R1);
 
-impl<R0, R1> Rate for Compose<R0, R1>
+impl<R0, R1> Rate for ComposeRate<R0, R1>
 where
     R0: Rate,
     R1: Rate,
@@ -79,36 +48,100 @@ where
     }
 }
 
-pub struct Clamp(Range<f32>);
+pub struct ClampRate(Range<f32>);
 
-impl Rate for Clamp {
+impl Rate for ClampRate {
     fn eval(&self, t: f32) -> f32 {
         t.clamp(self.0.start, self.0.end)
     }
 }
 
-pub struct Speed(f32);
+pub trait Clamp<R>: ApplyRate<R>
+where
+    R: Rate,
+{
+    fn clamp(self, range: Range<f32>) -> Self::Output<ComposeRate<ClampRate, R>> {
+        self.apply_rate(ClampRate(range))
+    }
+}
 
-impl Rate for Speed {
+impl<T, R> Clamp<R> for T
+where
+    T: ApplyRate<R>,
+    R: Rate,
+{
+}
+
+pub struct SpeedRate(f32);
+
+impl Rate for SpeedRate {
     fn eval(&self, t: f32) -> f32 {
         t * self.0
     }
 }
 
-pub struct Smooth;
+pub trait Speed<R>: ApplyRate<R>
+where
+    R: Rate,
+{
+    fn speed(self, speed: f32) -> Self::Output<ComposeRate<SpeedRate, R>> {
+        self.apply_rate(SpeedRate(speed))
+    }
+}
 
-impl Rate for Smooth {
+impl<T, R> Speed<R> for T
+where
+    T: ApplyRate<R>,
+    R: Rate,
+{
+}
+
+pub struct SmoothRate;
+
+impl Rate for SmoothRate {
     fn eval(&self, t: f32) -> f32 {
         t * t * (3.0 - 2.0 * t)
     }
 }
 
-pub struct Smoother;
+pub trait Smooth<R>: ApplyRate<R>
+where
+    R: Rate,
+{
+    fn smooth(self) -> Self::Output<ComposeRate<SmoothRate, R>> {
+        self.apply_rate(SmoothRate)
+    }
+}
 
-impl Rate for Smoother {
+impl<T, R> Smooth<R> for T
+where
+    T: ApplyRate<R>,
+    R: Rate,
+{
+}
+
+pub struct SmootherRate;
+
+impl Rate for SmootherRate {
     fn eval(&self, t: f32) -> f32 {
         t * t * t * (10.0 - t * (15.0 - 6.0 * t))
     }
+}
+
+pub trait Smoother<R>: ApplyRate<R>
+where
+    R: Rate,
+{
+    fn smooth(self) -> Self::Output<ComposeRate<SmootherRate, R>> {
+        self.apply_rate(SmootherRate)
+    }
+}
+
+impl<T, R> Smoother<R> for T
+where
+    T: ApplyRate<R>,
+    R: Rate,
+{
 }
 
 // Refer to https://docs.rs/interpolation/latest/src/interpolation/ease.rs.html

@@ -13,9 +13,9 @@ pub mod steady {
 
 pub mod dynamic {
     use super::super::super::mobjects::mobject::Mobject;
-    use super::super::rates::Identity;
+    use super::super::rates::ApplyRate;
+    use super::super::rates::IdentityRate;
     use super::super::rates::Rate;
-    use super::super::rates::WithRate;
     use super::steady::SteadyTimeline;
     use super::Timeline;
 
@@ -58,7 +58,7 @@ pub mod dynamic {
         metric: M,
     }
 
-    impl<T, M, R> WithRate<R> for DynamicTimelineBuilder<T, M, R>
+    impl<T, M, R> ApplyRate<R> for DynamicTimelineBuilder<T, M, R>
     where
         T: Mobject,
         M: DynamicTimelineMetric,
@@ -95,19 +95,19 @@ pub mod dynamic {
     where
         T: Mobject,
     {
-        pub fn animate(self) -> DynamicTimelineBuilder<T, RelativeTimelineMetric, Identity> {
+        pub fn animate(self) -> DynamicTimelineBuilder<T, RelativeTimelineMetric, IdentityRate> {
             DynamicTimelineBuilder {
                 steady_mobject: self,
                 metric: RelativeTimelineMetric,
-                rate: Identity,
+                rate: IdentityRate,
             }
         }
 
-        pub fn animating(self) -> DynamicTimelineBuilder<T, AbsoluteTimelineMetric, Identity> {
+        pub fn animating(self) -> DynamicTimelineBuilder<T, AbsoluteTimelineMetric, IdentityRate> {
             DynamicTimelineBuilder {
                 steady_mobject: self,
                 metric: AbsoluteTimelineMetric,
-                rate: Identity,
+                rate: IdentityRate,
             }
         }
     }
@@ -116,18 +116,12 @@ pub mod dynamic {
 pub mod action {
     // use super::super::super::components::interpolate::Interpolate;
     use super::super::super::mobjects::mobject::Mobject;
+    use super::super::act::Act;
     use super::super::rates::Rate;
     use super::dynamic::DynamicTimeline;
     use super::dynamic::DynamicTimelineBuilder;
     use super::dynamic::DynamicTimelineContent;
     use super::dynamic::DynamicTimelineMetric;
-
-    pub trait Act<T>
-    where
-        T: Mobject,
-    {
-        fn act(self, mobject: &mut T);
-    }
 
     pub struct ActionTimelineContent<T>
     where
@@ -184,13 +178,6 @@ pub mod continuous {
     use super::super::super::mobjects::mobject::Mobject;
     use super::dynamic::DynamicTimelineContent;
 
-    pub trait Update<T>
-    where
-        T: Mobject,
-    {
-        fn update(self, mobject: &T, alpha: f32);
-    }
-
     pub struct ContinuousTimelineContent<T>
     where
         T: Mobject,
@@ -202,20 +189,8 @@ pub mod continuous {
 }
 
 pub mod discrete {
-    use super::super::super::mobjects::mobject::Mobject;
     use super::dynamic::DynamicTimelineContent;
-    use super::steady::SteadyTimeline;
     use super::Timeline;
-
-    pub trait Construct<T>
-    where
-        T: Mobject,
-    {
-        type Input: Mobject;
-        type Output: Mobject;
-
-        fn construct(self, input: SteadyTimeline<Self::Input>) -> SteadyTimeline<Self::Output>;
-    }
 
     pub struct DiscreteTimelineContent {
         children: Vec<Box<dyn Timeline>>,
