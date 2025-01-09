@@ -1,31 +1,35 @@
 use std::ops::Range;
 
-pub(crate) trait WithRate<R>
+pub(crate) trait WithRate<R>: Sized
 where
     R: Rate,
-    Self: Sized,
 {
+    type Partial;
     type Output<RO>
     where
         RO: Rate;
 
-    fn with_rate<F, RO>(self, f: F) -> Self::Output<RO>
+    fn split(self) -> (R, Self::Partial);
+
+    fn combine<RO>(rate: RO, partial: Self::Partial) -> Self::Output<RO>
     where
-        RO: Rate,
-        F: FnOnce(R) -> RO;
+        RO: Rate;
 }
 
 pub trait ApplyRate<R>: WithRate<R>
 where
     R: Rate,
-    Self: Sized,
 {
     fn apply_rate<RI>(self, applied_rate: RI) -> Self::Output<Compose<RI, R>>
     where
         RI: Rate,
     {
-        self.with_rate(|rate| Compose(applied_rate, rate))
+        let (rate, partial) = self.split();
+        Self::combine(Compose(applied_rate, rate), partial)
     }
+    // {
+    //     self.with_rate(|rate| Compose(applied_rate, rate))
+    // }
 
     fn clamp(self, range: Range<f32>) -> Self::Output<Compose<Clamp, R>> {
         self.apply_rate(Clamp(range))
@@ -44,23 +48,23 @@ where
     }
 }
 
-impl<T, RI> ApplyRate<RI> for T
+impl<T, R> ApplyRate<R> for T
 where
-    T: WithRate<RI>,
-    RI: Rate,
+    T: WithRate<R>,
+    R: Rate,
 {
 }
 
-// impl<T, RI> T
-// where
-//     T: WithRate<RI> + Sized,
-//     RI: Rate,
-// {
-//     // add code here
-// }
-
 pub trait Rate {
     fn eval(&self, t: f32) -> f32;
+}
+
+pub(crate) struct Identity;
+
+impl Rate for Identity {
+    fn eval(&self, t: f32) -> f32 {
+        t
+    }
 }
 
 struct Compose<R0, R1>(R0, R1);
