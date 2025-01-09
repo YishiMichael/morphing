@@ -1,1 +1,1 @@
-pub trait Mobject {}
+pub trait Mobject: Clone {}

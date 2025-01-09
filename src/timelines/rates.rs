@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-pub(crate) trait WithRate<R>: Sized
+pub trait WithRate<R>: Sized
 where
     R: Rate,
 {
@@ -59,7 +59,7 @@ pub trait Rate {
     fn eval(&self, t: f32) -> f32;
 }
 
-pub(crate) struct Identity;
+pub struct Identity;
 
 impl Rate for Identity {
     fn eval(&self, t: f32) -> f32 {
@@ -67,7 +67,7 @@ impl Rate for Identity {
     }
 }
 
-struct Compose<R0, R1>(R0, R1);
+pub struct Compose<R0, R1>(R0, R1);
 
 impl<R0, R1> Rate for Compose<R0, R1>
 where
@@ -79,7 +79,7 @@ where
     }
 }
 
-struct Clamp(Range<f32>);
+pub struct Clamp(Range<f32>);
 
 impl Rate for Clamp {
     fn eval(&self, t: f32) -> f32 {
@@ -87,7 +87,7 @@ impl Rate for Clamp {
     }
 }
 
-struct Speed(f32);
+pub struct Speed(f32);
 
 impl Rate for Speed {
     fn eval(&self, t: f32) -> f32 {
@@ -95,7 +95,7 @@ impl Rate for Speed {
     }
 }
 
-struct Smooth;
+pub struct Smooth;
 
 impl Rate for Smooth {
     fn eval(&self, t: f32) -> f32 {
@@ -103,7 +103,7 @@ impl Rate for Smooth {
     }
 }
 
-struct Smoother;
+pub struct Smoother;
 
 impl Rate for Smoother {
     fn eval(&self, t: f32) -> f32 {

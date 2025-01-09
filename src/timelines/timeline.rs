@@ -1,14 +1,14 @@
 pub trait Timeline {}
 
-pub mod r#static {
+pub mod steady {
     use super::super::super::mobjects::mobject::Mobject;
     use super::Timeline;
 
-    pub(crate) struct StaticTimeline<T> {
-        mobject: T,
+    pub struct SteadyTimeline<T> {
+        pub mobject: T,
     }
 
-    impl<T> Timeline for StaticTimeline<T> where T: Mobject {}
+    impl<T> Timeline for SteadyTimeline<T> where T: Mobject {}
 }
 
 pub mod dynamic {
@@ -16,45 +16,45 @@ pub mod dynamic {
     use super::super::rates::Identity;
     use super::super::rates::Rate;
     use super::super::rates::WithRate;
-    use super::r#static::StaticTimeline;
+    use super::steady::SteadyTimeline;
     use super::Timeline;
 
-    pub(crate) trait DynamicTimelineNode {
+    pub trait DynamicTimelineContent {
         // type Mobject: Mobject;
     }
 
-    trait DynamicTimelineMetric {}
+    pub trait DynamicTimelineMetric {}
 
-    struct RelativeTimelineMetric;
+    pub struct RelativeTimelineMetric;
 
     impl DynamicTimelineMetric for RelativeTimelineMetric {}
 
-    struct AbsoluteTimelineMetric;
+    pub struct AbsoluteTimelineMetric;
 
     impl DynamicTimelineMetric for AbsoluteTimelineMetric {}
 
-    struct DynamicTimeline<N, M, R> {
-        node: N,
-        metric: M,
-        rate: R,
+    pub struct DynamicTimeline<C, M, R> {
+        pub content: C,
+        pub metric: M,
+        pub rate: R,
     }
 
-    impl<N, M, R> Timeline for DynamicTimeline<N, M, R>
+    impl<C, M, R> Timeline for DynamicTimeline<C, M, R>
     where
-        N: DynamicTimelineNode,
+        C: DynamicTimelineContent,
         M: DynamicTimelineMetric,
         R: Rate,
     {
     }
 
-    struct DynamicTimelineBuilder<T, M, R> {
-        static_mobject: StaticTimeline<T>,
-        metric: M,
-        rate: R,
+    pub struct DynamicTimelineBuilder<T, M, R> {
+        pub steady_mobject: SteadyTimeline<T>,
+        pub metric: M,
+        pub rate: R,
     }
 
-    struct DynamicTimelineBuilderPartial<T, M> {
-        static_mobject: StaticTimeline<T>,
+    pub struct DynamicTimelineBuilderPartial<T, M> {
+        steady_mobject: SteadyTimeline<T>,
         metric: M,
     }
 
@@ -73,7 +73,7 @@ pub mod dynamic {
             (
                 self.rate,
                 DynamicTimelineBuilderPartial {
-                    static_mobject: self.static_mobject,
+                    steady_mobject: self.steady_mobject,
                     metric: self.metric,
                 },
             )
@@ -84,20 +84,20 @@ pub mod dynamic {
             RO: Rate,
         {
             DynamicTimelineBuilder {
-                static_mobject: partial.static_mobject,
+                steady_mobject: partial.steady_mobject,
                 metric: partial.metric,
                 rate,
             }
         }
     }
 
-    impl<T> StaticTimeline<T>
+    impl<T> SteadyTimeline<T>
     where
         T: Mobject,
     {
         pub fn animate(self) -> DynamicTimelineBuilder<T, RelativeTimelineMetric, Identity> {
             DynamicTimelineBuilder {
-                static_mobject: self,
+                steady_mobject: self,
                 metric: RelativeTimelineMetric,
                 rate: Identity,
             }
@@ -105,7 +105,7 @@ pub mod dynamic {
 
         pub fn animating(self) -> DynamicTimelineBuilder<T, AbsoluteTimelineMetric, Identity> {
             DynamicTimelineBuilder {
-                static_mobject: self,
+                steady_mobject: self,
                 metric: AbsoluteTimelineMetric,
                 rate: Identity,
             }
@@ -114,31 +114,75 @@ pub mod dynamic {
 }
 
 pub mod action {
-    use super::super::super::components::interpolate::Interpolate;
+    // use super::super::super::components::interpolate::Interpolate;
     use super::super::super::mobjects::mobject::Mobject;
-    use super::dynamic::DynamicTimelineNode;
+    use super::super::rates::Rate;
+    use super::dynamic::DynamicTimeline;
+    use super::dynamic::DynamicTimelineBuilder;
+    use super::dynamic::DynamicTimelineContent;
+    use super::dynamic::DynamicTimelineMetric;
 
     pub trait Act<T>
     where
-        T: Mobject + Interpolate,
+        T: Mobject,
     {
-        fn act(&self, mobject: &mut T);
+        fn act(self, mobject: &mut T);
     }
 
-    struct Node<T>
+    pub struct ActionTimelineContent<T>
     where
-        T: Mobject + Interpolate,
+        T: Mobject,
     {
         source_mobject: T,
         target_mobject: T,
     }
 
-    impl<T> DynamicTimelineNode for Node<T> where T: Mobject + Interpolate {}
+    impl<T, M, R> DynamicTimeline<ActionTimelineContent<T>, M, R>
+    where
+        T: Mobject,
+        M: DynamicTimelineMetric,
+        R: Rate,
+    {
+        pub fn act<A>(mut self, act: A) -> Self
+        where
+            A: Act<T>,
+        {
+            act.act(&mut self.content.target_mobject);
+            self
+        }
+    }
+
+    impl<T, M, R> DynamicTimelineBuilder<T, M, R>
+    where
+        T: Mobject,
+        M: DynamicTimelineMetric,
+        R: Rate,
+    {
+        pub fn act<A>(self, act: A) -> DynamicTimeline<ActionTimelineContent<T>, M, R>
+        where
+            A: Act<T>,
+        {
+            let source_mobject = self.steady_mobject.mobject;
+            let target_mobject = source_mobject.clone();
+            let content = ActionTimelineContent {
+                source_mobject,
+                target_mobject,
+            };
+            DynamicTimeline {
+                content: content,
+                metric: self.metric,
+                rate: self.rate,
+            }
+            .act(act)
+        }
+    }
+
+    impl<T> DynamicTimelineContent for ActionTimelineContent<T> where T: Mobject {}
 }
 
 pub mod continuous {
     use super::super::super::mobjects::mobject::Mobject;
-    use super::dynamic::DynamicTimelineNode;
+    use super::dynamic::DynamicTimelineContent;
 
     pub trait Update<T>
     where
@@ -147,46 +191,49 @@ pub mod continuous {
         fn update(self, mobject: &T, alpha: f32);
     }
 
-    struct Node<T>
+    pub struct ContinuousTimelineContent<T>
     where
         T: Mobject,
     {
         mobject: T,
     }
 
-    impl<T> DynamicTimelineNode for Node<T> where T: Mobject {}
+    impl<T> DynamicTimelineContent for ContinuousTimelineContent<T> where T: Mobject {}
 }
 
 pub mod discrete {
     use super::super::super::mobjects::mobject::Mobject;
-    use super::dynamic::DynamicTimelineNode;
-    use super::r#static::StaticTimeline;
+    use super::dynamic::DynamicTimelineContent;
+    use super::steady::SteadyTimeline;
     use super::Timeline;
 
     pub trait Construct<T>
     where
         T: Mobject,
     {
-        fn construct(self, static_mobject: StaticTimeline<T>);
+        type Input: Mobject;
+        type Output: Mobject;
+
+        fn construct(self, input: SteadyTimeline<Self::Input>) -> SteadyTimeline<Self::Output>;
     }
 
-    struct Node {
+    pub struct DiscreteTimelineContent {
         children: Vec<Box<dyn Timeline>>,
     }
 
-    impl DynamicTimelineNode for Node {}
+    impl DynamicTimelineContent for DiscreteTimelineContent {}
 }
 
-// pub trait StaticTimeline: Timeline {
+// pub trait SteadyTimeline: TimelineContent {
 //     type Relative: RelativeTimeline;
 //     type Absolute: AbsoluteTimeline;
 //     fn animate(self) -> (Timeli)
 // }
 
-// pub trait RelativeTimeline: Timeline {
+// pub trait RelativeTimeline: TimelineContent {
 // }
 
-// pub trait AbsoluteTimeline: Timeline {
+// pub trait AbsoluteTimeline: TimelineContent {
 // }
 
 // pub trait ContinuousRelativeTimeline: RelativeTimeline {fn update(&mut self, t: f32);}

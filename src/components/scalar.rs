@@ -1,10 +1,10 @@
 use super::interpolate::Interpolate;
 
 #[derive(Clone)]
-pub(crate) struct Scalar(f32);
+pub struct Scalar(f32);
 
 impl Scalar {
-    pub(crate) fn new(value: f32) -> Self {
+    pub fn new(value: f32) -> Self {
         Self(value)
     }
 }

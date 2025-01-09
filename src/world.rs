@@ -7,9 +7,9 @@ use comemo::Track;
 use super::scene::BakedWorldline;
 use super::scene::Worldline;
 
-pub(crate) static WORLD: LazyLock<World> = LazyLock::new(|| World::new());
+pub static WORLD: LazyLock<World> = LazyLock::new(|| World::new());
 
-pub(crate) struct World {
+pub struct World {
     cache_path: LazyLock<PathBuf>,
     typst_world: LazyLock<TypstWorld>,
 }
@@ -37,19 +37,19 @@ impl World {
         Ok(cache_path)
     }
 
-    pub(crate) fn read_cache(&self) -> HashMap<Worldline, BakedWorldline> {
+    pub fn read_cache(&self) -> HashMap<Worldline, BakedWorldline> {
         std::fs::read(&*self.cache_path)
             .map(|buf| ron::de::from_reader(&*buf).unwrap_or_default())
             .unwrap_or_default()
     }
 
-    pub(crate) fn write_cache(&self, cache: HashMap<Worldline, BakedWorldline>) {
+    pub fn write_cache(&self, cache: HashMap<Worldline, BakedWorldline>) {
         let mut buf = Vec::new();
         ron::ser::to_writer(&mut buf, &cache).unwrap();
         std::fs::write(&*self.cache_path, buf).unwrap();
     }
 
-    pub(crate) fn typst_world(&self) -> &TypstWorld {
+    pub fn typst_world(&self) -> &TypstWorld {
         &self.typst_world
     }
 }

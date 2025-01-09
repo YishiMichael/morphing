@@ -7,12 +7,12 @@ use serde::Serialize;
 use super::world::WORLD;
 
 #[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub(crate) struct Worldline {
+pub struct Worldline {
     data: u32,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
-pub(crate) struct BakedWorldline {
+pub struct BakedWorldline {
     data: String,
 }
 
@@ -70,7 +70,7 @@ impl Scene {
 }
 
 #[derive(Deserialize, Serialize)]
-pub(crate) struct BakedScene {
+pub struct BakedScene {
     baked_worldlines: Vec<BakedWorldline>,
 }
 

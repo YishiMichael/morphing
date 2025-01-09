@@ -1,3 +1,3 @@
-pub(crate) mod interpolate;
-pub(crate) mod path;
-pub(crate) mod scalar;
+pub mod interpolate;
+pub mod path;
+pub mod scalar;
