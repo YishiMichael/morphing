@@ -1,12 +1,11 @@
 use super::super::mobjects::mobject::Mobject;
 use super::timeline::steady::SteadyTimeline;
 
-pub trait Construct<T>
+pub trait Construct<M>: 'static
 where
-    T: Mobject,
+    M: Mobject,
 {
-    type Input: Mobject;
     type Output: Mobject;
 
-    fn construct(self, input: SteadyTimeline<Self::Input>) -> SteadyTimeline<Self::Output>;
+    fn construct(self, input: SteadyTimeline<M>) -> SteadyTimeline<Self::Output>;
 }

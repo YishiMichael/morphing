@@ -1,8 +1,18 @@
 use super::super::mobjects::mobject::Mobject;
 
-pub trait Act<T>
+pub trait ApplyAct<M, A>
 where
-    T: Mobject,
+    M: Mobject,
+    A: Act<M>,
 {
-    fn act(self, mobject: &mut T);
+    type Output;
+
+    fn apply_act(self, act: A) -> Self::Output;
+}
+
+pub trait Act<M>
+where
+    M: Mobject,
+{
+    fn act(self, mobject: &mut M);
 }

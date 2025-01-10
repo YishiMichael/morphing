@@ -1,8 +1,8 @@
 use super::super::mobjects::mobject::Mobject;
 
-pub trait Update<T>
+pub trait Update<M>: 'static
 where
-    T: Mobject,
+    M: Mobject,
 {
-    fn update(self, mobject: &T, alpha: f32);
+    fn update(&self, mobject: &M, alpha: f32) -> M;
 }

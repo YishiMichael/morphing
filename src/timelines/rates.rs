@@ -24,7 +24,7 @@ where
     }
 }
 
-pub trait Rate {
+pub trait Rate: 'static {
     fn eval(&self, t: f32) -> f32;
 }
 
