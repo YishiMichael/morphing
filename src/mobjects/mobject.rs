@@ -1,6 +1,8 @@
 use std::ops::AddAssign;
 use std::ops::MulAssign;
 
+use super::super::toplevel::renderer::Renderer;
+
 pub trait VectorSpace: Clone + AddAssign + MulAssign<f32> {}
 
 impl<T> VectorSpace for T where T: Clone + AddAssign + MulAssign<f32> {}
@@ -9,7 +11,7 @@ pub trait Mobject: 'static + Clone {
     type Diff: VectorSpace;
 
     fn apply_diff(&self, diff: Self::Diff) -> Self;
-    fn render(&self);
+    fn render(&self, renderer: &Renderer);
 }
 
 #[derive(Clone)]
@@ -62,5 +64,5 @@ impl Mobject for EmptyMobject {
         Self
     }
 
-    fn render(&self) {}
+    fn render(&self, _renderer: &Renderer) {}
 }

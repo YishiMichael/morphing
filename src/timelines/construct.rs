@@ -1,7 +1,7 @@
 use super::super::mobjects::mobject::Mobject;
+use super::super::toplevel::scene::Supervisor;
+use super::alive::Alive;
 use super::timeline::steady::SteadyTimeline;
-use super::timeline::Alive;
-use super::timeline::Supervisor;
 
 pub trait Construct<M>: 'static
 where
@@ -12,7 +12,7 @@ where
     fn construct<'a>(
         self,
         input: Alive<'a, SteadyTimeline<M>>,
-        sv: &Supervisor,
+        supervisor: &Supervisor,
     ) -> Alive<'a, SteadyTimeline<Self::Output>>;
 }
 
