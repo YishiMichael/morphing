@@ -1,7 +1,7 @@
 pub trait Interpolate {
-    type Diff;
+    type Output;
 
-    fn interpolate(&mut self, src: &Self, diff: &Self::Diff, alpha: f32);
+    fn interpolate(&self, alpha: f32) -> Self::Output;
     // fn diff(&self, target: &Self) -> Self::Diff;
     // fn is_negligible(diff: &Self::Diff) -> bool;
 }

@@ -8,4 +8,8 @@ pub struct Fill {
     pub options: lyon::tessellation::FillOptions,
 }
 
-impl Mobject for Fill {}
+impl Mobject for Fill {
+    fn render(&self) {
+        println!("Rendered Fill!")
+    }
+}
