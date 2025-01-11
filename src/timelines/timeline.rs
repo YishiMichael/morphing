@@ -100,11 +100,12 @@ where
         );
         if !timestamp_index_interval.is_empty() {
             guard
-            .presentations
-            .push((timestamp_index_interval, Box::new(presentation)));
+                .presentations
+                .push((timestamp_index_interval, Box::new(presentation)));
         }
         output
     }
+}
 
 pub mod steady {
     use std::ops::Range;

@@ -42,7 +42,7 @@ where
 }
 
 #[derive(Clone)]
-struct EmptyMobjectDiff;
+pub struct EmptyMobjectDiff;
 
 impl AddAssign for EmptyMobjectDiff {
     fn add_assign(&mut self, _rhs: Self) {}
