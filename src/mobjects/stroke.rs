@@ -8,8 +8,8 @@ pub struct Stroke {
     pub options: lyon::tessellation::StrokeOptions,
 }
 
-impl Mobject for Stroke {
-    fn render(&self) {
-        println!("Rendered Stroke!")
-    }
-}
+// impl Mobject for Stroke {
+//     fn render(&self) {
+//         println!("Rendered Stroke!")
+//     }
+// }

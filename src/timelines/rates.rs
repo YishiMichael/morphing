@@ -1,5 +1,9 @@
 use std::ops::Range;
 
+pub trait Rate: 'static {
+    fn eval(&self, t: f32) -> f32;
+}
+
 pub trait ApplyRate<R>: Sized
 where
     R: Rate,
@@ -22,10 +26,6 @@ where
         let (rate, partial) = self.split();
         Self::combine(ComposeRate(applied_rate, rate), partial)
     }
-}
-
-pub trait Rate: 'static {
-    fn eval(&self, t: f32) -> f32;
 }
 
 pub struct IdentityRate;

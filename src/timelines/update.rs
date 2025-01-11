@@ -6,3 +6,13 @@ where
 {
     fn update(&self, mobject: &M, alpha: f32) -> M;
 }
+
+pub trait ApplyUpdate<M, U>
+where
+    M: Mobject,
+    U: Update<M>,
+{
+    type Output;
+
+    fn apply_update(self, update: U) -> Self::Output;
+}
