@@ -2,21 +2,32 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::sync::Arc;
 
+use super::app::App;
 use super::renderer::Renderer;
 
 pub trait Present: 'static {
     fn present(&self, time: f32, time_interval: Range<f32>, renderer: &Renderer);
 }
 
-pub(crate) struct ArchivedPresentations(Vec<(Range<Arc<f32>>, Box<dyn Present>)>);
+pub(crate) struct SupervisorData {
+    time: Arc<f32>,
+    presentations: Vec<(Range<Arc<f32>>, Box<dyn Present>)>,
+}
 
-impl ArchivedPresentations {
+impl SupervisorData {
     pub(crate) fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            time: Arc::new(0.0),
+            presentations: Vec::new(),
+        }
+    }
+
+    pub(crate) fn full_time(&self) -> f32 {
+        *self.time
     }
 
     pub(crate) fn present_all(&self, time: f32, renderer: &Renderer) {
-        for (time_range, presentation) in &self.0 {
+        for (time_range, presentation) in &self.presentations {
             let time_range = *time_range.start..*time_range.end;
             if time_range.contains(&time) {
                 presentation.present(time, time_range, renderer);
@@ -25,25 +36,19 @@ impl ArchivedPresentations {
     }
 }
 
-pub struct Supervisor {
-    time: Arc<f32>,
-    presentations: RefCell<ArchivedPresentations>,
-}
+pub struct Supervisor(RefCell<SupervisorData>);
 
 impl Supervisor {
     pub(crate) fn new() -> Self {
-        Self {
-            time: Arc::new(0.0),
-            presentations: RefCell::new(ArchivedPresentations::new()),
-        }
+        Self(RefCell::new(SupervisorData::new()))
     }
 
-    pub(crate) fn into_presentations(self) -> ArchivedPresentations {
-        self.presentations.into_inner()
+    pub(crate) fn into_data(self) -> SupervisorData {
+        self.0.into_inner()
     }
 
     pub(crate) fn get_time(&self) -> Arc<f32> {
-        self.time.clone()
+        self.0.borrow().time.clone()
     }
 
     pub(crate) fn archive_presentation<P>(&self, time_interval: Range<Arc<f32>>, presentation: P)
@@ -51,16 +56,20 @@ impl Supervisor {
         P: Present,
     {
         if !Arc::<f32>::ptr_eq(&time_interval.start, &time_interval.end) {
-            self.presentations
+            self.0
                 .borrow_mut()
-                .0
+                .presentations
                 .push((time_interval, Box::new(presentation)));
         }
     }
 
-    pub fn wait(&mut self, delta_time: f32) {
-        assert!(delta_time.is_sign_positive());
-        self.time = Arc::new(*self.time + delta_time);
+    pub fn wait(&self, delta_time: f32) {
+        assert!(
+            delta_time.is_sign_positive(),
+            "`Supervisor::wait` expects a non-negative argument `delta_time`, got {delta_time}",
+        );
+        let time = &mut self.0.borrow_mut().time;
+        *time = Arc::new(**time + delta_time);
     }
 }
 
@@ -76,18 +85,18 @@ impl Supervisor {
 
 // use super::timelines::timeline::Supervisor;
 
-// pub trait Scene {
-//     fn construct(self, supervisor: &Supervisor);
-// }
+pub trait Scene {
+    fn construct(self, supervisor: &Supervisor);
+}
 
-// pub fn run<S>(scene: S)
-// where
-//     S: Scene,
-// {
-//     let supervisor = Supervisor::new();
-//     scene.construct(&supervisor);
-//     let supervisor_data = supervisor.into_data();
-// }
+pub fn run<S>(scene: S) -> Result<(), winit::error::EventLoopError>
+where
+    S: Scene,
+{
+    let supervisor = Supervisor::new();
+    scene.construct(&supervisor);
+    App::run(supervisor.into_data())
+}
 
 // #[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 // pub struct Worldline {

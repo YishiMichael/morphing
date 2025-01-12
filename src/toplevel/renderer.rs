@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
-pub struct Renderer {
+use super::config::Config;
+
+struct WgpuContext {
     window: Arc<winit::window::Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
 }
 
-impl Renderer {
+impl WgpuContext {
     pub(crate) async fn new(window: winit::window::Window) -> Self {
         let window = Arc::new(window);
 
@@ -81,4 +83,10 @@ impl Renderer {
             queue,
         }
     }
+}
+
+pub(crate) struct Renderer {
+    wgpu_context: Option<WgpuContext>,
+    config: Config,
+    
 }

@@ -6,7 +6,7 @@ use ttf_parser::OutlineBuilder;
 
 use super::super::components::path::Path;
 use super::super::components::path::PathBuilder;
-use super::super::world::WORLD;
+use super::super::toplevel::world::WORLD;
 use super::fill::Fill;
 use super::mobject::Mobject;
 use super::stroke::Stroke;

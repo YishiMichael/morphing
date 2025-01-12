@@ -1,62 +1,61 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::LazyLock;
 
 use comemo::Track;
 
-use super::scene::BakedWorldline;
-use super::scene::Worldline;
+// use super::scene::BakedWorldline;
+// use super::scene::Worldline;
 
-pub static WORLD: LazyLock<World> = LazyLock::new(|| World::new());
+// pub static WORLD: LazyLock<World> = LazyLock::new(|| World::new());
 
-pub struct World {
-    cache_path: LazyLock<PathBuf>,
-    typst_world: LazyLock<TypstWorld>,
-}
+// pub struct World {
+//     // cache_path: LazyLock<PathBuf>,
+//     typst_world: LazyLock<TypstWorld>,
+// }
 
-impl World {
-    fn new() -> Self {
-        Self {
-            cache_path: LazyLock::new(|| Self::init_cache_path().unwrap()),
-            typst_world: LazyLock::new(|| TypstWorld::default()),
-        }
-    }
+// impl World {
+//     fn new() -> Self {
+//         Self {
+//             // cache_path: LazyLock::new(|| Self::init_cache_path().unwrap()),
+//             typst_world: LazyLock::new(|| TypstWorld::default()),
+//         }
+//     }
 
-    fn init_cache_path() -> std::io::Result<PathBuf> {
-        let temp_dir_path = std::env::temp_dir().join(format!(
-            "{}-{}-CACHE",
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION")
-        ));
-        let cache_path = temp_dir_path.join("cache.ron");
-        if !std::fs::exists(&cache_path)? {
-            if !std::fs::exists(&temp_dir_path)? {
-                std::fs::create_dir(&temp_dir_path)?;
-            }
-        };
-        Ok(cache_path)
-    }
+//     fn init_cache_path() -> std::io::Result<PathBuf> {
+//         let temp_dir_path = std::env::temp_dir().join(format!(
+//             "{}-{}-CACHE",
+//             env!("CARGO_PKG_NAME"),
+//             env!("CARGO_PKG_VERSION")
+//         ));
+//         let cache_path = temp_dir_path.join("cache.ron");
+//         if !std::fs::exists(&cache_path)? {
+//             if !std::fs::exists(&temp_dir_path)? {
+//                 std::fs::create_dir(&temp_dir_path)?;
+//             }
+//         };
+//         Ok(cache_path)
+//     }
 
-    pub fn read_cache(&self) -> HashMap<Worldline, BakedWorldline> {
-        std::fs::read(&*self.cache_path)
-            .map(|buf| ron::de::from_reader(&*buf).unwrap_or_default())
-            .unwrap_or_default()
-    }
+//     // pub fn read_cache(&self) -> HashMap<Worldline, BakedWorldline> {
+//     //     std::fs::read(&*self.cache_path)
+//     //         .map(|buf| ron::de::from_reader(&*buf).unwrap_or_default())
+//     //         .unwrap_or_default()
+//     // }
 
-    pub fn write_cache(&self, cache: HashMap<Worldline, BakedWorldline>) {
-        let mut buf = Vec::new();
-        ron::ser::to_writer(&mut buf, &cache).unwrap();
-        std::fs::write(&*self.cache_path, buf).unwrap();
-    }
+//     // pub fn write_cache(&self, cache: HashMap<Worldline, BakedWorldline>) {
+//     //     let mut buf = Vec::new();
+//     //     ron::ser::to_writer(&mut buf, &cache).unwrap();
+//     //     std::fs::write(&*self.cache_path, buf).unwrap();
+//     // }
 
-    pub fn typst_world(&self) -> &TypstWorld {
-        &self.typst_world
-    }
-}
+//     pub fn typst_world(&self) -> &TypstWorld {
+//         &self.typst_world
+//     }
+// }
 
 // Modified from typst/lib.rs, typst-cli/src/world.rs
 
-pub struct TypstWorld {
+pub(crate) struct World {
     root: PathBuf,
     library: typst::utils::LazyHash<typst::Library>,
     book: typst::utils::LazyHash<typst::text::FontBook>,
@@ -69,8 +68,9 @@ pub struct TypstWorld {
         parking_lot::Mutex<HashMap<typst::syntax::FileId, SlotCell<typst::foundations::Bytes>>>,
 }
 
-impl TypstWorld {
+impl World {
     fn new(
+        // TODO: move to config
         root: PathBuf,
         inputs: Vec<(String, String)>,
         // font
@@ -117,11 +117,11 @@ impl TypstWorld {
         })
     }
 
-    pub fn main_id(&self) -> typst::syntax::FileId {
+    pub(crate) fn main_id(&self) -> typst::syntax::FileId {
         self.main_id
     }
 
-    pub fn document(&self, source: &typst::syntax::Source) -> typst::model::Document {
+    pub(crate) fn document(&self, source: &typst::syntax::Source) -> typst::model::Document {
         self.source_slots
             .lock()
             .values_mut()
@@ -179,7 +179,7 @@ impl TypstWorld {
     }
 }
 
-impl Default for TypstWorld {
+impl Default for World {
     fn default() -> Self {
         Self::new(
             PathBuf::from("."),
@@ -194,7 +194,7 @@ impl Default for TypstWorld {
     }
 }
 
-impl typst::World for TypstWorld {
+impl typst::World for World {
     fn library(&self) -> &typst::utils::LazyHash<typst::Library> {
         &self.library
     }
@@ -241,7 +241,7 @@ impl typst::World for TypstWorld {
     }
 }
 
-impl std::ops::Deref for TypstWorld {
+impl std::ops::Deref for World {
     type Target = dyn typst::World;
 
     fn deref(&self) -> &Self::Target {

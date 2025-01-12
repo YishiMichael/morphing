@@ -229,8 +229,8 @@ pub mod continuous {
 pub mod discrete {
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::toplevel::renderer::Renderer;
-    use super::super::super::toplevel::scene::ArchivedPresentations;
     use super::super::super::toplevel::scene::Supervisor;
+    use super::super::super::toplevel::scene::SupervisorData;
     use super::super::construct::Construct;
     use super::dynamic::Collapse;
     use super::dynamic::ContentPresent;
@@ -256,14 +256,14 @@ pub mod discrete {
                 .archive(|steady_timeline, _, _| steady_timeline.mobject.clone());
             DiscreteTimelineContentPresentation {
                 mobject,
-                presentations: supervisor.into_presentations(),
+                supervisor_data: supervisor.into_data(),
             }
         }
     }
 
     pub struct DiscreteTimelineContentPresentation<M> {
         mobject: M,
-        presentations: ArchivedPresentations,
+        supervisor_data: SupervisorData,
     }
 
     impl<M> ContentPresent for DiscreteTimelineContentPresentation<M>
@@ -271,7 +271,7 @@ pub mod discrete {
         M: Mobject,
     {
         fn content_present(&self, time: f32, renderer: &Renderer) {
-            self.presentations.present_all(time, renderer);
+            self.supervisor_data.present_all(time, renderer);
         }
     }
 
