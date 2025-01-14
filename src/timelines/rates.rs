@@ -4,27 +4,43 @@ pub trait Rate: 'static {
     fn eval(&self, t: f32) -> f32;
 }
 
-pub trait ApplyRate<R>: Sized
-where
-    R: Rate,
-{
+pub trait ApplyRate {
+    type Output<R>
+    where
+        R: Rate;
+
+    fn apply_rate<R>(self, rate: R) -> Self::Output<R>
+    where
+        R: Rate;
+}
+
+pub trait ApplyRateChain {
+    type InRate: Rate;
     type Partial;
     type Output<RO>
     where
         RO: Rate;
 
-    fn split(self) -> (R, Self::Partial);
+    fn split(self) -> (Self::InRate, Self::Partial);
 
     fn combine<RO>(rate: RO, partial: Self::Partial) -> Self::Output<RO>
     where
         RO: Rate;
+}
 
-    fn apply_rate<RI>(self, applied_rate: RI) -> Self::Output<ComposeRate<RI, R>>
+impl<T, RI> ApplyRate for T
+where
+    T: ApplyRateChain<InRate = RI>,
+    RI: Rate,
+{
+    type Output<R> = T::Output<ComposeRate<R, RI>> where R: Rate;
+
+    fn apply_rate<R>(self, rate: R) -> Self::Output<R>
     where
-        RI: Rate,
+        R: Rate,
     {
-        let (rate, partial) = self.split();
-        Self::combine(ComposeRate(applied_rate, rate), partial)
+        let (in_rate, partial) = self.split();
+        Self::combine(ComposeRate(rate, in_rate), partial)
     }
 }
 
@@ -56,21 +72,13 @@ impl Rate for ClampRate {
     }
 }
 
-pub trait Clamp<R>: ApplyRate<R>
-where
-    R: Rate,
-{
-    fn clamp(self, range: Range<f32>) -> Self::Output<ComposeRate<ClampRate, R>> {
+pub trait Clamp: Sized + ApplyRate {
+    fn clamp(self, range: Range<f32>) -> Self::Output<ClampRate> {
         self.apply_rate(ClampRate(range))
     }
 }
 
-impl<T, R> Clamp<R> for T
-where
-    T: ApplyRate<R>,
-    R: Rate,
-{
-}
+impl<T> Clamp for T where T: ApplyRate {}
 
 pub struct SpeedRate(f32);
 
@@ -80,21 +88,13 @@ impl Rate for SpeedRate {
     }
 }
 
-pub trait Speed<R>: ApplyRate<R>
-where
-    R: Rate,
-{
-    fn speed(self, speed: f32) -> Self::Output<ComposeRate<SpeedRate, R>> {
+pub trait Speed: Sized + ApplyRate {
+    fn speed(self, speed: f32) -> Self::Output<SpeedRate> {
         self.apply_rate(SpeedRate(speed))
     }
 }
 
-impl<T, R> Speed<R> for T
-where
-    T: ApplyRate<R>,
-    R: Rate,
-{
-}
+impl<T> Speed for T where T: ApplyRate {}
 
 pub struct SmoothRate;
 
@@ -104,21 +104,13 @@ impl Rate for SmoothRate {
     }
 }
 
-pub trait Smooth<R>: ApplyRate<R>
-where
-    R: Rate,
-{
-    fn smooth(self) -> Self::Output<ComposeRate<SmoothRate, R>> {
+pub trait Smooth: Sized + ApplyRate {
+    fn smooth(self) -> Self::Output<SmoothRate> {
         self.apply_rate(SmoothRate)
     }
 }
 
-impl<T, R> Smooth<R> for T
-where
-    T: ApplyRate<R>,
-    R: Rate,
-{
-}
+impl<T> Smooth for T where T: ApplyRate {}
 
 pub struct SmootherRate;
 
@@ -128,20 +120,12 @@ impl Rate for SmootherRate {
     }
 }
 
-pub trait Smoother<R>: ApplyRate<R>
-where
-    R: Rate,
-{
-    fn smooth(self) -> Self::Output<ComposeRate<SmootherRate, R>> {
+pub trait Smoother: Sized + ApplyRate {
+    fn smooth(self) -> Self::Output<SmootherRate> {
         self.apply_rate(SmootherRate)
     }
 }
 
-impl<T, R> Smoother<R> for T
-where
-    T: ApplyRate<R>,
-    R: Rate,
-{
-}
+impl<T> Smoother for T where T: ApplyRate {}
 
 // Refer to https://docs.rs/interpolation/latest/src/interpolation/ease.rs.html

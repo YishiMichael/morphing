@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::config::Config;
+use super::world::World;
 
 struct WgpuContext {
     window: Arc<winit::window::Window>,
@@ -10,7 +10,7 @@ struct WgpuContext {
 }
 
 impl WgpuContext {
-    pub(crate) async fn new(window: winit::window::Window) -> Self {
+    async fn new(window: winit::window::Window) -> Self {
         let window = Arc::new(window);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -87,6 +87,26 @@ impl WgpuContext {
 
 pub(crate) struct Renderer {
     wgpu_context: Option<WgpuContext>,
-    config: Config,
-    
+    world: World,
+}
+
+impl Renderer {
+    pub(crate) fn new(world: World) -> Self {
+        Self {
+            wgpu_context: None,
+            world,
+        }
+    }
+
+    pub(crate) fn is_wgpu_context_initialized(&self) -> bool {
+        self.wgpu_context.is_none()
+    }
+
+    pub(crate) fn init_wgpu_context(&mut self, window: winit::window::Window) {
+        self.wgpu_context = Some(pollster::block_on(WgpuContext::new(window)));
+    }
+
+    pub(crate) fn request_redraw(&self) {
+        self.wgpu_context.as_ref().unwrap().window.request_redraw();
+    }
 }

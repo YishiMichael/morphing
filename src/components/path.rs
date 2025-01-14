@@ -1,5 +1,7 @@
 use itertools::Itertools;
 
+use super::stroke::DashPattern;
+
 // #[derive(Clone)]
 // pub struct Path(pub lyon::path::Path);
 
@@ -17,13 +19,31 @@ impl Path {
         &self.0
     }
 
-    pub fn dash(&self, array: &[f64], phase: f64) -> Self {
+    pub fn bounding_box(&self) -> Option<[glam::DVec2; 2]> {
+        self.subpaths()
+            .iter()
+            .map(|subpath| subpath.bounding_box())
+            .fold(None, |bounding_box_acc, bounding_box| {
+                match (bounding_box_acc, bounding_box) {
+                    (Some([min_acc, max_acc]), Some([min, max])) => {
+                        Some([min_acc.min(min), max_acc.max(max)])
+                    }
+                    (Some(bounding_box_acc), None) => Some(bounding_box_acc),
+                    (None, Some(bounding_box)) => Some(bounding_box),
+                    (None, None) => None,
+                }
+            })
+    }
+
+    pub fn dash(&self, pattern: &DashPattern) -> Self {
         Self::from_iter(self.subpaths().into_iter().flat_map(|subpath| {
             let total_length = subpath.length(None);
-            let phase = phase / total_length;
-            let mut alphas = array
-                .into_iter()
-                .map(|length| length / total_length)
+            let phase = pattern.phase / total_length;
+            let mut alphas = pattern
+                .dashes
+                .iter()
+                .flatten()
+                .map(|length| *length / total_length)
                 .scan(0.0, |alpha_acc, alpha| {
                     *alpha_acc += alpha;
                     Some(*alpha_acc)

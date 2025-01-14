@@ -7,12 +7,15 @@ where
     fn update(&self, mobject: &M, alpha: f32) -> M;
 }
 
-pub trait ApplyUpdate<M, U>
+pub trait ApplyUpdate<M>
 where
     M: Mobject,
-    U: Update<M>,
 {
-    type Output;
+    type Output<U>
+    where
+        U: Update<M>;
 
-    fn apply_update(self, update: U) -> Self::Output;
+    fn apply_update<U>(self, update: U) -> Self::Output<U>
+    where
+        U: Update<M>;
 }

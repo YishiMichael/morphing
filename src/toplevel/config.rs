@@ -1,27 +1,41 @@
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use super::palette::BLACK;
+use super::palette::WHITE;
 
-#[derive(Default, Deserialize)]
-pub(crate) struct Config {
-    #[serde(default = "WindowConfig::default")]
-    pub(crate) window: WindowConfig,
-    #[serde(default = "VideoConfig::default")]
-    pub(crate) video: VideoConfig,
-    #[serde(default = "TypstConfig::default")]
-    pub(crate) typst: TypstConfig,
+#[derive(Default)]
+pub struct Config {
+    pub window: WindowConfig,
+    pub video: VideoConfig,
+    pub style: StyleConfig,
+    pub typst: TypstConfig,
 }
 
-#[derive(Deserialize)]
-pub(crate) struct WindowConfig {
-    #[serde(default = "WindowConfig::default_size")]
-    pub(crate) size: (u32, u32),
-    #[serde(default = "WindowConfig::default_base_speed")]
-    pub(crate) base_speed: f32,
-    #[serde(default = "WindowConfig::default_forward_seconds")]
-    pub(crate) forward_seconds: f32,
-    #[serde(default = "WindowConfig::default_fast_forward_seconds")]
-    pub(crate) fast_forward_seconds: f32,
+pub struct WindowConfig {
+    pub size: (u32, u32),
+    pub base_speed: f32,
+    pub forward_seconds: f32,
+    pub fast_forward_seconds: f32,
+}
+
+pub struct VideoConfig {
+    pub size: (u32, u32),
+    pub fps: f32,
+}
+
+pub struct StyleConfig {
+    pub color: palette::Srgb<f32>,
+    pub background_color: palette::Srgb<f32>,
+}
+
+pub struct TypstConfig {
+    pub root: PathBuf,
+    pub inputs: Vec<(String, String)>,
+    pub font_paths: Vec<PathBuf>,
+    pub include_system_fonts: bool,
+    pub include_embedded_fonts: bool,
+    pub package_path: Option<PathBuf>,
+    pub package_cache_path: Option<PathBuf>,
 }
 
 impl Default for WindowConfig {
@@ -35,32 +49,6 @@ impl Default for WindowConfig {
     }
 }
 
-impl WindowConfig {
-    fn default_size() -> (u32, u32) {
-        Self::default().size
-    }
-
-    fn default_base_speed() -> f32 {
-        Self::default().base_speed
-    }
-
-    fn default_forward_seconds() -> f32 {
-        Self::default().forward_seconds
-    }
-
-    fn default_fast_forward_seconds() -> f32 {
-        Self::default().fast_forward_seconds
-    }
-}
-
-#[derive(Deserialize)]
-pub(crate) struct VideoConfig {
-    #[serde(default = "VideoConfig::default_size")]
-    pub(crate) size: (u32, u32),
-    #[serde(default = "VideoConfig::default_fps")]
-    pub(crate) fps: f32,
-}
-
 impl Default for VideoConfig {
     fn default() -> Self {
         Self {
@@ -70,32 +58,13 @@ impl Default for VideoConfig {
     }
 }
 
-impl VideoConfig {
-    fn default_size() -> (u32, u32) {
-        Self::default().size
+impl Default for StyleConfig {
+    fn default() -> Self {
+        Self {
+            color: WHITE.into(),
+            background_color: BLACK.into(),
+        }
     }
-
-    fn default_fps() -> f32 {
-        Self::default().fps
-    }
-}
-
-#[derive(Deserialize)]
-pub(crate) struct TypstConfig {
-    #[serde(default = "TypstConfig::default_root")]
-    pub(crate) root: PathBuf,
-    #[serde(default = "TypstConfig::default_inputs")]
-    pub(crate) inputs: Vec<(String, String)>,
-    #[serde(default = "TypstConfig::default_font_paths")]
-    pub(crate) font_paths: Vec<PathBuf>,
-    #[serde(default = "TypstConfig::default_include_system_fonts")]
-    pub(crate) include_system_fonts: bool,
-    #[serde(default = "TypstConfig::default_include_embedded_fonts")]
-    pub(crate) include_embedded_fonts: bool,
-    #[serde(default = "TypstConfig::default_package_path")]
-    pub(crate) package_path: Option<PathBuf>,
-    #[serde(default = "TypstConfig::default_package_cache_path")]
-    pub(crate) package_cache_path: Option<PathBuf>,
 }
 
 impl Default for TypstConfig {
@@ -109,35 +78,5 @@ impl Default for TypstConfig {
             package_path: None,
             package_cache_path: None,
         }
-    }
-}
-
-impl TypstConfig {
-    fn default_root() -> PathBuf {
-        Self::default().root
-    }
-
-    fn default_inputs() -> Vec<(String, String)> {
-        Self::default().inputs
-    }
-
-    fn default_font_paths() -> Vec<PathBuf> {
-        Self::default().font_paths
-    }
-
-    fn default_include_system_fonts() -> bool {
-        Self::default().include_system_fonts
-    }
-
-    fn default_include_embedded_fonts() -> bool {
-        Self::default().include_embedded_fonts
-    }
-
-    fn default_package_path() -> Option<PathBuf> {
-        Self::default().package_path
-    }
-
-    fn default_package_cache_path() -> Option<PathBuf> {
-        Self::default().package_cache_path
     }
 }

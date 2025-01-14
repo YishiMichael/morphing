@@ -9,15 +9,15 @@ bezier-rs = "0.4.0"
 comemo = "0.4.0"
 encase = { version = "0.10.0", features = ["glam"] }
 env_logger = "0.11.6"
-glam = "0.29.2"
+geometric_algebra = "0.3.0"
+glam = "0.24.2"
 itertools = "0.13.0"
 lyon = "1.0.1"
+palette = "0.7.6"
 parking_lot = "0.12.3"
 pollster = "0.4.0"
-rgb = "0.8.50"
-ron = "0.8.1"
-serde = "1.0.217"
-toml = "0.8.19"
+ron = "0.8.1" # to be removed
+serde = "1.0.217" # to be removed
 ttf-parser = "0.24.1"
 typst = "0.12.0"
 typst-kit = { version = "0.12.0", features = ["embed-fonts"] }

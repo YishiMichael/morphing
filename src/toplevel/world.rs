@@ -1,61 +1,67 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use std::path::PathBuf;
 
 use comemo::Track;
+
+use super::config::StyleConfig;
+use super::config::TypstConfig;
 
 // use super::scene::BakedWorldline;
 // use super::scene::Worldline;
 
 // pub static WORLD: LazyLock<World> = LazyLock::new(|| World::new());
 
-// pub struct World {
-//     // cache_path: LazyLock<PathBuf>,
-//     typst_world: LazyLock<TypstWorld>,
-// }
+pub(crate) struct World {
+    // cache_path: LazyLock<PathBuf>,
+    pub(crate) style_config: StyleConfig,
+    pub(crate) typst_world: TypstWorld,
+}
 
-// impl World {
-//     fn new() -> Self {
-//         Self {
-//             // cache_path: LazyLock::new(|| Self::init_cache_path().unwrap()),
-//             typst_world: LazyLock::new(|| TypstWorld::default()),
-//         }
-//     }
+impl World {
+    pub(crate) fn new(style_config: StyleConfig, typst_config: TypstConfig) -> Self {
+        Self {
+            // cache_path: LazyLock::new(|| Self::init_cache_path().unwrap()),
+            style_config,
+            typst_world: TypstWorld::new(typst_config),
+        }
+    }
 
-//     fn init_cache_path() -> std::io::Result<PathBuf> {
-//         let temp_dir_path = std::env::temp_dir().join(format!(
-//             "{}-{}-CACHE",
-//             env!("CARGO_PKG_NAME"),
-//             env!("CARGO_PKG_VERSION")
-//         ));
-//         let cache_path = temp_dir_path.join("cache.ron");
-//         if !std::fs::exists(&cache_path)? {
-//             if !std::fs::exists(&temp_dir_path)? {
-//                 std::fs::create_dir(&temp_dir_path)?;
-//             }
-//         };
-//         Ok(cache_path)
-//     }
+    // fn init_cache_path() -> std::io::Result<PathBuf> {
+    //     let temp_dir_path = std::env::temp_dir().join(format!(
+    //         "{}-{}-CACHE",
+    //         env!("CARGO_PKG_NAME"),
+    //         env!("CARGO_PKG_VERSION")
+    //     ));
+    //     let cache_path = temp_dir_path.join("cache.ron");
+    //     if !std::fs::exists(&cache_path)? {
+    //         if !std::fs::exists(&temp_dir_path)? {
+    //             std::fs::create_dir(&temp_dir_path)?;
+    //         }
+    //     };
+    //     Ok(cache_path)
+    // }
 
-//     // pub fn read_cache(&self) -> HashMap<Worldline, BakedWorldline> {
-//     //     std::fs::read(&*self.cache_path)
-//     //         .map(|buf| ron::de::from_reader(&*buf).unwrap_or_default())
-//     //         .unwrap_or_default()
-//     // }
+    // pub fn read_cache(&self) -> HashMap<Worldline, BakedWorldline> {
+    //     std::fs::read(&*self.cache_path)
+    //         .map(|buf| ron::de::from_reader(&*buf).unwrap_or_default())
+    //         .unwrap_or_default()
+    // }
 
-//     // pub fn write_cache(&self, cache: HashMap<Worldline, BakedWorldline>) {
-//     //     let mut buf = Vec::new();
-//     //     ron::ser::to_writer(&mut buf, &cache).unwrap();
-//     //     std::fs::write(&*self.cache_path, buf).unwrap();
-//     // }
+    // pub fn write_cache(&self, cache: HashMap<Worldline, BakedWorldline>) {
+    //     let mut buf = Vec::new();
+    //     ron::ser::to_writer(&mut buf, &cache).unwrap();
+    //     std::fs::write(&*self.cache_path, buf).unwrap();
+    // }
 
-//     pub fn typst_world(&self) -> &TypstWorld {
-//         &self.typst_world
-//     }
-// }
+    // pub(crate) fn typst_world(&self) -> &TypstWorld {
+    //     &self.typst_world
+    // }
+}
 
 // Modified from typst/lib.rs, typst-cli/src/world.rs
 
-pub(crate) struct World {
+struct TypstWorld {
     root: PathBuf,
     library: typst::utils::LazyHash<typst::Library>,
     book: typst::utils::LazyHash<typst::text::FontBook>,
@@ -68,20 +74,10 @@ pub(crate) struct World {
         parking_lot::Mutex<HashMap<typst::syntax::FileId, SlotCell<typst::foundations::Bytes>>>,
 }
 
-impl World {
-    fn new(
-        // TODO: move to config
-        root: PathBuf,
-        inputs: Vec<(String, String)>,
-        // font
-        font_paths: Vec<PathBuf>,
-        include_system_fonts: bool,
-        include_embedded_fonts: bool,
-        // package
-        package_path: Option<PathBuf>,
-        package_cache_path: Option<PathBuf>,
-    ) -> typst::diag::FileResult<Self> {
-        let inputs = inputs
+impl TypstWorld {
+    fn new(config: TypstConfig) -> Self {
+        let inputs = config
+            .inputs
             .iter()
             .map(|(k, v)| {
                 (
@@ -91,20 +87,25 @@ impl World {
             })
             .collect();
         let fonts = typst_kit::fonts::FontSearcher::new()
-            .include_system_fonts(include_system_fonts)
-            .include_embedded_fonts(include_embedded_fonts)
-            .search_with(font_paths);
+            .include_system_fonts(config.include_system_fonts)
+            .include_embedded_fonts(config.include_embedded_fonts)
+            .search_with(config.font_paths);
         let user_agent = concat!("typst/", env!("CARGO_PKG_VERSION"));
         let downloader = match std::env::var("TYPST_CERT") {
             Ok(cert) => typst_kit::download::Downloader::with_path(user_agent, cert.into()),
             Err(_) => typst_kit::download::Downloader::new(user_agent),
         };
-        let package_storage =
-            typst_kit::package::PackageStorage::new(package_cache_path, package_path, downloader);
-        Ok(Self {
-            root: root
-                .canonicalize()
-                .map_err(|_| typst::diag::FileError::NotFound(root))?,
+        let package_storage = typst_kit::package::PackageStorage::new(
+            config.package_cache_path,
+            config.package_path,
+            downloader,
+        );
+        Self {
+            root: config.root,
+            // root: config
+            // .root
+            // .canonicalize()
+            // .map_err(|_| typst::diag::FileError::NotFound(config.root))?,
             library: typst::utils::LazyHash::new(
                 typst::Library::builder().with_inputs(inputs).build(),
             ),
@@ -114,14 +115,14 @@ impl World {
             main_id: typst::syntax::FileId::new_fake(typst::syntax::VirtualPath::new("main.typ")),
             source_slots: parking_lot::Mutex::new(HashMap::new()),
             file_slots: parking_lot::Mutex::new(HashMap::new()),
-        })
+        }
     }
 
-    pub(crate) fn main_id(&self) -> typst::syntax::FileId {
-        self.main_id
-    }
+    // pub(crate) fn main_id(&self) -> typst::syntax::FileId {
+    //     self.main_id
+    // }
 
-    pub(crate) fn document(&self, source: &typst::syntax::Source) -> typst::model::Document {
+    pub(crate) fn document(&self, text: String) -> typst::model::Document {
         self.source_slots
             .lock()
             .values_mut()
@@ -131,6 +132,7 @@ impl World {
             .values_mut()
             .for_each(SlotCell::reset);
 
+        let source = typst::syntax::Source::new(self.main_id, text);
         let styles = typst::foundations::StyleChain::new(&self.library().styles);
         let traced = typst::engine::Traced::default();
         let introspector = typst::introspection::Introspector::default();
@@ -160,6 +162,10 @@ impl World {
         typst::layout::layout_document(&mut engine, &content, styles).unwrap()
     }
 
+    pub(crate) fn range(&self, span: typst::syntax::Span) -> Option<Range<usize>> {
+        self.source(self.main_id).unwrap().range(span)
+    }
+
     fn read(&self, id: typst::syntax::FileId) -> typst::diag::FileResult<Vec<u8>> {
         let root = match id.package() {
             Some(spec) => &self
@@ -179,22 +185,7 @@ impl World {
     }
 }
 
-impl Default for World {
-    fn default() -> Self {
-        Self::new(
-            PathBuf::from("."),
-            Vec::new(),
-            Vec::new(),
-            true,
-            true,
-            None,
-            None,
-        )
-        .unwrap()
-    }
-}
-
-impl typst::World for World {
+impl typst::World for TypstWorld {
     fn library(&self) -> &typst::utils::LazyHash<typst::Library> {
         &self.library
     }
@@ -241,7 +232,7 @@ impl typst::World for World {
     }
 }
 
-impl std::ops::Deref for World {
+impl std::ops::Deref for TypstWorld {
     type Target = dyn typst::World;
 
     fn deref(&self) -> &Self::Target {

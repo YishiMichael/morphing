@@ -10,7 +10,7 @@ impl<T> VectorSpace for T where T: Clone + AddAssign + MulAssign<f32> {}
 pub trait Mobject: 'static + Clone {
     type Diff: VectorSpace;
 
-    fn apply_diff(&self, diff: Self::Diff) -> Self;
+    // fn apply_diff(&self, diff: Self::Diff) -> Self;
     fn render(&self, renderer: &Renderer);
 }
 

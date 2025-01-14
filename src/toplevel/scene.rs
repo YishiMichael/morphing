@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::app::App;
+use super::config::Config;
 use super::renderer::Renderer;
 
 pub trait Present: 'static {
@@ -87,15 +89,13 @@ impl Supervisor {
 
 pub trait Scene {
     fn construct(self, supervisor: &Supervisor);
-}
 
-pub fn run<S>(scene: S) -> Result<(), winit::error::EventLoopError>
-where
-    S: Scene,
-{
-    let supervisor = Supervisor::new();
-    scene.construct(&supervisor);
-    App::run(supervisor.into_data())
+    fn run(self, config: Config) -> anyhow::Result<()> {
+        let supervisor = Supervisor::new();
+        scene.construct(&supervisor);
+        App::instantiate_and_run(supervisor.into_data(), config)?;
+        Ok(())
+    }
 }
 
 // #[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]

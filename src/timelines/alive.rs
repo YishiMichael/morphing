@@ -7,7 +7,7 @@ use super::act::Act;
 use super::act::ApplyAct;
 use super::construct::ApplyConstruct;
 use super::construct::Construct;
-use super::rates::ApplyRate;
+use super::rates::ApplyRateChain;
 use super::rates::IdentityRate;
 use super::rates::Rate;
 use super::timeline::action::ActionTimelineContent;
@@ -42,8 +42,6 @@ where
     where
         F: FnOnce(&T::Presentation, &'a Supervisor, Range<f32>) -> O,
     {
-        // let mut guard = self.supervisor.0.lock();
-        // let timestamp_index_interval = self.spawn_timestamp_index..guard.timestamps.len() - 1;
         let presentation = self.timeline.presentation();
         let time_interval = self.spawn_time..self.supervisor.get_time();
         let output = f(
@@ -95,7 +93,8 @@ where
 
     fn apply_act(self, act: A) -> Self::Output {
         self.archive(|SteadyTimeline { mobject }, supervisor, _| {
-            supervisor.spawn(mobject.apply_diff(act.act(mobject)))
+            let (mobject, _) = act.act(mobject);
+            supervisor.spawn(mobject)
         })
     }
 }
@@ -117,12 +116,13 @@ where
     metric: ME,
 }
 
-impl<'a, M, ME, R> ApplyRate<R> for DynamicTimelineBuilder<'a, M, ME, R>
+impl<'a, M, ME, R> ApplyRateChain for DynamicTimelineBuilder<'a, M, ME, R>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
 {
+    type InRate = R;
     type Partial = DynamicTimelineBuilderPartial<'a, M, ME>;
     type Output<RO> = DynamicTimelineBuilder<'a, M, ME, RO>
         where
@@ -213,8 +213,7 @@ where
         self.steady_mobject
             .archive(|SteadyTimeline { mobject }, supervisor, _| {
                 let source_mobject = mobject.clone();
-                let diff = act.act(&source_mobject);
-                let target_mobject = source_mobject.apply_diff(diff.clone());
+                let (target_mobject, diff) = act.act(&source_mobject);
                 supervisor.launch_timeline(DynamicTimeline {
                     content: ActionTimelineContent {
                         source_mobject,
@@ -228,16 +227,20 @@ where
     }
 }
 
-impl<'a, M, ME, R, U> ApplyUpdate<M, U> for DynamicTimelineBuilder<'a, M, ME, R>
+impl<'a, M, ME, R> ApplyUpdate<M> for DynamicTimelineBuilder<'a, M, ME, R>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
-    U: Update<M>,
 {
-    type Output = Alive<'a, DynamicTimeline<ContinuousTimelineContent<M, U>, ME, R>>;
+    type Output<U> = Alive<'a, DynamicTimeline<ContinuousTimelineContent<M, U>, ME, R>>
+    where
+        U: Update<M>;
 
-    fn apply_update(self, update: U) -> Self::Output {
+    fn apply_update<U>(self, update: U) -> Self::Output<U>
+    where
+        U: Update<M>,
+    {
         self.steady_mobject
             .archive(|SteadyTimeline { mobject }, supervisor, _| {
                 supervisor.launch_timeline(DynamicTimeline {
@@ -252,16 +255,20 @@ where
     }
 }
 
-impl<'a, M, ME, R, C> ApplyConstruct<M, C> for DynamicTimelineBuilder<'a, M, ME, R>
+impl<'a, M, ME, R> ApplyConstruct<M> for DynamicTimelineBuilder<'a, M, ME, R>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
-    C: Construct<M>,
 {
-    type Output = Alive<'a, DynamicTimeline<DiscreteTimelineContent<M, C>, ME, R>>;
+    type Output<C> = Alive<'a, DynamicTimeline<DiscreteTimelineContent<M, C>, ME, R>>
+    where
+        C: Construct<M>;
 
-    fn apply_construct(self, construct: C) -> Self::Output {
+    fn apply_construct<C>(self, construct: C) -> Self::Output<C>
+    where
+        C: Construct<M>,
+    {
         self.steady_mobject
             .archive(|SteadyTimeline { mobject }, supervisor, _| {
                 supervisor.launch_timeline(DynamicTimeline {
@@ -287,8 +294,8 @@ where
 
     fn apply_act(mut self, act: A) -> Self::Output {
         let content = &mut self.timeline.content;
-        let diff = act.act(&content.target_mobject);
-        content.target_mobject = content.target_mobject.apply_diff(diff.clone());
+        let (target_mobject, diff) = act.act(&content.source_mobject);
+        content.target_mobject = target_mobject;
         content.diff += diff;
         self
     }

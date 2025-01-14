@@ -10,7 +10,7 @@ where
     // fn apply_diff(mobject: &M, diff: Self::Diff) -> M;
     // fn scale_diff(alpha: f32, diff: &Self::Diff) -> Self::Diff;
 
-    fn act(self, mobject: &M) -> M::Diff;
+    fn act(self, mobject: &M) -> (M, M::Diff);
 }
 
 pub trait ApplyAct<M, A>

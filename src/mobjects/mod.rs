@@ -1,4 +1,3 @@
-pub mod fill;
 pub mod mobject;
-pub mod stroke;
+pub mod shape;
 pub mod typst;
