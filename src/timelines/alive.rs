@@ -2,23 +2,25 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use super::super::mobjects::mobject::Mobject;
+use super::super::mobjects::mobject::MobjectBuilder;
 use super::super::toplevel::scene::Supervisor;
 use super::act::Act;
 use super::act::ApplyAct;
+use super::act::ComposeDiff;
+use super::act::Diff;
 use super::construct::ApplyConstruct;
 use super::construct::Construct;
-use super::rates::ApplyRateChain;
+use super::rates::ApplyRate;
+use super::rates::ComposeRate;
 use super::rates::IdentityRate;
 use super::rates::Rate;
 use super::timeline::action::ActionTimelineContent;
 use super::timeline::continuous::ContinuousTimelineContent;
 use super::timeline::discrete::DiscreteTimelineContent;
 use super::timeline::dynamic::AbsoluteTimelineMetric;
-use super::timeline::dynamic::Collapse;
 use super::timeline::dynamic::DynamicTimeline;
 use super::timeline::dynamic::DynamicTimelineContent;
 use super::timeline::dynamic::DynamicTimelineMetric;
-use super::timeline::dynamic::DynamicTimelinePresentation;
 use super::timeline::dynamic::RelativeTimelineMetric;
 use super::timeline::steady::SteadyTimeline;
 use super::timeline::Timeline;
@@ -40,27 +42,28 @@ where
 {
     pub(crate) fn archive<F, O>(self, f: F) -> O
     where
-        F: FnOnce(&T::Presentation, &'a Supervisor, Range<f32>) -> O,
+        F: FnOnce(&T, &'a Supervisor, Range<f32>) -> O,
     {
-        let presentation = self.timeline.presentation();
         let time_interval = self.spawn_time..self.supervisor.get_time();
         let output = f(
-            &presentation,
+            &self.timeline,
             self.supervisor,
             *time_interval.start..*time_interval.end,
         );
         self.supervisor
-            .archive_presentation(time_interval, presentation);
+            .archive_presentation(time_interval, self.timeline.presentation());
         output
     }
 }
 
 impl Supervisor {
-    pub fn spawn<M>(&self, mobject: M) -> Alive<'_, SteadyTimeline<M>>
+    pub fn spawn<MB>(&self, mobject_builder: MB) -> Alive<'_, SteadyTimeline<MB::Instantiation>>
     where
-        M: Mobject,
+        MB: MobjectBuilder,
     {
-        self.launch_timeline(SteadyTimeline { mobject })
+        self.launch_timeline(SteadyTimeline {
+            mobject: mobject_builder.instantiate(self.world()),
+        })
     }
 
     fn launch_timeline<T>(&self, timeline: T) -> Alive<'_, T>
@@ -84,16 +87,19 @@ where
     }
 }
 
-impl<'a, M, A> ApplyAct<M, A> for Alive<'_, SteadyTimeline<M>>
+impl<'a, M> ApplyAct<M> for Alive<'_, SteadyTimeline<M>>
 where
     M: Mobject,
-    A: Act<M>,
 {
-    type Output = Self;
+    type Output<A> = Self where A: Act<M>;
 
-    fn apply_act(self, act: A) -> Self::Output {
+    fn apply_act<A>(self, act: A) -> Self::Output<A>
+    where
+        A: Act<M>,
+    {
         self.archive(|SteadyTimeline { mobject }, supervisor, _| {
-            let (mobject, _) = act.act(mobject);
+            let mut mobject = mobject.clone();
+            act.act(&mobject).apply(&mut mobject);
             supervisor.spawn(mobject)
         })
     }
@@ -108,44 +114,24 @@ where
     rate: R,
 }
 
-pub struct DynamicTimelineBuilderPartial<'a, M, ME>
-where
-    M: Mobject,
-{
-    steady_mobject: Alive<'a, SteadyTimeline<M>>,
-    metric: ME,
-}
-
-impl<'a, M, ME, R> ApplyRateChain for DynamicTimelineBuilder<'a, M, ME, R>
+impl<'a, M, ME, R> ApplyRate for DynamicTimelineBuilder<'a, M, ME, R>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    type InRate = R;
-    type Partial = DynamicTimelineBuilderPartial<'a, M, ME>;
-    type Output<RO> = DynamicTimelineBuilder<'a, M, ME, RO>
-        where
-            RO: Rate;
-
-    fn split(self) -> (R, Self::Partial) {
-        (
-            self.rate,
-            DynamicTimelineBuilderPartial {
-                steady_mobject: self.steady_mobject,
-                metric: self.metric,
-            },
-        )
-    }
-
-    fn combine<RO>(rate: RO, partial: Self::Partial) -> Self::Output<RO>
+    type Output<RA> = DynamicTimelineBuilder<'a, M, ME, ComposeRate<RA, R>>
     where
-        RO: Rate,
+        RA: Rate;
+
+    fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
+    where
+        RA: Rate,
     {
         DynamicTimelineBuilder {
-            steady_mobject: partial.steady_mobject,
-            metric: partial.metric,
-            rate,
+            steady_mobject: self.steady_mobject,
+            metric: self.metric,
+            rate: ComposeRate(rate, self.rate),
         }
     }
 }
@@ -177,49 +163,43 @@ where
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    pub fn collapse(
-        self,
-    ) -> Alive<'a, SteadyTimeline<<CO::ContentPresentation as Collapse>::Output>> {
+    pub fn collapse(self) -> Alive<'a, SteadyTimeline<CO::Output>> {
         self.archive(
-            |DynamicTimelinePresentation {
-                 content_presentation,
+            |DynamicTimeline {
+                 content,
                  metric,
                  rate,
              },
              supervisor,
              time_interval| {
                 supervisor.spawn(
-                    content_presentation
-                        .collapse(rate.eval(metric.eval(time_interval.end, time_interval))),
+                    content.collapse(rate.eval(metric.eval(time_interval.end, time_interval))),
                 )
             },
         )
     }
 }
 
-impl<'a, M, ME, R, A> ApplyAct<M, A> for DynamicTimelineBuilder<'a, M, ME, R>
+impl<'a, M, ME, R> ApplyAct<M> for DynamicTimelineBuilder<'a, M, ME, R>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
-    A: Act<M>,
 {
-    type Output = Alive<'a, DynamicTimeline<ActionTimelineContent<M>, ME, R>>;
+    type Output<A> = Alive<'a, DynamicTimeline<ActionTimelineContent<M, A::Diff>, ME, R>>
+    where
+        A: Act<M>;
 
-    fn apply_act(self, act: A) -> Self::Output
+    fn apply_act<A>(self, act: A) -> Self::Output<A>
     where
         A: Act<M>,
     {
         self.steady_mobject
             .archive(|SteadyTimeline { mobject }, supervisor, _| {
-                let source_mobject = mobject.clone();
-                let (target_mobject, diff) = act.act(&source_mobject);
+                let mobject = mobject.clone();
+                let diff = act.act(&mobject);
                 supervisor.launch_timeline(DynamicTimeline {
-                    content: ActionTimelineContent {
-                        source_mobject,
-                        target_mobject,
-                        diff,
-                    },
+                    content: ActionTimelineContent { mobject, diff },
                     metric: self.metric,
                     rate: self.rate,
                 })
@@ -275,6 +255,7 @@ where
                     content: DiscreteTimelineContent {
                         mobject: mobject.clone(),
                         construct,
+                        world: supervisor.world().clone(),
                     },
                     metric: self.metric,
                     rate: self.rate,
@@ -283,20 +264,25 @@ where
     }
 }
 
-impl<M, A, ME, R> ApplyAct<M, A> for Alive<'_, DynamicTimeline<ActionTimelineContent<M>, ME, R>>
+impl<'a, M, ME, R, D> ApplyAct<M> for Alive<'a, DynamicTimeline<ActionTimelineContent<M, D>, ME, R>>
 where
     M: Mobject,
-    A: Act<M>,
     ME: DynamicTimelineMetric,
     R: Rate,
+    D: Diff<M>,
 {
-    type Output = Self;
+    type Output<A> = Alive<'a, DynamicTimeline<ActionTimelineContent<M, ComposeDiff<A::Diff, D>>, ME, R>> where A: Act<M>;
 
-    fn apply_act(mut self, act: A) -> Self::Output {
-        let content = &mut self.timeline.content;
-        let (target_mobject, diff) = act.act(&content.source_mobject);
-        content.target_mobject = target_mobject;
-        content.diff += diff;
-        self
+    fn apply_act<A>(self, act: A) -> Self::Output<A>
+    where
+        A: Act<M>,
+    {
+        let mobject = self.timeline.content.mobject.clone();
+        let diff = ComposeDiff(act.act(&mobject), self.timeline.content.diff.clone());
+        self.supervisor.launch_timeline(DynamicTimeline {
+            content: ActionTimelineContent { mobject, diff },
+            metric: self.timeline.metric,
+            rate: self.timeline.rate,
+        })
     }
 }

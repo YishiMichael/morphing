@@ -35,6 +35,14 @@ impl Path {
             })
     }
 
+    pub fn transform(&self, transform: glam::DAffine2) -> Self {
+        Self::from_iter(self.subpaths().into_iter().map(|subpath| {
+            let mut subpath = subpath.clone();
+            subpath.apply_transform(transform);
+            subpath
+        }))
+    }
+
     pub fn dash(&self, pattern: &DashPattern) -> Self {
         Self::from_iter(self.subpaths().into_iter().flat_map(|subpath| {
             let total_length = subpath.length(None);

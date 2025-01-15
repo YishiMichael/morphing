@@ -1,68 +1,73 @@
-use std::ops::AddAssign;
-use std::ops::MulAssign;
+use crate::toplevel::world::World;
 
 use super::super::toplevel::renderer::Renderer;
 
-pub trait VectorSpace: Clone + AddAssign + MulAssign<f32> {}
+// pub trait VectorSpace: Clone + AddAssign + MulAssign<f32> {}
 
-impl<T> VectorSpace for T where T: Clone + AddAssign + MulAssign<f32> {}
+// impl<T> VectorSpace for T where T: Clone + AddAssign + MulAssign<f32> {}
 
 pub trait Mobject: 'static + Clone {
-    type Diff: VectorSpace;
+    // type Diff: VectorSpace;
 
     // fn apply_diff(&self, diff: Self::Diff) -> Self;
     fn render(&self, renderer: &Renderer);
 }
 
-#[derive(Clone)]
-struct LazyDiffField<T>(Option<T>);
+pub trait MobjectBuilder {
+    type Instantiation: Mobject;
 
-impl<T> AddAssign for LazyDiffField<T>
-where
-    T: VectorSpace,
-{
-    fn add_assign(&mut self, rhs: Self) {
-        if let Some(rhs) = rhs.0 {
-            if let Some(lhs) = self.0.as_mut() {
-                *lhs += rhs;
-            } else {
-                self.0 = Some(rhs);
-            }
-        }
-    }
+    fn instantiate(self, world: &World) -> Self::Instantiation;
 }
 
-impl<T> MulAssign<f32> for LazyDiffField<T>
-where
-    T: VectorSpace,
-{
-    fn mul_assign(&mut self, rhs: f32) {
-        if let Some(lhs) = self.0.as_mut() {
-            *lhs *= rhs;
-        }
-    }
-}
+// #[derive(Clone)]
+// struct LazyDiffField<T>(Option<T>);
 
-#[derive(Clone)]
-pub struct EmptyMobjectDiff;
+// impl<T> AddAssign for LazyDiffField<T>
+// where
+//     T: VectorSpace,
+// {
+//     fn add_assign(&mut self, rhs: Self) {
+//         if let Some(rhs) = rhs.0 {
+//             if let Some(lhs) = self.0.as_mut() {
+//                 *lhs += rhs;
+//             } else {
+//                 self.0 = Some(rhs);
+//             }
+//         }
+//     }
+// }
 
-impl AddAssign for EmptyMobjectDiff {
-    fn add_assign(&mut self, _rhs: Self) {}
-}
+// impl<T> MulAssign<f32> for LazyDiffField<T>
+// where
+//     T: VectorSpace,
+// {
+//     fn mul_assign(&mut self, rhs: f32) {
+//         if let Some(lhs) = self.0.as_mut() {
+//             *lhs *= rhs;
+//         }
+//     }
+// }
 
-impl MulAssign<f32> for EmptyMobjectDiff {
-    fn mul_assign(&mut self, _rhs: f32) {}
-}
+// #[derive(Clone)]
+// pub struct EmptyMobjectDiff;
+
+// impl AddAssign for EmptyMobjectDiff {
+//     fn add_assign(&mut self, _rhs: Self) {}
+// }
+
+// impl MulAssign<f32> for EmptyMobjectDiff {
+//     fn mul_assign(&mut self, _rhs: f32) {}
+// }
 
 #[derive(Clone)]
 pub struct EmptyMobject;
 
 impl Mobject for EmptyMobject {
-    type Diff = EmptyMobjectDiff;
+    // type Diff = EmptyMobjectDiff;
 
-    fn apply_diff(&self, _diff: Self::Diff) -> Self {
-        Self
-    }
+    // fn apply_diff(&self, _diff: Self::Diff) -> Self {
+    //     Self
+    // }
 
     fn render(&self, _renderer: &Renderer) {}
 }

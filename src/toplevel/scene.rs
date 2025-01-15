@@ -1,22 +1,22 @@
 use std::cell::RefCell;
 use std::ops::Range;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::app::App;
 use super::config::Config;
 use super::renderer::Renderer;
+use super::world::World;
 
 pub trait Present: 'static {
     fn present(&self, time: f32, time_interval: Range<f32>, renderer: &Renderer);
 }
 
-pub(crate) struct SupervisorData {
+pub(crate) struct PresentationCollection {
     time: Arc<f32>,
     presentations: Vec<(Range<Arc<f32>>, Box<dyn Present>)>,
 }
 
-impl SupervisorData {
+impl PresentationCollection {
     pub(crate) fn new() -> Self {
         Self {
             time: Arc::new(0.0),
@@ -38,19 +38,29 @@ impl SupervisorData {
     }
 }
 
-pub struct Supervisor(RefCell<SupervisorData>);
+pub struct Supervisor {
+    world: Arc<World>,
+    presentation_collection: RefCell<PresentationCollection>,
+}
 
 impl Supervisor {
-    pub(crate) fn new() -> Self {
-        Self(RefCell::new(SupervisorData::new()))
+    pub(crate) fn new(world: Arc<World>) -> Self {
+        Self {
+            world,
+            presentation_collection: RefCell::new(PresentationCollection::new()),
+        }
     }
 
-    pub(crate) fn into_data(self) -> SupervisorData {
-        self.0.into_inner()
+    pub(crate) fn world(&self) -> &Arc<World> {
+        &self.world
+    }
+
+    pub(crate) fn into_collection(self) -> PresentationCollection {
+        self.presentation_collection.into_inner()
     }
 
     pub(crate) fn get_time(&self) -> Arc<f32> {
-        self.0.borrow().time.clone()
+        self.presentation_collection.borrow().time.clone()
     }
 
     pub(crate) fn archive_presentation<P>(&self, time_interval: Range<Arc<f32>>, presentation: P)
@@ -58,7 +68,7 @@ impl Supervisor {
         P: Present,
     {
         if !Arc::<f32>::ptr_eq(&time_interval.start, &time_interval.end) {
-            self.0
+            self.presentation_collection
                 .borrow_mut()
                 .presentations
                 .push((time_interval, Box::new(presentation)));
@@ -70,7 +80,7 @@ impl Supervisor {
             delta_time.is_sign_positive(),
             "`Supervisor::wait` expects a non-negative argument `delta_time`, got {delta_time}",
         );
-        let time = &mut self.0.borrow_mut().time;
+        let time = &mut self.presentation_collection.borrow_mut().time;
         *time = Arc::new(**time + delta_time);
     }
 }
@@ -87,13 +97,13 @@ impl Supervisor {
 
 // use super::timelines::timeline::Supervisor;
 
-pub trait Scene {
+pub trait Scene: Sized {
     fn construct(self, supervisor: &Supervisor);
 
     fn run(self, config: Config) -> anyhow::Result<()> {
-        let supervisor = Supervisor::new();
-        scene.construct(&supervisor);
-        App::instantiate_and_run(supervisor.into_data(), config)?;
+        let supervisor = Supervisor::new(Arc::new(World::new(config.style, config.typst)));
+        self.construct(&supervisor);
+        App::instantiate_and_run(supervisor.into_collection(), config.window, config.video)?;
         Ok(())
     }
 }

@@ -14,36 +14,6 @@ pub trait ApplyRate {
         R: Rate;
 }
 
-pub trait ApplyRateChain {
-    type InRate: Rate;
-    type Partial;
-    type Output<RO>
-    where
-        RO: Rate;
-
-    fn split(self) -> (Self::InRate, Self::Partial);
-
-    fn combine<RO>(rate: RO, partial: Self::Partial) -> Self::Output<RO>
-    where
-        RO: Rate;
-}
-
-impl<T, RI> ApplyRate for T
-where
-    T: ApplyRateChain<InRate = RI>,
-    RI: Rate,
-{
-    type Output<R> = T::Output<ComposeRate<R, RI>> where R: Rate;
-
-    fn apply_rate<R>(self, rate: R) -> Self::Output<R>
-    where
-        R: Rate,
-    {
-        let (in_rate, partial) = self.split();
-        Self::combine(ComposeRate(rate, in_rate), partial)
-    }
-}
-
 pub struct IdentityRate;
 
 impl Rate for IdentityRate {
@@ -52,7 +22,7 @@ impl Rate for IdentityRate {
     }
 }
 
-pub struct ComposeRate<R0, R1>(R0, R1);
+pub struct ComposeRate<R0, R1>(pub(crate) R0, pub(crate) R1);
 
 impl<R0, R1> Rate for ComposeRate<R0, R1>
 where

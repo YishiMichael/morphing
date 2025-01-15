@@ -1,12 +1,10 @@
 use std::ops::Range;
 use std::time::Instant;
 
-use super::config::Config;
 use super::config::VideoConfig;
 use super::config::WindowConfig;
 use super::renderer::Renderer;
-use super::scene::SupervisorData;
-use super::world::World;
+use super::scene::PresentationCollection;
 
 struct Progress {
     time_interval: Range<f32>,
@@ -81,32 +79,34 @@ impl Progress {
 pub(crate) struct App {
     window_config: WindowConfig,
     video_config: VideoConfig,
-    renderer: Renderer,
+    renderer: Option<Renderer>,
     progress: Progress,
     control_pressed: bool,
-    supervisor_data: SupervisorData,
+    presentation_collection: PresentationCollection,
 }
 
 impl App {
     pub(crate) fn instantiate_and_run(
-        supervisor_data: SupervisorData,
-        config: Config,
+        presentation_collection: PresentationCollection,
+        window_config: WindowConfig,
+        video_config: VideoConfig,
     ) -> Result<(), winit::error::EventLoopError> {
         env_logger::init();
         let event_loop = winit::event_loop::EventLoop::new().unwrap();
         let mut app = Self {
-            window_config: config.window,
-            video_config: config.video,
-            renderer: Renderer::new(World::new(config.style, config.typst)),
-            progress: Progress::new(supervisor_data.full_time()),
+            window_config,
+            video_config,
+            renderer: None,
+            progress: Progress::new(presentation_collection.full_time()),
             control_pressed: false,
-            supervisor_data,
+            presentation_collection,
         };
         event_loop.run_app(&mut app)
     }
 
     fn render(&self, time: f32) {
-        self.supervisor_data.present_all(time, &self.renderer)
+        self.presentation_collection
+            .present_all(time, self.renderer.as_ref().unwrap())
     }
 
     fn on_key_down(&mut self, key: winit::keyboard::NamedKey) -> Option<f32> {
@@ -147,17 +147,16 @@ impl App {
 
 impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        if !self.renderer.is_wgpu_context_initialized() {
-            self.renderer.init_wgpu_context(
-                event_loop
-                    .create_window(
-                        winit::window::Window::default_attributes()
-                            .with_inner_size::<winit::dpi::PhysicalSize<u32>>(
-                                winit::dpi::PhysicalSize::from(self.window_config.size),
-                            ),
-                    )
-                    .unwrap(),
-            );
+        if self.renderer.is_none() {
+            let window = event_loop
+                .create_window(
+                    winit::window::Window::default_attributes()
+                        .with_inner_size::<winit::dpi::PhysicalSize<u32>>(
+                            winit::dpi::PhysicalSize::from(self.window_config.size),
+                        ),
+                )
+                .unwrap();
+            self.renderer = Some(pollster::block_on(Renderer::new(window)));
             self.progress.set_base_speed(self.window_config.base_speed);
             self.progress.set_speed_level(|_| 1);
         }
@@ -201,6 +200,6 @@ impl winit::application::ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
-        self.renderer.request_redraw();
+        self.renderer.as_ref().unwrap().request_redraw();
     }
 }

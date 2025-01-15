@@ -4,7 +4,7 @@ pub trait Update<M>: 'static
 where
     M: Mobject,
 {
-    fn update(&self, mobject: &M, alpha: f32) -> M;
+    fn update(&self, mobject: &mut M, alpha: f32);
 }
 
 pub trait ApplyUpdate<M>

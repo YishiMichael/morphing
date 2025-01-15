@@ -58,8 +58,8 @@ pub mod dynamic {
         fn collapse(&self, time: f32) -> Self::Output;
     }
 
-    pub trait DynamicTimelineContent: 'static {
-        type ContentPresentation: ContentPresent + Collapse;
+    pub trait DynamicTimelineContent: 'static + Collapse {
+        type ContentPresentation: ContentPresent;
 
         fn content_presentation(self) -> Self::ContentPresentation;
     }
@@ -129,56 +129,73 @@ pub mod dynamic {
 }
 
 pub mod action {
+    use std::cell::RefCell;
+
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::toplevel::renderer::Renderer;
+    use super::super::act::Diff;
     use super::dynamic::Collapse;
     use super::dynamic::ContentPresent;
     use super::dynamic::DynamicTimelineContent;
 
-    pub struct ActionTimelineContent<M>
-    where
-        M: Mobject,
-    {
-        pub(crate) source_mobject: M,
-        pub(crate) target_mobject: M,
-        pub(crate) diff: M::Diff,
+    pub struct ActionTimelineContent<M, D> {
+        pub(crate) mobject: M,
+        // pub(crate) source_mobject: M,
+        // pub(crate) target_mobject: M,
+        pub(crate) diff: D,
     }
 
-    impl<M> DynamicTimelineContent for ActionTimelineContent<M>
+    impl<M, D> Collapse for ActionTimelineContent<M, D>
     where
         M: Mobject,
-    {
-        type ContentPresentation = Self;
-
-        fn content_presentation(self) -> Self::ContentPresentation {
-            self
-        }
-    }
-
-    impl<M> ContentPresent for ActionTimelineContent<M>
-    where
-        M: Mobject,
-    {
-        fn content_present(&self, time: f32, renderer: &Renderer) {
-            self.collapse(time).render(renderer);
-        }
-    }
-
-    impl<M> Collapse for ActionTimelineContent<M>
-    where
-        M: Mobject,
+        D: Diff<M>,
     {
         type Output = M;
 
         fn collapse(&self, time: f32) -> Self::Output {
-            let mut diff = self.diff.clone();
-            diff *= time;
-            self.source_mobject.apply_diff(diff)
+            let mut mobject = self.mobject.clone();
+            self.diff.apply_partial(&mut mobject, time);
+            mobject
+        }
+    }
+
+    impl<M, D> DynamicTimelineContent for ActionTimelineContent<M, D>
+    where
+        M: Mobject,
+        D: Diff<M>,
+    {
+        type ContentPresentation = ActionTimelineContentPresentation<M, D>;
+
+        fn content_presentation(self) -> Self::ContentPresentation {
+            ActionTimelineContentPresentation {
+                mobject: RefCell::new(self.mobject),
+                diff: self.diff,
+            }
+        }
+    }
+
+    pub struct ActionTimelineContentPresentation<M, D> {
+        mobject: RefCell<M>,
+        diff: D,
+    }
+
+    impl<M, D> ContentPresent for ActionTimelineContentPresentation<M, D>
+    where
+        M: Mobject,
+        D: Diff<M>,
+    {
+        fn content_present(&self, time: f32, renderer: &Renderer) {
+            let mut mobject = self.mobject.borrow_mut();
+            self.diff.apply_partial(&mut mobject, time);
+            mobject.render(renderer);
+            // self.collapse(time).render(renderer);
         }
     }
 }
 
 pub mod continuous {
+    use std::cell::RefCell;
+
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::toplevel::renderer::Renderer;
     use super::super::update::Update;
@@ -191,28 +208,6 @@ pub mod continuous {
         pub(crate) update: U,
     }
 
-    impl<M, U> DynamicTimelineContent for ContinuousTimelineContent<M, U>
-    where
-        M: Mobject,
-        U: Update<M>,
-    {
-        type ContentPresentation = Self;
-
-        fn content_presentation(self) -> Self::ContentPresentation {
-            self
-        }
-    }
-
-    impl<M, U> ContentPresent for ContinuousTimelineContent<M, U>
-    where
-        M: Mobject,
-        U: Update<M>,
-    {
-        fn content_present(&self, time: f32, renderer: &Renderer) {
-            self.collapse(time).render(renderer);
-        }
-    }
-
     impl<M, U> Collapse for ContinuousTimelineContent<M, U>
     where
         M: Mobject,
@@ -221,16 +216,53 @@ pub mod continuous {
         type Output = M;
 
         fn collapse(&self, time: f32) -> Self::Output {
-            self.update.update(&self.mobject, time)
+            let mut mobject = self.mobject.clone();
+            self.update.update(&mut mobject, time);
+            mobject
+        }
+    }
+
+    impl<M, U> DynamicTimelineContent for ContinuousTimelineContent<M, U>
+    where
+        M: Mobject,
+        U: Update<M>,
+    {
+        type ContentPresentation = ContinuousTimelineContentPresentation<M, U>;
+
+        fn content_presentation(self) -> Self::ContentPresentation {
+            ContinuousTimelineContentPresentation {
+                mobject: RefCell::new(self.mobject),
+                update: self.update,
+            }
+        }
+    }
+
+    pub struct ContinuousTimelineContentPresentation<M, U> {
+        mobject: RefCell<M>,
+        update: U,
+    }
+
+    impl<M, U> ContentPresent for ContinuousTimelineContentPresentation<M, U>
+    where
+        M: Mobject,
+        U: Update<M>,
+    {
+        fn content_present(&self, time: f32, renderer: &Renderer) {
+            let mut mobject = self.mobject.borrow_mut();
+            self.update.update(&mut mobject, time);
+            mobject.render(renderer);
         }
     }
 }
 
 pub mod discrete {
+    use std::sync::Arc;
+
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::toplevel::renderer::Renderer;
+    use super::super::super::toplevel::scene::PresentationCollection;
     use super::super::super::toplevel::scene::Supervisor;
-    use super::super::super::toplevel::scene::SupervisorData;
+    use super::super::super::toplevel::world::World;
     use super::super::construct::Construct;
     use super::dynamic::Collapse;
     use super::dynamic::ContentPresent;
@@ -239,6 +271,19 @@ pub mod discrete {
     pub struct DiscreteTimelineContent<M, C> {
         pub(crate) mobject: M,
         pub(crate) construct: C,
+        pub(crate) world: Arc<World>,
+    }
+
+    impl<M, C> Collapse for DiscreteTimelineContent<M, C>
+    where
+        M: Mobject,
+        C: Construct<M>,
+    {
+        type Output = M;
+
+        fn collapse(&self, _time: f32) -> Self::Output {
+            self.mobject.clone()
+        }
     }
 
     impl<M, C> DynamicTimelineContent for DiscreteTimelineContent<M, C>
@@ -249,21 +294,21 @@ pub mod discrete {
         type ContentPresentation = DiscreteTimelineContentPresentation<C::Output>;
 
         fn content_presentation(self) -> Self::ContentPresentation {
-            let supervisor = Supervisor::new();
+            let supervisor = Supervisor::new(self.world.clone());
             let mobject = self
                 .construct
                 .construct(supervisor.spawn(self.mobject), &supervisor)
                 .archive(|steady_timeline, _, _| steady_timeline.mobject.clone());
             DiscreteTimelineContentPresentation {
                 mobject,
-                supervisor_data: supervisor.into_data(),
+                presentation_collection: supervisor.into_collection(),
             }
         }
     }
 
     pub struct DiscreteTimelineContentPresentation<M> {
         mobject: M,
-        supervisor_data: SupervisorData,
+        presentation_collection: PresentationCollection,
     }
 
     impl<M> ContentPresent for DiscreteTimelineContentPresentation<M>
@@ -271,18 +316,7 @@ pub mod discrete {
         M: Mobject,
     {
         fn content_present(&self, time: f32, renderer: &Renderer) {
-            self.supervisor_data.present_all(time, renderer);
-        }
-    }
-
-    impl<M> Collapse for DiscreteTimelineContentPresentation<M>
-    where
-        M: Mobject,
-    {
-        type Output = M;
-
-        fn collapse(&self, _time: f32) -> Self::Output {
-            self.mobject.clone()
+            self.presentation_collection.present_all(time, renderer);
         }
     }
 }
