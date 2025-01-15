@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ops::Range;
 use std::path::PathBuf;
 
 use comemo::Track;
@@ -61,7 +60,7 @@ impl World {
 
 // Modified from typst/lib.rs, typst-cli/src/world.rs
 
-struct TypstWorld {
+pub(crate) struct TypstWorld {
     root: PathBuf,
     library: typst::utils::LazyHash<typst::Library>,
     book: typst::utils::LazyHash<typst::text::FontBook>,
@@ -122,7 +121,11 @@ impl TypstWorld {
     //     self.main_id
     // }
 
-    pub(crate) fn document(&self, text: String) -> typst::model::Document {
+    pub(crate) fn source(&self, text: String) -> typst::syntax::Source {
+        typst::syntax::Source::new(self.main_id, text)
+    }
+
+    pub(crate) fn document(&self, source: &typst::syntax::Source) -> typst::model::Document {
         self.source_slots
             .lock()
             .values_mut()
@@ -132,7 +135,6 @@ impl TypstWorld {
             .values_mut()
             .for_each(SlotCell::reset);
 
-        let source = typst::syntax::Source::new(self.main_id, text);
         let styles = typst::foundations::StyleChain::new(&self.library().styles);
         let traced = typst::engine::Traced::default();
         let introspector = typst::introspection::Introspector::default();
@@ -147,7 +149,7 @@ impl TypstWorld {
             traced,
             sink.track_mut(),
             typst::engine::Route::default().track(),
-            &source,
+            source,
         )
         .unwrap()
         .content();
@@ -160,10 +162,6 @@ impl TypstWorld {
             route: typst::engine::Route::default(),
         };
         typst::layout::layout_document(&mut engine, &content, styles).unwrap()
-    }
-
-    pub(crate) fn range(&self, span: typst::syntax::Span) -> Option<Range<usize>> {
-        self.source(self.main_id).unwrap().range(span)
     }
 
     fn read(&self, id: typst::syntax::FileId) -> typst::diag::FileResult<Vec<u8>> {

@@ -66,7 +66,7 @@ impl Supervisor {
         })
     }
 
-    fn launch_timeline<T>(&self, timeline: T) -> Alive<'_, T>
+    pub(crate) fn launch_timeline<T>(&self, timeline: T) -> Alive<'_, T>
     where
         T: Timeline,
     {
@@ -100,7 +100,7 @@ where
         self.archive(|SteadyTimeline { mobject }, supervisor, _| {
             let mut mobject = mobject.clone();
             act.act(&mobject).apply(&mut mobject);
-            supervisor.spawn(mobject)
+            supervisor.launch_timeline(SteadyTimeline { mobject })
         })
     }
 }
@@ -172,9 +172,10 @@ where
              },
              supervisor,
              time_interval| {
-                supervisor.spawn(
-                    content.collapse(rate.eval(metric.eval(time_interval.end, time_interval))),
-                )
+                supervisor.launch_timeline(SteadyTimeline {
+                    mobject: content
+                        .collapse(rate.eval(metric.eval(time_interval.end, time_interval))),
+                })
             },
         )
     }

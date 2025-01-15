@@ -1,4 +1,7 @@
 macro_rules! c {
+    ($name:ident = $alias:ident) => {
+        pub const $name: palette::Srgb<u8> = $alias;
+    };
     ($name:ident = $value:tt) => {
         pub const $name: palette::Srgb<u8> = palette::Srgb::new(
             ($value as u32 >> 16 & 0xFF) as u8,
@@ -63,12 +66,12 @@ c!(LIGHT_PINK = 0xDC75CD);
 c!(GREEN_SCREEN = 0x00FF00);
 c!(ORANGE = 0xFF862F);
 
-c!(BLUE = 0x58C4DD);
-c!(TEAL = 0x5CD0B3);
-c!(GREEN = 0x83C167);
-c!(YELLOW = 0xFFFF00);
-c!(GOLD = 0xF0AC5F);
-c!(RED = 0xFC6255);
-c!(MAROON = 0xC55F73);
-c!(PURPLE = 0x9A72AC);
-c!(GREY = 0x888888);
+c!(BLUE = BLUE_C);
+c!(TEAL = TEAL_C);
+c!(GREEN = GREEN_C);
+c!(YELLOW = YELLOW_C);
+c!(GOLD = GOLD_C);
+c!(RED = RED_C);
+c!(MAROON = MAROON_C);
+c!(PURPLE = PURPLE_C);
+c!(GREY = GREY_C);

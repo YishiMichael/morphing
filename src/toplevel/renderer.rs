@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-pub(crate) struct Renderer {
+pub struct Renderer {
     window: Arc<winit::window::Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -86,29 +86,3 @@ impl Renderer {
         self.window.request_redraw();
     }
 }
-
-// pub(crate) struct Renderer {
-//     wgpu_context: Option<WgpuContext>,
-//     world: World,
-// }
-
-// impl Renderer {
-//     pub(crate) fn new(world: World) -> Self {
-//         Self {
-//             wgpu_context: None,
-//             world,
-//         }
-//     }
-
-//     pub(crate) fn is_wgpu_context_initialized(&self) -> bool {
-//         self.wgpu_context.is_none()
-//     }
-
-//     pub(crate) fn init_wgpu_context(&mut self, window: winit::window::Window) {
-//         self.wgpu_context = Some(pollster::block_on(WgpuContext::new(window)));
-//     }
-
-//     pub(crate) fn request_redraw(&self) {
-//         self.wgpu_context.as_ref().unwrap().window.request_redraw();
-//     }
-// }

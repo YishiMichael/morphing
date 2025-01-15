@@ -7,10 +7,10 @@ use super::mobject::Mobject;
 
 #[derive(Clone)]
 pub struct ShapeMobject {
-    transform: Transform,
-    path: Path,
-    fill: Option<Fill>,
-    stroke: Option<Stroke>,
+    pub(crate) transform: Transform,
+    pub(crate) path: Path,
+    pub(crate) fill: Option<Fill>,
+    pub(crate) stroke: Option<Stroke>,
 }
 
 impl Mobject for ShapeMobject {

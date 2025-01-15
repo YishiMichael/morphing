@@ -52,10 +52,11 @@ pub struct TypstMobject {
 
 impl TypstMobject {
     fn instantiate(text: String, world: &World) -> Self {
-        let document = world.typst_world.document(text.clone());
+        let source = world.typst_world.source(text.clone());
+        let document = world.typst_world.document(&source);
         Self {
             text,
-            tokens: TypstMobject::from_typst_document(&document, world),
+            tokens: TypstMobject::from_typst_document(&document, &source),
         }
     }
 
@@ -215,7 +216,7 @@ impl TypstMobject {
         stroke: Option<&typst::visualize::FixedStroke>,
         span: typst::syntax::Span,
         transform: typst::layout::Transform,
-        world: &World,
+        source: &typst::syntax::Source,
     ) -> TypstMobjectToken {
         let path = path.transform(glam::DAffine2::from_cols_array_2d(&[
             [transform.sx.get(), transform.ky.get()],
@@ -273,7 +274,7 @@ impl TypstMobject {
             },
         });
         TypstMobjectToken {
-            span: world.typst_world.range(span),
+            span: source.range(span),
             mobject: ShapeMobject {
                 transform: Transform::default(),
                 path,
@@ -287,7 +288,7 @@ impl TypstMobject {
         shape: &typst::visualize::Shape,
         span: typst::syntax::Span,
         transform: typst::layout::Transform,
-        world: &World,
+        source: &typst::syntax::Source,
     ) -> Vec<TypstMobjectToken> {
         let typst_path = match &shape.geometry {
             &typst::visualize::Geometry::Line(point) => {
@@ -307,14 +308,14 @@ impl TypstMobject {
             shape.stroke.as_ref(),
             span,
             transform,
-            world,
+            source,
         )]
     }
 
     fn from_typst_text(
         text: &typst::text::TextItem,
         transform: typst::layout::Transform,
-        world: &World,
+        source: &typst::syntax::Source,
     ) -> Vec<TypstMobjectToken> {
         let scale = typst::layout::Ratio::new(text.size.to_pt() / text.font.units_per_em());
         text.glyphs
@@ -347,7 +348,7 @@ impl TypstMobject {
                             text.stroke.as_ref(),
                             glyph.span.0,
                             transform,
-                            world,
+                            source,
                         )
                     })
             })
@@ -357,7 +358,7 @@ impl TypstMobject {
     fn from_typst_frame(
         frame: &typst::layout::Frame,
         transform: typst::layout::Transform,
-        world: &World,
+        source: &typst::syntax::Source,
     ) -> Vec<TypstMobjectToken> {
         // #[inline]
         // fn convert_point(typst::layout::Point { x, y }: typst::layout::Point) -> (f32, f32) {
@@ -398,14 +399,14 @@ impl TypstMobject {
                         Self::from_typst_frame(
                             &group.frame,
                             transform.pre_concat(group.transform),
-                            world,
+                            source,
                         )
                     }
                     &typst::layout::FrameItem::Text(ref text) => {
-                        Self::from_typst_text(text, transform, world)
+                        Self::from_typst_text(text, transform, source)
                     }
                     &typst::layout::FrameItem::Shape(ref shape, span) => {
-                        Self::from_typst_shape(shape, span, transform, world)
+                        Self::from_typst_shape(shape, span, transform, source)
                     }
                     &typst::layout::FrameItem::Image(_, _, _) => {
                         panic!("Unsopported item: image")
@@ -419,7 +420,7 @@ impl TypstMobject {
 
     fn from_typst_document(
         document: &typst::model::Document,
-        world: &World,
+        source: &typst::syntax::Source,
     ) -> Vec<TypstMobjectToken> {
         document
             .pages
@@ -432,7 +433,7 @@ impl TypstMobject {
                         typst::layout::Abs::zero(),
                         i as f64 * page.frame.height(),
                     ),
-                    world,
+                    source,
                 )
             })
             .collect()

@@ -109,38 +109,73 @@ impl App {
             .present_all(time, self.renderer.as_ref().unwrap())
     }
 
-    fn on_key_down(&mut self, key: winit::keyboard::NamedKey) -> Option<f32> {
+    fn on_redraw_requested(&mut self) {
+        if self.progress.speed_level != 0 {
+            let time = self.progress.get_time();
+            self.render(time);
+        }
+    }
+
+    fn on_key_down(&mut self, key: winit::keyboard::Key, control_pressed: bool) {
         match key {
-            winit::keyboard::NamedKey::ArrowRight => {
-                Some(self.progress.forward_time(if self.control_pressed {
-                    self.window_config.fast_forward_seconds
-                } else {
-                    self.window_config.forward_seconds
-                }))
-            }
-            winit::keyboard::NamedKey::ArrowLeft => {
-                Some(self.progress.forward_time(-if self.control_pressed {
-                    self.window_config.fast_forward_seconds
-                } else {
-                    self.window_config.forward_seconds
-                }))
-            }
-            winit::keyboard::NamedKey::ArrowUp => Some(
-                self.progress
-                    .set_speed_level(|speed_level| speed_level.max(0) + 1),
-            ),
-            winit::keyboard::NamedKey::ArrowDown => Some(
-                self.progress
-                    .set_speed_level(|speed_level| speed_level.min(0) - 1),
-            ),
-            winit::keyboard::NamedKey::Space => Some(
-                self.progress
-                    .set_speed_level(|speed_level| if speed_level != 0 { 0 } else { 1 }),
-            ),
-            _ => {
-                dbg!(key);
-                None
-            }
+            winit::keyboard::Key::Named(named_key) => match named_key {
+                winit::keyboard::NamedKey::ArrowRight if !control_pressed => {
+                    let time = self
+                        .progress
+                        .forward_time(self.window_config.forward_seconds);
+                    self.render(time);
+                }
+                winit::keyboard::NamedKey::ArrowRight if control_pressed => {
+                    let time = self
+                        .progress
+                        .forward_time(self.window_config.fast_forward_seconds);
+                    self.render(time);
+                }
+                winit::keyboard::NamedKey::ArrowLeft if !control_pressed => {
+                    let time = self
+                        .progress
+                        .forward_time(-self.window_config.forward_seconds);
+                    self.render(time);
+                }
+                winit::keyboard::NamedKey::ArrowLeft if control_pressed => {
+                    let time = self
+                        .progress
+                        .forward_time(-self.window_config.fast_forward_seconds);
+                    self.render(time);
+                }
+                winit::keyboard::NamedKey::ArrowUp => {
+                    let time = self
+                        .progress
+                        .set_speed_level(|speed_level| speed_level.max(0) + 1);
+                    self.render(time);
+                }
+                winit::keyboard::NamedKey::ArrowDown => {
+                    let time = self
+                        .progress
+                        .set_speed_level(|speed_level| speed_level.min(0) - 1);
+                    self.render(time);
+                }
+                winit::keyboard::NamedKey::Space => {
+                    let time = self
+                        .progress
+                        .set_speed_level(|speed_level| if speed_level != 0 { 0 } else { 1 });
+                    self.render(time);
+                }
+                _ => {}
+            },
+            winit::keyboard::Key::Character(ch) => match ch.as_str() {
+                "s" if control_pressed => {
+                    let time = self.progress.set_speed_level(|_| 0);
+                    self.render(time);
+                    let save_path = rfd::FileDialog::new()
+                        .add_filter("MP4", &["mp4"])
+                        .add_filter("PNG", &["png"])
+                        .save_file();
+                    dbg!(save_path);
+                }
+                _ => {}
+            },
+            _ => {}
         }
     }
 }
@@ -170,10 +205,7 @@ impl winit::application::ApplicationHandler for App {
     ) {
         match event {
             winit::event::WindowEvent::RedrawRequested => {
-                if self.progress.speed_level != 0 {
-                    let time = self.progress.get_time();
-                    self.render(time);
-                }
+                self.on_redraw_requested();
             }
             winit::event::WindowEvent::CloseRequested => event_loop.exit(),
             winit::event::WindowEvent::ModifiersChanged(modifiers) => {
@@ -182,18 +214,13 @@ impl winit::application::ApplicationHandler for App {
             winit::event::WindowEvent::KeyboardInput {
                 event:
                     winit::event::KeyEvent {
-                        logical_key: winit::keyboard::Key::Named(key),
+                        logical_key,
                         state: winit::event::ElementState::Pressed,
                         ..
                     },
                 ..
             } => {
-                if let Some(time) = self.on_key_down(key) {
-                    self.render(time);
-                }
-            }
-            winit::event::WindowEvent::KeyboardInput { event, .. } => {
-                dbg!(event);
+                self.on_key_down(logical_key, self.control_pressed);
             }
             _ => {}
         };

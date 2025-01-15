@@ -267,6 +267,7 @@ pub mod discrete {
     use super::dynamic::Collapse;
     use super::dynamic::ContentPresent;
     use super::dynamic::DynamicTimelineContent;
+    use super::steady::SteadyTimeline;
 
     pub struct DiscreteTimelineContent<M, C> {
         pub(crate) mobject: M,
@@ -297,7 +298,12 @@ pub mod discrete {
             let supervisor = Supervisor::new(self.world.clone());
             let mobject = self
                 .construct
-                .construct(supervisor.spawn(self.mobject), &supervisor)
+                .construct(
+                    supervisor.launch_timeline(SteadyTimeline {
+                        mobject: self.mobject,
+                    }),
+                    &supervisor,
+                )
                 .archive(|steady_timeline, _, _| steady_timeline.mobject.clone());
             DiscreteTimelineContentPresentation {
                 mobject,
