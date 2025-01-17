@@ -9,8 +9,8 @@ pub struct Paint {
 
 #[derive(Clone)]
 pub struct Gradient {
-    pub from: nalgebra::Vector2<f32>,
-    pub to: nalgebra::Vector2<f32>,
+    pub from_position: nalgebra::Vector2<f32>,
+    pub to_position: nalgebra::Vector2<f32>,
     pub radius_slope: f32,
     pub radius_quotient: f32,
     pub radial_stops: Vec<(f32, palette::Srgba<f32>)>,
@@ -38,8 +38,8 @@ pub(crate) struct PaintUniform {
 
 #[derive(ShaderType)]
 struct GradientStorage {
-    from: nalgebra::Vector2<f32>,
-    to: nalgebra::Vector2<f32>,
+    from_position: nalgebra::Vector2<f32>,
+    to_position: nalgebra::Vector2<f32>,
     radius_slope: f32,
     radius_quotient: f32,
     radial_stops_range: nalgebra::Vector2<u32>,
@@ -86,8 +86,8 @@ impl Paint {
                 (0, 0),
                 |(radial_stops_len, angular_stops_len),
                  &Gradient {
-                     from,
-                     to,
+                     from_position,
+                     to_position,
                      radius_slope,
                      radius_quotient,
                      ref radial_stops,
@@ -112,8 +112,8 @@ impl Paint {
                         }
                     }));
                     Some(GradientStorage {
-                        from,
-                        to,
+                        from_position,
+                        to_position,
                         radius_slope,
                         radius_quotient,
                         radial_stops_range: nalgebra::Vector2::new(
@@ -160,7 +160,7 @@ impl PaintShaderTypes {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: Some(GradientStorage::min_size()),
                     },
@@ -171,7 +171,7 @@ impl PaintShaderTypes {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: Some(GradientStopStorage::min_size()),
                     },
@@ -182,7 +182,7 @@ impl PaintShaderTypes {
                     binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: Some(GradientStopStorage::min_size()),
                     },
@@ -272,7 +272,7 @@ impl PaintShaderTypes {
             buffer.write(&self.paint_uniform).unwrap();
         }
         {
-            let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
+            let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
                 queue
                     .write_buffer_with(&buffers.gradients_storage, 0, self.gradients_storage.size())
                     .unwrap(),
@@ -280,7 +280,7 @@ impl PaintShaderTypes {
             buffer.write(&self.gradients_storage).unwrap();
         }
         {
-            let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
+            let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
                 queue
                     .write_buffer_with(
                         &buffers.radial_stops_storage,
@@ -292,7 +292,7 @@ impl PaintShaderTypes {
             buffer.write(&self.radial_stops_storage).unwrap();
         }
         {
-            let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
+            let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
                 queue
                     .write_buffer_with(
                         &buffers.angular_stops_storage,

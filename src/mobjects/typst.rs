@@ -121,8 +121,8 @@ impl TypstMobject {
                             .unwrap_or_default();
                         let to = from + (to - from).project_onto(direction);
                         Gradient {
-                            from: nalgebra::Vector2::new(from.x as f32, from.y as f32),
-                            to: nalgebra::Vector2::new(to.x as f32, to.y as f32),
+                            from_position: nalgebra::Vector2::new(from.x as f32, from.y as f32),
+                            to_position: nalgebra::Vector2::new(to.x as f32, to.y as f32),
                             radius_slope: 0.0,
                             radius_quotient: 1.0,
                             radial_stops: linear_gradient
@@ -152,8 +152,8 @@ impl TypstMobject {
                         let from = focal_center + focal_radius * direction;
                         let to = center + radius * direction;
                         Gradient {
-                            from: nalgebra::Vector2::new(from.x as f32, from.y as f32),
-                            to: nalgebra::Vector2::new(to.x as f32, to.y as f32),
+                            from_position: nalgebra::Vector2::new(from.x as f32, from.y as f32),
+                            to_position: nalgebra::Vector2::new(to.x as f32, to.y as f32),
                             radius_slope: ((to - from).length() / (radius - focal_radius)) as f32,
                             radius_quotient: (radius / focal_radius) as f32,
                             radial_stops: radial_gradient
@@ -177,8 +177,8 @@ impl TypstMobject {
                                 y: conic_gradient.angle.sin(),
                             };
                         Gradient {
-                            from: nalgebra::Vector2::new(from.x as f32, from.y as f32),
-                            to: nalgebra::Vector2::new(to.x as f32, to.y as f32),
+                            from_position: nalgebra::Vector2::new(from.x as f32, from.y as f32),
+                            to_position: nalgebra::Vector2::new(to.x as f32, to.y as f32),
                             radius_slope: 0.0,
                             radius_quotient: 0.0,
                             radial_stops: Vec::new(),

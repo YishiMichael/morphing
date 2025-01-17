@@ -97,7 +97,7 @@ impl Mobject for ShapeMobject {
                     entry_point: None,
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::R32Float,
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb, // TODO: check if color channels messed up?
                         blend: Some(wgpu::BlendState {
                             color: wgpu::BlendComponent {
                                 src_factor: wgpu::BlendFactor::One,
@@ -139,14 +139,14 @@ impl Mobject for ShapeMobject {
 
         fn render_half(
             transform_bind_group: &wgpu::BindGroup,
-            camera_bind_group: &wgpu::BindGroup,
             paint_bind_group: &wgpu::BindGroup,
+            camera_bind_group: &wgpu::BindGroup,
             vertex_buffers: VertexBuffers<Vertex, u32>,
             pipeline: &wgpu::RenderPipeline,
             renderer: &Renderer,
         ) {
             let vertex_buffer = {
-                let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
+                let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
                 buffer.write(&vertex_buffers.vertices).unwrap();
                 renderer
                     .device
@@ -157,7 +157,7 @@ impl Mobject for ShapeMobject {
                     })
             };
             let index_buffer = {
-                let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
+                let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
                 buffer.write(&vertex_buffers.indices).unwrap();
                 renderer
                     .device
@@ -192,8 +192,8 @@ impl Mobject for ShapeMobject {
                 });
                 frame_pass.set_pipeline(pipeline);
                 frame_pass.set_bind_group(0, transform_bind_group, &[]);
-                frame_pass.set_bind_group(1, camera_bind_group, &[]);
-                frame_pass.set_bind_group(2, paint_bind_group, &[]);
+                frame_pass.set_bind_group(1, paint_bind_group, &[]);
+                frame_pass.set_bind_group(2, camera_bind_group, &[]);
                 frame_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 frame_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 frame_pass.draw(0..3, 0..1);
@@ -263,8 +263,8 @@ impl Mobject for ShapeMobject {
 
             render_half(
                 &transform_bind_group,
-                &camera_bind_group,
                 &paint_bind_group,
+                &camera_bind_group,
                 vertex_buffers,
                 &pipeline,
                 renderer,
@@ -312,8 +312,8 @@ impl Mobject for ShapeMobject {
 
             render_half(
                 &transform_bind_group,
-                &camera_bind_group,
                 &paint_bind_group,
+                &camera_bind_group,
                 vertex_buffers,
                 &pipeline,
                 renderer,

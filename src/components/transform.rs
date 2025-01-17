@@ -21,7 +21,7 @@ pub(crate) struct TransformBuffers {
 
 #[derive(ShaderType)]
 pub(crate) struct TransformUniform {
-    motor: nalgebra::Matrix2x4<f32>,
+    motor: nalgebra::Matrix4x2<f32>,
     scale: f32,
 }
 
@@ -29,7 +29,7 @@ impl Transform {
     pub(crate) fn to_shader_types(&self) -> TransformShaderTypes {
         TransformShaderTypes {
             transform_uniform: TransformUniform {
-                motor: nalgebra::Matrix2x4::from_column_slice(&Into::<[f32; 8]>::into(self.motor)),
+                motor: nalgebra::Matrix4x2::from_column_slice(&Into::<[f32; 8]>::into(self.motor)), // transpose?
                 scale: self.scale,
             },
         }
