@@ -1,6 +1,5 @@
-use crate::toplevel::world::World;
-
 use super::super::toplevel::renderer::Renderer;
+use super::super::toplevel::world::World;
 
 // pub trait VectorSpace: Clone + AddAssign + MulAssign<f32> {}
 

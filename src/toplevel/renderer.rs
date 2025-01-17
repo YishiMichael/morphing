@@ -1,34 +1,33 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
+
 pub struct Renderer {
-    window: Arc<winit::window::Window>,
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    pub(crate) window: Arc<winit::window::Window>,
+    pub(crate) surface: wgpu::Surface<'static>,
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
+    // TODO: remove pub(crate) vis
 }
 
 impl Renderer {
-    pub(crate) async fn new(window: winit::window::Window) -> Self {
+    pub(crate) fn new(window: winit::window::Window) -> anyhow::Result<Self> {
         let window = Arc::new(window);
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
-        let surface = instance.create_surface(window.clone()).unwrap();
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                force_fallback_adapter: false,
-                // Request an adapter which can render to our surface
-                compatible_surface: Some(&surface),
-            })
-            .await
-            .unwrap();
+        let surface = instance.create_surface(window.clone())?;
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            force_fallback_adapter: false,
+            compatible_surface: Some(&surface),
+        }))
+        .ok_or(wgpu::core::instance::RequestAdapterError::NotFound)?;
 
-        // Create the logical device and command queue
-        let (device, queue) = adapter
-            .request_device(
+        let (device, queue) = pollster::block_on(
+            adapter.request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
                     required_features: [
@@ -36,50 +35,45 @@ impl Renderer {
                         wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY,
                         wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
                     ]
-                    .iter()
-                    .copied()
-                    .reduce(std::ops::BitOr::bitor)
-                    .unwrap(),
-                    // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the swapchain.
+                    .into_iter()
+                    .fold(wgpu::Features::empty(), std::ops::BitOr::bitor),
                     required_limits: wgpu::Limits::default(),
                     memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,
-            )
-            .await
-            .unwrap();
+            ),
+        )?;
 
-        let window_size = window.inner_size();
         let config = {
-            let surface_capabilities = surface.get_capabilities(&adapter);
-            // Shader code in this tutorial assumes an Srgb surface texture. Using a different
-            // one will result all the colors comming out darker. If you want to support non
-            // Srgb surfaces, you'll need to account for that when drawing to the frame.
-            let surface_format = surface_capabilities
-                .formats
-                .iter()
-                .copied()
-                .find(|format| format.is_srgb())
-                .unwrap_or(surface_capabilities.formats[0]);
+            let window_size = window.inner_size();
+            let wgpu::SurfaceCapabilities {
+                formats,
+                present_modes,
+                alpha_modes,
+                ..
+            } = surface.get_capabilities(&adapter);
             wgpu::SurfaceConfiguration {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                format: surface_format,
+                format: formats
+                    .into_iter()
+                    .find_or_first(|format| format.is_srgb())
+                    .unwrap(),
                 width: window_size.width,
                 height: window_size.height,
-                present_mode: surface_capabilities.present_modes[0],
-                alpha_mode: surface_capabilities.alpha_modes[0],
+                present_mode: present_modes.into_iter().next().unwrap(),
+                alpha_mode: alpha_modes.into_iter().next().unwrap(),
                 view_formats: vec![],
                 desired_maximum_frame_latency: 2,
             }
         };
         surface.configure(&device, &config);
 
-        Self {
+        Ok(Self {
             window,
             surface,
             device,
             queue,
-        }
+        })
     }
 
     pub(crate) fn request_redraw(&self) {

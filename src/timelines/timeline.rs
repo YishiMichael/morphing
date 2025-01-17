@@ -1,6 +1,6 @@
 use super::super::toplevel::scene::Present;
 
-pub trait Timeline: 'static {
+pub trait Timeline {
     type Presentation: Present;
 
     fn presentation(self) -> Self::Presentation;
@@ -58,7 +58,7 @@ pub mod dynamic {
         fn collapse(&self, time: f32) -> Self::Output;
     }
 
-    pub trait DynamicTimelineContent: 'static + Collapse {
+    pub trait DynamicTimelineContent: Collapse {
         type ContentPresentation: ContentPresent;
 
         fn content_presentation(self) -> Self::ContentPresentation;
@@ -256,8 +256,6 @@ pub mod continuous {
 }
 
 pub mod discrete {
-    use std::sync::Arc;
-
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::toplevel::renderer::Renderer;
     use super::super::super::toplevel::scene::PresentationCollection;
@@ -269,13 +267,13 @@ pub mod discrete {
     use super::dynamic::DynamicTimelineContent;
     use super::steady::SteadyTimeline;
 
-    pub struct DiscreteTimelineContent<M, C> {
+    pub struct DiscreteTimelineContent<'w, M, C> {
         pub(crate) mobject: M,
         pub(crate) construct: C,
-        pub(crate) world: Arc<World>,
+        pub(crate) world: &'w World,
     }
 
-    impl<M, C> Collapse for DiscreteTimelineContent<M, C>
+    impl<M, C> Collapse for DiscreteTimelineContent<'_, M, C>
     where
         M: Mobject,
         C: Construct<M>,
@@ -287,7 +285,7 @@ pub mod discrete {
         }
     }
 
-    impl<M, C> DynamicTimelineContent for DiscreteTimelineContent<M, C>
+    impl<M, C> DynamicTimelineContent for DiscreteTimelineContent<'_, M, C>
     where
         M: Mobject,
         C: Construct<M>,
@@ -295,7 +293,7 @@ pub mod discrete {
         type ContentPresentation = DiscreteTimelineContentPresentation<C::Output>;
 
         fn content_presentation(self) -> Self::ContentPresentation {
-            let supervisor = Supervisor::new(self.world.clone());
+            let supervisor = Supervisor::new(self.world);
             let mobject = self
                 .construct
                 .construct(

@@ -27,22 +27,22 @@ use super::timeline::Timeline;
 use super::update::ApplyUpdate;
 use super::update::Update;
 
-pub struct Alive<'a, T>
+pub struct Alive<'w, T>
 where
     T: Timeline,
 {
     spawn_time: Arc<f32>,
     timeline: T,
-    supervisor: &'a Supervisor,
+    supervisor: &'w Supervisor<'w>,
 }
 
-impl<'a, T> Alive<'a, T>
+impl<'w, T> Alive<'w, T>
 where
     T: Timeline,
 {
     pub(crate) fn archive<F, O>(self, f: F) -> O
     where
-        F: FnOnce(&T, &'a Supervisor, Range<f32>) -> O,
+        F: FnOnce(&T, &'w Supervisor, Range<f32>) -> O,
     {
         let time_interval = self.spawn_time..self.supervisor.get_time();
         let output = f(
@@ -56,7 +56,7 @@ where
     }
 }
 
-impl Supervisor {
+impl Supervisor<'_> {
     pub fn spawn<MB>(&self, mobject_builder: MB) -> Alive<'_, SteadyTimeline<MB::Instantiation>>
     where
         MB: MobjectBuilder,
@@ -87,7 +87,7 @@ where
     }
 }
 
-impl<'a, M> ApplyAct<M> for Alive<'_, SteadyTimeline<M>>
+impl<M> ApplyAct<M> for Alive<'_, SteadyTimeline<M>>
 where
     M: Mobject,
 {
@@ -105,22 +105,22 @@ where
     }
 }
 
-pub struct DynamicTimelineBuilder<'a, M, ME, R>
+pub struct DynamicTimelineBuilder<'w, M, ME, R>
 where
     M: Mobject,
 {
-    steady_mobject: Alive<'a, SteadyTimeline<M>>,
+    steady_mobject: Alive<'w, SteadyTimeline<M>>,
     metric: ME,
     rate: R,
 }
 
-impl<'a, M, ME, R> ApplyRate for DynamicTimelineBuilder<'a, M, ME, R>
+impl<'w, M, ME, R> ApplyRate for DynamicTimelineBuilder<'w, M, ME, R>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    type Output<RA> = DynamicTimelineBuilder<'a, M, ME, ComposeRate<RA, R>>
+    type Output<RA> = DynamicTimelineBuilder<'w, M, ME, ComposeRate<RA, R>>
     where
         RA: Rate;
 
@@ -136,11 +136,11 @@ where
     }
 }
 
-impl<'a, M> Alive<'a, SteadyTimeline<M>>
+impl<'w, M> Alive<'w, SteadyTimeline<M>>
 where
     M: Mobject,
 {
-    pub fn animate(self) -> DynamicTimelineBuilder<'a, M, RelativeTimelineMetric, IdentityRate> {
+    pub fn animate(self) -> DynamicTimelineBuilder<'w, M, RelativeTimelineMetric, IdentityRate> {
         DynamicTimelineBuilder {
             steady_mobject: self,
             metric: RelativeTimelineMetric,
@@ -148,7 +148,7 @@ where
         }
     }
 
-    pub fn animating(self) -> DynamicTimelineBuilder<'a, M, AbsoluteTimelineMetric, IdentityRate> {
+    pub fn animating(self) -> DynamicTimelineBuilder<'w, M, AbsoluteTimelineMetric, IdentityRate> {
         DynamicTimelineBuilder {
             steady_mobject: self,
             metric: AbsoluteTimelineMetric,
@@ -157,13 +157,13 @@ where
     }
 }
 
-impl<'a, CO, ME, R> Alive<'a, DynamicTimeline<CO, ME, R>>
+impl<'w, CO, ME, R> Alive<'w, DynamicTimeline<CO, ME, R>>
 where
     CO: DynamicTimelineContent,
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    pub fn collapse(self) -> Alive<'a, SteadyTimeline<CO::Output>> {
+    pub fn collapse(self) -> Alive<'w, SteadyTimeline<CO::Output>> {
         self.archive(
             |DynamicTimeline {
                  content,
@@ -181,13 +181,13 @@ where
     }
 }
 
-impl<'a, M, ME, R> ApplyAct<M> for DynamicTimelineBuilder<'a, M, ME, R>
+impl<'w, M, ME, R> ApplyAct<M> for DynamicTimelineBuilder<'w, M, ME, R>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    type Output<A> = Alive<'a, DynamicTimeline<ActionTimelineContent<M, A::Diff>, ME, R>>
+    type Output<A> = Alive<'w, DynamicTimeline<ActionTimelineContent<M, A::Diff>, ME, R>>
     where
         A: Act<M>;
 
@@ -208,13 +208,13 @@ where
     }
 }
 
-impl<'a, M, ME, R> ApplyUpdate<M> for DynamicTimelineBuilder<'a, M, ME, R>
+impl<'w, M, ME, R> ApplyUpdate<M> for DynamicTimelineBuilder<'w, M, ME, R>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    type Output<U> = Alive<'a, DynamicTimeline<ContinuousTimelineContent<M, U>, ME, R>>
+    type Output<U> = Alive<'w, DynamicTimeline<ContinuousTimelineContent<M, U>, ME, R>>
     where
         U: Update<M>;
 
@@ -236,13 +236,13 @@ where
     }
 }
 
-impl<'a, M, ME, R> ApplyConstruct<M> for DynamicTimelineBuilder<'a, M, ME, R>
+impl<'w, M, ME, R> ApplyConstruct<M> for DynamicTimelineBuilder<'w, M, ME, R>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    type Output<C> = Alive<'a, DynamicTimeline<DiscreteTimelineContent<M, C>, ME, R>>
+    type Output<C> = Alive<'w, DynamicTimeline<DiscreteTimelineContent<'w, M, C>, ME, R>>
     where
         C: Construct<M>;
 
@@ -256,7 +256,7 @@ where
                     content: DiscreteTimelineContent {
                         mobject: mobject.clone(),
                         construct,
-                        world: supervisor.world().clone(),
+                        world: supervisor.world(),
                     },
                     metric: self.metric,
                     rate: self.rate,
@@ -265,14 +265,14 @@ where
     }
 }
 
-impl<'a, M, ME, R, D> ApplyAct<M> for Alive<'a, DynamicTimeline<ActionTimelineContent<M, D>, ME, R>>
+impl<'w, M, ME, R, D> ApplyAct<M> for Alive<'w, DynamicTimeline<ActionTimelineContent<M, D>, ME, R>>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
     D: Diff<M>,
 {
-    type Output<A> = Alive<'a, DynamicTimeline<ActionTimelineContent<M, ComposeDiff<A::Diff, D>>, ME, R>> where A: Act<M>;
+    type Output<A> = Alive<'w, DynamicTimeline<ActionTimelineContent<M, ComposeDiff<A::Diff, D>>, ME, R>> where A: Act<M>;
 
     fn apply_act<A>(self, act: A) -> Self::Output<A>
     where

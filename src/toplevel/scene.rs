@@ -38,21 +38,21 @@ impl PresentationCollection {
     }
 }
 
-pub struct Supervisor {
-    world: Arc<World>,
+pub struct Supervisor<'w> {
+    world: &'w World,
     presentation_collection: RefCell<PresentationCollection>,
 }
 
-impl Supervisor {
-    pub(crate) fn new(world: Arc<World>) -> Self {
+impl<'w> Supervisor<'w> {
+    pub(crate) fn new(world: &'w World) -> Self {
         Self {
             world,
             presentation_collection: RefCell::new(PresentationCollection::new()),
         }
     }
 
-    pub(crate) fn world(&self) -> &Arc<World> {
-        &self.world
+    pub(crate) fn world(&self) -> &'w World {
+        self.world
     }
 
     pub(crate) fn into_collection(self) -> PresentationCollection {
@@ -101,7 +101,8 @@ pub trait Scene: Sized {
     fn construct(self, supervisor: &Supervisor);
 
     fn run(self, config: Config) -> anyhow::Result<()> {
-        let supervisor = Supervisor::new(Arc::new(World::new(config.style, config.typst)));
+        let world = World::new(config.style, config.typst);
+        let supervisor = Supervisor::new(&world);
         self.construct(&supervisor);
         App::instantiate_and_run(supervisor.into_collection(), config.window, config.video)?;
         Ok(())

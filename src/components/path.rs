@@ -8,21 +8,27 @@ use super::stroke::DashPattern;
 #[derive(Clone)]
 pub struct Path(Vec<bezier_rs::Subpath<ManipulatorGroupId>>);
 
-// TODO: port ctors from bezier_rs::Subpath
-
 impl Path {
     pub fn concat<I: IntoIterator<Item = Self>>(iter: I) -> Self {
         Self::from_iter(iter.into_iter().flat_map(|path| path.0))
     }
 
-    pub fn subpaths(&self) -> &[bezier_rs::Subpath<ManipulatorGroupId>] {
-        &self.0
+    pub fn iter(&self) -> std::slice::Iter<'_, bezier_rs::Subpath<ManipulatorGroupId>> {
+        self.0.iter()
     }
 
     pub fn bounding_box(&self) -> Option<[glam::DVec2; 2]> {
-        self.subpaths()
-            .iter()
+        self.iter()
             .map(|subpath| subpath.bounding_box())
+            // .map(|bounding_box| {
+            //     // handle glam version mismatch
+            //     bounding_box.map(|[min, max]| {
+            //         [
+            //             glam::DVec2::new(min.x, min.y),
+            //             glam::DVec2::new(max.x, max.y),
+            //         ]
+            //     })
+            // })
             .fold(None, |bounding_box_acc, bounding_box| {
                 match (bounding_box_acc, bounding_box) {
                     (Some([min_acc, max_acc]), Some([min, max])) => {
@@ -36,7 +42,7 @@ impl Path {
     }
 
     pub fn transform(&self, transform: glam::DAffine2) -> Self {
-        Self::from_iter(self.subpaths().into_iter().map(|subpath| {
+        Self::from_iter(self.iter().map(|subpath| {
             let mut subpath = subpath.clone();
             subpath.apply_transform(transform);
             subpath
@@ -44,7 +50,7 @@ impl Path {
     }
 
     pub fn dash(&self, pattern: &DashPattern) -> Self {
-        Self::from_iter(self.subpaths().into_iter().flat_map(|subpath| {
+        Self::from_iter(self.iter().flat_map(|subpath| {
             let total_length = subpath.length(None);
             let phase = pattern.phase / total_length;
             let mut alphas = pattern
@@ -146,7 +152,7 @@ impl Path {
             lyon::geom::point(x as f32, y as f32)
         }
 
-        lyon::path::Path::from_iter(self.subpaths().iter().flat_map(|subpath| {
+        lyon::path::Path::from_iter(self.iter().flat_map(|subpath| {
             let begin_point = convert_point(subpath[0].anchor.into());
             let end_point = convert_point(subpath[subpath.len() - 1].anchor.into());
             std::iter::once(lyon::path::PathEvent::Begin { at: begin_point })

@@ -11,10 +11,10 @@ use super::config::TypstConfig;
 
 // pub static WORLD: LazyLock<World> = LazyLock::new(|| World::new());
 
-pub(crate) struct World {
+pub struct World {
     // cache_path: LazyLock<PathBuf>,
-    pub(crate) style_config: StyleConfig,
-    pub(crate) typst_world: TypstWorld,
+    pub style_config: StyleConfig,
+    pub typst_world: TypstWorld,
 }
 
 impl World {
@@ -60,7 +60,7 @@ impl World {
 
 // Modified from typst/lib.rs, typst-cli/src/world.rs
 
-pub(crate) struct TypstWorld {
+pub struct TypstWorld {
     root: PathBuf,
     library: typst::utils::LazyHash<typst::Library>,
     book: typst::utils::LazyHash<typst::text::FontBook>,
@@ -121,11 +121,11 @@ impl TypstWorld {
     //     self.main_id
     // }
 
-    pub(crate) fn source(&self, text: String) -> typst::syntax::Source {
+    pub fn source(&self, text: String) -> typst::syntax::Source {
         typst::syntax::Source::new(self.main_id, text)
     }
 
-    pub(crate) fn document(&self, source: &typst::syntax::Source) -> typst::model::Document {
+    pub fn document(&self, source: &typst::syntax::Source) -> typst::model::Document {
         self.source_slots
             .lock()
             .values_mut()

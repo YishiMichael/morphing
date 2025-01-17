@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use itertools::Itertools;
+use palette::Srgba;
 use ttf_parser::OutlineBuilder;
 
 use super::super::components::fill::Fill;
@@ -45,7 +46,6 @@ struct TypstMobjectToken {
 
 #[derive(Clone)]
 pub struct TypstMobject {
-    // transform: Transform,
     text: String,
     tokens: Vec<TypstMobjectToken>,
 }
@@ -92,7 +92,7 @@ impl TypstMobject {
     fn typst_paint_to_paint(paint: &typst::visualize::Paint, path: &Path) -> Paint {
         match paint {
             typst::visualize::Paint::Solid(color) => Paint {
-                solid: Some(palette::Srgba::from(color.to_vec4())),
+                color: palette::Srgba::from(color.to_vec4()),
                 gradients: Vec::new(),
             },
             typst::visualize::Paint::Gradient(gradient) => {
@@ -121,20 +121,18 @@ impl TypstMobject {
                             .unwrap_or_default();
                         let to = from + (to - from).project_onto(direction);
                         Gradient {
-                            from: from.as_vec2(),
-                            to: to.as_vec2(),
-                            radius_diff: (to - from).length() as f32,
+                            from: nalgebra::Vector2::new(from.x as f32, from.y as f32),
+                            to: nalgebra::Vector2::new(to.x as f32, to.y as f32),
+                            radius_slope: 0.0,
                             radius_quotient: 1.0,
-                            radial_stops: Some(
-                                linear_gradient
-                                    .stops
-                                    .iter()
-                                    .map(|(color, ratio)| {
-                                        (ratio.get() as f32, palette::Srgba::from(color.to_vec4()))
-                                    })
-                                    .collect(),
-                            ),
-                            angular_stops: None,
+                            radial_stops: linear_gradient
+                                .stops
+                                .iter()
+                                .map(|(color, ratio)| {
+                                    (ratio.get() as f32, palette::Srgba::from(color.to_vec4()))
+                                })
+                                .collect(),
+                            angular_stops: Vec::new(),
                         }
                     }
                     typst::visualize::Gradient::Radial(radial_gradient) => {
@@ -151,52 +149,51 @@ impl TypstMobject {
                         let direction = (center - focal_center)
                             .try_normalize()
                             .unwrap_or(glam::DVec2::new(1.0, 0.0));
+                        let from = focal_center + focal_radius * direction;
+                        let to = center + radius * direction;
                         Gradient {
-                            from: (focal_center + focal_radius * direction).as_vec2(),
-                            to: (center + radius * direction).as_vec2(),
-                            radius_diff: (radius - focal_radius) as f32,
+                            from: nalgebra::Vector2::new(from.x as f32, from.y as f32),
+                            to: nalgebra::Vector2::new(to.x as f32, to.y as f32),
+                            radius_slope: ((to - from).length() / (radius - focal_radius)) as f32,
                             radius_quotient: (radius / focal_radius) as f32,
-                            radial_stops: Some(
-                                radial_gradient
-                                    .stops
-                                    .iter()
-                                    .map(|(color, ratio)| {
-                                        (ratio.get() as f32, palette::Srgba::from(color.to_vec4()))
-                                    })
-                                    .collect(),
-                            ),
-                            angular_stops: None,
+                            radial_stops: radial_gradient
+                                .stops
+                                .iter()
+                                .map(|(color, ratio)| {
+                                    (ratio.get() as f32, palette::Srgba::from(color.to_vec4()))
+                                })
+                                .collect(),
+                            angular_stops: Vec::new(),
                         }
                     }
                     typst::visualize::Gradient::Conic(conic_gradient) => {
-                        let center = glam::DVec2 {
+                        let from = glam::DVec2 {
                             x: conic_gradient.center.x.get(),
                             y: conic_gradient.center.y.get(),
                         };
-                        let direction = glam::DVec2 {
-                            x: conic_gradient.angle.cos(),
-                            y: conic_gradient.angle.sin(),
-                        };
+                        let to = from
+                            + glam::DVec2 {
+                                x: conic_gradient.angle.cos(),
+                                y: conic_gradient.angle.sin(),
+                            };
                         Gradient {
-                            from: center.as_vec2(),
-                            to: (center + direction).as_vec2(),
-                            radius_diff: 1.0,
+                            from: nalgebra::Vector2::new(from.x as f32, from.y as f32),
+                            to: nalgebra::Vector2::new(to.x as f32, to.y as f32),
+                            radius_slope: 0.0,
                             radius_quotient: 0.0,
-                            radial_stops: None,
-                            angular_stops: Some(
-                                conic_gradient
-                                    .stops
-                                    .iter()
-                                    .map(|(color, ratio)| {
-                                        (ratio.get() as f32, palette::Srgba::from(color.to_vec4()))
-                                    })
-                                    .collect(),
-                            ),
+                            radial_stops: Vec::new(),
+                            angular_stops: conic_gradient
+                                .stops
+                                .iter()
+                                .map(|(color, ratio)| {
+                                    (ratio.get() as f32, palette::Srgba::from(color.to_vec4()))
+                                })
+                                .collect(),
                         }
                     }
                 };
                 Paint {
-                    solid: None,
+                    color: Srgba::new(1.0, 1.0, 1.0, 1.0),
                     gradients: vec![gradient],
                 }
             }
@@ -442,7 +439,9 @@ impl TypstMobject {
 
 impl Mobject for TypstMobject {
     fn render(&self, renderer: &Renderer) {
-        println!("Rendered Typst!");
+        self.tokens
+            .iter()
+            .for_each(|TypstMobjectToken { mobject, .. }| mobject.render(renderer));
     }
 }
 

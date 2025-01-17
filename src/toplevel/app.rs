@@ -191,7 +191,7 @@ impl winit::application::ApplicationHandler for App {
                         ),
                 )
                 .unwrap();
-            self.renderer = Some(pollster::block_on(Renderer::new(window)));
+            self.renderer = Some(Renderer::new(window).unwrap());
             self.progress.set_base_speed(self.window_config.base_speed);
             self.progress.set_speed_level(|_| 1);
         }
