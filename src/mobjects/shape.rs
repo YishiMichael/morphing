@@ -1,7 +1,11 @@
+use crate::components::component::Component;
+use crate::components::component::ComponentShaderTypes;
+use std::sync::OnceLock;
+
 use encase::ShaderType;
 use lyon::tessellation::{
     BuffersBuilder, FillOptions, FillVertex, FillVertexConstructor, StrokeOptions, StrokeVertex,
-    StrokeVertexConstructor, VertexBuffers,
+    StrokeVertexConstructor,
 };
 use palette::WithAlpha;
 use wgpu::util::DeviceExt;
@@ -15,8 +19,7 @@ use super::super::components::fill::Fill;
 use super::super::components::path::Path;
 use super::super::components::stroke::Stroke;
 use super::super::components::transform::Transform;
-use super::super::toplevel::renderer::Renderer;
-use super::mobject::{Mobject, MobjectBuilder};
+use super::mobject::{Mobject, MobjectBuilder, MobjectRealization};
 
 #[derive(Clone)]
 pub struct ShapeMobject {
@@ -51,27 +54,40 @@ impl StrokeVertexConstructor<Vertex> for VertexConstructor {
     }
 }
 
-impl Mobject for ShapeMobject {
-    fn render(&self, renderer: &Renderer) {
-        // pipeline
-        let device = &renderer.device;
+impl MobjectRealization for Vec<PlanarTrianglesRealization> {
+    fn render(&self, queue: &wgpu::Queue, render_pass: &mut wgpu::RenderPass) {
+        for planar_triangles_realization in self {
+            planar_triangles_realization.render(queue, render_pass);
+        }
+    }
+}
 
-        let transform_bind_group_layout = TransformShaderTypes::create_bind_group_layout(&device);
-        let paint_bind_group_layout = PaintShaderTypes::create_bind_group_layout(&device);
-        let camera_bind_group_layout = CameraShaderTypes::create_bind_group_layout(&device);
-        let pipeline = {
+static PLANAR_TRNANGLES_PIPELINE: OnceLock<wgpu::RenderPipeline> = OnceLock::new();
+
+pub(crate) struct PlanarTrianglesRealization {
+    pipeline: &'static wgpu::RenderPipeline,
+    transform_bind_group: wgpu::BindGroup,
+    paint_bind_group: wgpu::BindGroup,
+    camera_bind_group: wgpu::BindGroup,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+}
+
+impl PlanarTrianglesRealization {
+    fn pipeline(device: &wgpu::Device) -> &'static wgpu::RenderPipeline {
+        PLANAR_TRNANGLES_PIPELINE.get_or_init(|| {
             let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
                 source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
-                    "../shaders/shape.wgsl"
+                    "../shaders/planar_triangles.wgsl"
                 ))),
             });
             let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
                 bind_group_layouts: &[
-                    &transform_bind_group_layout,
-                    &paint_bind_group_layout,
-                    &camera_bind_group_layout,
+                    TransformShaderTypes::bind_group_layout(device),
+                    PaintShaderTypes::bind_group_layout(device),
+                    CameraShaderTypes::bind_group_layout(device),
                 ],
                 push_constant_ranges: &[],
             });
@@ -135,191 +151,139 @@ impl Mobject for ShapeMobject {
                 multiview: None,
                 cache: None,
             })
-        };
+        })
+    }
+}
 
-        fn render_half(
-            transform_bind_group: &wgpu::BindGroup,
-            paint_bind_group: &wgpu::BindGroup,
-            camera_bind_group: &wgpu::BindGroup,
-            vertex_buffers: VertexBuffers<Vertex, u32>,
-            pipeline: &wgpu::RenderPipeline,
-            renderer: &Renderer,
-        ) {
-            let vertex_buffer = {
-                let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
-                buffer.write(&vertex_buffers.vertices).unwrap();
-                renderer
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+impl MobjectRealization for PlanarTrianglesRealization {
+    fn render(&self, _queue: &wgpu::Queue, render_pass: &mut wgpu::RenderPass) {
+        render_pass.set_pipeline(self.pipeline);
+        render_pass.set_bind_group(0, &self.transform_bind_group, &[]);
+        render_pass.set_bind_group(1, &self.paint_bind_group, &[]);
+        render_pass.set_bind_group(2, &self.camera_bind_group, &[]);
+        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        render_pass.draw(0..3, 0..1);
+    }
+}
+
+impl Mobject for ShapeMobject {
+    type Realization = Vec<PlanarTrianglesRealization>;
+
+    fn realize(&self, device: &wgpu::Device) -> Self::Realization {
+        std::iter::empty()
+            .chain(self.fill.iter().map(|fill| {
+                let lyon_path = self.path.to_lyon_path();
+                let mut vertex_buffers: lyon::tessellation::VertexBuffers<Vertex, u32> =
+                    lyon::tessellation::VertexBuffers::new();
+                let mut vertex_builder =
+                    BuffersBuilder::new(&mut vertex_buffers, VertexConstructor);
+                let mut tessellator = lyon::tessellation::FillTessellator::new();
+                assert!(tessellator
+                    .tessellate(lyon_path.iter(), &fill.options, &mut vertex_builder)
+                    .is_ok());
+                (vertex_buffers, &fill.paint)
+            }))
+            .chain(self.stroke.iter().map(|stroke| {
+                let lyon_path = if let Some(dash_pattern) = stroke.dash_pattern.as_ref() {
+                    self.path.dash(dash_pattern).to_lyon_path()
+                } else {
+                    self.path.to_lyon_path()
+                };
+                let mut vertex_buffers: lyon::tessellation::VertexBuffers<Vertex, u32> =
+                    lyon::tessellation::VertexBuffers::new();
+                let mut vertex_builder =
+                    BuffersBuilder::new(&mut vertex_buffers, VertexConstructor);
+                let mut tessellator = lyon::tessellation::StrokeTessellator::new();
+                assert!(tessellator
+                    .tessellate(lyon_path.iter(), &stroke.options, &mut vertex_builder)
+                    .is_ok());
+                (vertex_buffers, &stroke.paint)
+            }))
+            .map(|(vertex_buffers, paint)| {
+                let pipeline = PlanarTrianglesRealization::pipeline(device);
+
+                // buffers
+                let transform_shader_types = self.transform.to_shader_types();
+                let transform_buffers = transform_shader_types.initialize_buffers(device);
+                let transform_bind_group =
+                    TransformShaderTypes::bind_group_from_buffers(device, &transform_buffers);
+
+                let camera_shader_types = Camera::default().to_shader_types();
+                let camera_buffers = camera_shader_types.initialize_buffers(device);
+                let camera_bind_group =
+                    CameraShaderTypes::bind_group_from_buffers(device, &camera_buffers);
+
+                let paint_shader_types = paint.to_shader_types();
+                let paint_buffers = paint_shader_types.initialize_buffers(device);
+                let paint_bind_group =
+                    PaintShaderTypes::bind_group_from_buffers(device, &paint_buffers);
+
+                // TODO
+                let vertex_buffer = {
+                    let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
+                    buffer.write(&vertex_buffers.vertices).unwrap();
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: None,
                         contents: buffer.as_ref(),
                         usage: wgpu::BufferUsages::VERTEX,
                     })
-            };
-            let index_buffer = {
-                let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
-                buffer.write(&vertex_buffers.indices).unwrap();
-                renderer
-                    .device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                };
+                let index_buffer = {
+                    let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
+                    buffer.write(&vertex_buffers.indices).unwrap();
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: None,
                         contents: buffer.as_ref(),
                         usage: wgpu::BufferUsages::INDEX,
                     })
-            };
+                }; // TODO
 
-            let mut encoder = renderer
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            let frame = renderer.surface.get_current_texture().unwrap();
-            let frame_view = frame
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-            {
-                let mut frame_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &frame_view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-                frame_pass.set_pipeline(pipeline);
-                frame_pass.set_bind_group(0, transform_bind_group, &[]);
-                frame_pass.set_bind_group(1, paint_bind_group, &[]);
-                frame_pass.set_bind_group(2, camera_bind_group, &[]);
-                frame_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                frame_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-                frame_pass.draw(0..3, 0..1);
-            }
-
-            renderer.queue.submit(Some(encoder.finish()));
-            frame.present();
-        }
-
-        // buffers
-        let transform_shader_types = self.transform.to_shader_types();
-        let transform_buffers = transform_shader_types.create_buffers_init(device);
-        let transform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &transform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: transform_buffers.transform_uniform.as_entire_binding(),
-            }],
-        });
-
-        let camera_shader_types = Camera::default().to_shader_types();
-        let camera_buffers = camera_shader_types.create_buffers_init(device);
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffers.camera_uniform.as_entire_binding(),
-            }],
-        });
-
-        if let Some(fill) = self.fill.as_ref() {
-            let paint_shader_types = fill.paint.to_shader_types();
-            let paint_buffers = paint_shader_types.create_buffers_init(device);
-            let paint_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &paint_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: paint_buffers.paint_uniform.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: paint_buffers.gradients_storage.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: paint_buffers.radial_stops_storage.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: paint_buffers.angular_stops_storage.as_entire_binding(),
-                    },
-                ],
-            });
-
-            let lyon_path = self.path.to_lyon_path();
-            let mut vertex_buffers: lyon::tessellation::VertexBuffers<Vertex, u32> =
-                lyon::tessellation::VertexBuffers::new();
-            let mut vertex_builder = BuffersBuilder::new(&mut vertex_buffers, VertexConstructor);
-            let mut tessellator = lyon::tessellation::FillTessellator::new();
-            assert!(tessellator
-                .tessellate(lyon_path.iter(), &fill.options, &mut vertex_builder)
-                .is_ok());
-
-            render_half(
-                &transform_bind_group,
-                &paint_bind_group,
-                &camera_bind_group,
-                vertex_buffers,
-                &pipeline,
-                renderer,
-            );
-        }
-
-        if let Some(stroke) = self.stroke.as_ref() {
-            let paint_shader_types = stroke.paint.to_shader_types();
-            let paint_buffers = paint_shader_types.create_buffers_init(device);
-            let paint_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &paint_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: paint_buffers.paint_uniform.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: paint_buffers.gradients_storage.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: paint_buffers.radial_stops_storage.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: paint_buffers.angular_stops_storage.as_entire_binding(),
-                    },
-                ],
-            });
-
-            let lyon_path = if let Some(dash_pattern) = stroke.dash_pattern.as_ref() {
-                self.path.dash(dash_pattern).to_lyon_path()
-            } else {
-                self.path.to_lyon_path()
-            };
-            let mut vertex_buffers: lyon::tessellation::VertexBuffers<Vertex, u32> =
-                lyon::tessellation::VertexBuffers::new();
-            let mut vertex_builder = BuffersBuilder::new(&mut vertex_buffers, VertexConstructor);
-            let mut tessellator = lyon::tessellation::StrokeTessellator::new();
-            assert!(tessellator
-                .tessellate(lyon_path.iter(), &stroke.options, &mut vertex_builder)
-                .is_ok());
-
-            render_half(
-                &transform_bind_group,
-                &paint_bind_group,
-                &camera_bind_group,
-                vertex_buffers,
-                &pipeline,
-                renderer,
-            );
-        }
+                PlanarTrianglesRealization {
+                    pipeline,
+                    transform_bind_group,
+                    paint_bind_group,
+                    camera_bind_group,
+                    vertex_buffer,
+                    index_buffer,
+                }
+            })
+            .collect()
     }
+
+    // let mut encoder = renderer
+    //     .device
+    //     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    // let frame = renderer.surface.get_current_texture().unwrap();
+    // let frame_view = frame
+    //     .texture
+    //     .create_view(&wgpu::TextureViewDescriptor::default());
+    // {
+    //     let mut frame_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    //         label: None,
+    //         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+    //             view: &frame_view,
+    //             resolve_target: None,
+    //             ops: wgpu::Operations {
+    //                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+    //                 store: wgpu::StoreOp::Store,
+    //             },
+    //         })],
+    //         depth_stencil_attachment: None,
+    //         timestamp_writes: None,
+    //         occlusion_query_set: None,
+    //     });
+    //     frame_pass.set_pipeline(pipeline);
+    //     frame_pass.set_bind_group(0, transform_bind_group, &[]);
+    //     frame_pass.set_bind_group(1, paint_bind_group, &[]);
+    //     frame_pass.set_bind_group(2, camera_bind_group, &[]);
+    //     frame_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+    //     frame_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+    //     frame_pass.draw(0..3, 0..1);
+    // }
+
+    // renderer.queue.submit(Some(encoder.finish()));
+    // frame.present();
 }
 
 // TODO: port ctors from bezier_rs::Subpath

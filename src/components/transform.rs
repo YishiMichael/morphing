@@ -1,8 +1,12 @@
+use std::sync::OnceLock;
+
 use encase::ShaderType;
 use geometric_algebra::ppga3d as pga;
 use geometric_algebra::One;
 use wgpu::util::DeviceExt;
 
+use super::component::Component;
+use super::component::ComponentShaderTypes;
 use super::paint::QueueWriteBufferMutWrapper;
 
 #[derive(Clone)]
@@ -15,18 +19,20 @@ pub(crate) struct TransformShaderTypes {
     transform_uniform: TransformUniform,
 }
 
-pub(crate) struct TransformBuffers {
-    pub(crate) transform_uniform: wgpu::Buffer, // TODO: remove pub(crate) vis
+struct TransformBuffers {
+    transform_uniform: wgpu::Buffer,
 }
 
 #[derive(ShaderType)]
-pub(crate) struct TransformUniform {
+struct TransformUniform {
     motor: nalgebra::Matrix4x2<f32>,
     scale: f32,
 }
 
-impl Transform {
-    pub(crate) fn to_shader_types(&self) -> TransformShaderTypes {
+impl Component for Transform {
+    type ShaderTypes = TransformShaderTypes;
+
+    fn to_shader_types(&self) -> Self::ShaderTypes {
         TransformShaderTypes {
             transform_uniform: TransformUniform {
                 motor: nalgebra::Matrix4x2::from_column_slice(&Into::<[f32; 8]>::into(self.motor)), // transpose?
@@ -36,27 +42,55 @@ impl Transform {
     }
 }
 
-impl TransformShaderTypes {
-    pub(crate) fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // pub(VERTEX) @binding(0) var<uniform> u_transform: TransformUniform;
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(TransformUniform::min_size()),
+static TRANSFORM_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+
+impl ComponentShaderTypes for TransformShaderTypes {
+    type Buffers = TransformBuffers;
+
+    fn bind_group_layout(device: &wgpu::Device) -> &'static wgpu::BindGroupLayout {
+        TRANSFORM_BIND_GROUP_LAYOUT.get_or_init(|| {
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[
+                    // pub(VERTEX) @binding(0) var<uniform> u_transform: TransformUniform;
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(TransformUniform::min_size()),
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
+                ],
+            })
         })
     }
 
-    pub(crate) fn create_buffers_init(&self, device: &wgpu::Device) -> TransformBuffers {
+    fn bind_group_from_buffers(device: &wgpu::Device, buffers: &Self::Buffers) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: TransformShaderTypes::bind_group_layout(device),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffers.transform_uniform.as_entire_binding(),
+            }],
+        })
+    }
+
+    fn new_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
+        TransformBuffers {
+            transform_uniform: device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.transform_uniform.size().get(),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+        }
+    }
+
+    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
         TransformBuffers {
             transform_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
@@ -70,18 +104,7 @@ impl TransformShaderTypes {
         }
     }
 
-    pub(crate) fn create_buffers(&self, device: &wgpu::Device) -> TransformBuffers {
-        TransformBuffers {
-            transform_uniform: device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.transform_uniform.size().get(),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-        }
-    }
-
-    pub(crate) fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut TransformBuffers) {
+    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers) {
         {
             let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
                 queue

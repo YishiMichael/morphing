@@ -1,4 +1,5 @@
 pub mod camera;
+pub mod component;
 pub mod fill;
 pub mod interpolate;
 pub mod paint;

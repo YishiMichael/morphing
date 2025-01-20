@@ -1,4 +1,3 @@
-use super::super::toplevel::renderer::Renderer;
 use super::super::toplevel::world::World;
 
 // pub trait VectorSpace: Clone + AddAssign + MulAssign<f32> {}
@@ -9,7 +8,13 @@ pub trait Mobject: 'static + Clone {
     // type Diff: VectorSpace;
 
     // fn apply_diff(&self, diff: Self::Diff) -> Self;
-    fn render(&self, renderer: &Renderer);
+    type Realization: MobjectRealization;
+
+    fn realize(&self, device: &wgpu::Device) -> Self::Realization;
+}
+
+pub trait MobjectRealization: 'static {
+    fn render(&self, queue: &wgpu::Queue, render_pass: &mut wgpu::RenderPass);
 }
 
 pub trait MobjectBuilder {
@@ -17,6 +22,8 @@ pub trait MobjectBuilder {
 
     fn instantiate(self, world: &World) -> Self::Instantiation;
 }
+
+// TODO: alive container morphisms
 
 // #[derive(Clone)]
 // struct LazyDiffField<T>(Option<T>);
@@ -58,15 +65,35 @@ pub trait MobjectBuilder {
 //     fn mul_assign(&mut self, _rhs: f32) {}
 // }
 
-#[derive(Clone)]
-pub struct EmptyMobject;
+// #[derive(Clone)]
+// pub struct EmptyMobject;
 
-impl Mobject for EmptyMobject {
+impl Mobject for () {
     // type Diff = EmptyMobjectDiff;
 
     // fn apply_diff(&self, _diff: Self::Diff) -> Self {
     //     Self
     // }
 
-    fn render(&self, _renderer: &Renderer) {}
+    type Realization = ();
+
+    fn realize(&self, _device: &wgpu::Device) -> Self::Realization {
+        ()
+    }
 }
+
+impl MobjectBuilder for () {
+    type Instantiation = ();
+
+    fn instantiate(self, _world: &World) -> Self::Instantiation {
+        ()
+    }
+}
+
+impl MobjectRealization for () {
+    fn render(&self, _queue: &wgpu::Queue, _render_pass: &mut wgpu::RenderPass) {}
+}
+
+// trait HomogeneousMobject<M> where M: Mobject {
+//     fn
+// }

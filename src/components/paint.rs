@@ -1,5 +1,9 @@
+use std::sync::OnceLock;
+
 use encase::ShaderType;
 use wgpu::util::DeviceExt;
+
+use super::component::{Component, ComponentShaderTypes};
 
 #[derive(Clone)]
 pub struct Paint {
@@ -17,6 +21,13 @@ pub struct Gradient {
     pub angular_stops: Vec<(f32, palette::Srgba<f32>)>,
 }
 
+struct PaintBuffers {
+    paint_uniform: wgpu::Buffer,
+    gradients_storage: wgpu::Buffer,
+    radial_stops_storage: wgpu::Buffer,
+    angular_stops_storage: wgpu::Buffer,
+}
+
 pub(crate) struct PaintShaderTypes {
     paint_uniform: PaintUniform,
     gradients_storage: Vec<GradientStorage>,
@@ -24,15 +35,8 @@ pub(crate) struct PaintShaderTypes {
     angular_stops_storage: Vec<GradientStopStorage>,
 }
 
-pub(crate) struct PaintBuffers {
-    pub(crate) paint_uniform: wgpu::Buffer,
-    pub(crate) gradients_storage: wgpu::Buffer,
-    pub(crate) radial_stops_storage: wgpu::Buffer,
-    pub(crate) angular_stops_storage: wgpu::Buffer,
-}
-
 #[derive(ShaderType)]
-pub(crate) struct PaintUniform {
+struct PaintUniform {
     color: nalgebra::Vector4<f32>,
 }
 
@@ -68,8 +72,10 @@ impl encase::internal::BufferMut for QueueWriteBufferMutWrapper<'_> {
     }
 }
 
-impl Paint {
-    pub(crate) fn to_shader_types(&self) -> PaintShaderTypes {
+impl Component for Paint {
+    type ShaderTypes = PaintShaderTypes;
+
+    fn to_shader_types(&self) -> Self::ShaderTypes {
         #[inline]
         fn convert_color(color: palette::Srgba) -> nalgebra::Vector4<f32> {
             let (r, g, b, a) = color.into_components();
@@ -139,60 +145,120 @@ impl Paint {
     }
 }
 
-impl PaintShaderTypes {
-    pub(crate) fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+static PAINT_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+
+impl ComponentShaderTypes for PaintShaderTypes {
+    type Buffers = PaintBuffers;
+
+    fn bind_group_layout(device: &wgpu::Device) -> &'static wgpu::BindGroupLayout {
+        PAINT_BIND_GROUP_LAYOUT.get_or_init(|| {
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[
+                    // pub(FRAGMENT) @binding(0) var<uniform> u_paint: PaintUniform;
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(PaintUniform::min_size()),
+                        },
+                        count: None,
+                    },
+                    // pub(FRAGMENT) @binding(1) var<storage> s_gradients: array<GradientStorage>;
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(GradientStorage::min_size()),
+                        },
+                        count: None,
+                    },
+                    // pub(FRAGMENT) @binding(2) var<storage> s_radial_stops: array<GradientStopStorage>;
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(GradientStopStorage::min_size()),
+                        },
+                        count: None,
+                    },
+                    // pub(FRAGMENT) @binding(3) var<storage> s_angular_stops: array<GradientStopStorage>;
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(GradientStopStorage::min_size()),
+                        },
+                        count: None,
+                    },
+                ],
+            })
+        })
+    }
+
+    fn bind_group_from_buffers(device: &wgpu::Device, buffers: &Self::Buffers) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
+            layout: PaintShaderTypes::bind_group_layout(device),
             entries: &[
-                // pub(FRAGMENT) @binding(0) var<uniform> u_paint: PaintUniform;
-                wgpu::BindGroupLayoutEntry {
+                wgpu::BindGroupEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(PaintUniform::min_size()),
-                    },
-                    count: None,
+                    resource: buffers.paint_uniform.as_entire_binding(),
                 },
-                // pub(FRAGMENT) @binding(1) var<storage> s_gradients: array<GradientStorage>;
-                wgpu::BindGroupLayoutEntry {
+                wgpu::BindGroupEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GradientStorage::min_size()),
-                    },
-                    count: None,
+                    resource: buffers.gradients_storage.as_entire_binding(),
                 },
-                // pub(FRAGMENT) @binding(2) var<storage> s_radial_stops: array<GradientStopStorage>;
-                wgpu::BindGroupLayoutEntry {
+                wgpu::BindGroupEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GradientStopStorage::min_size()),
-                    },
-                    count: None,
+                    resource: buffers.radial_stops_storage.as_entire_binding(),
                 },
-                // pub(FRAGMENT) @binding(3) var<storage> s_angular_stops: array<GradientStopStorage>;
-                wgpu::BindGroupLayoutEntry {
+                wgpu::BindGroupEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(GradientStopStorage::min_size()),
-                    },
-                    count: None,
+                    resource: buffers.angular_stops_storage.as_entire_binding(),
                 },
             ],
         })
     }
 
-    pub(crate) fn create_buffers_init(&self, device: &wgpu::Device) -> PaintBuffers {
+    fn new_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
+        PaintBuffers {
+            paint_uniform: device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.paint_uniform.size().get(),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            gradients_storage: device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.gradients_storage.size().get(),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            radial_stops_storage: device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.radial_stops_storage.size().get(),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            angular_stops_storage: device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: self.angular_stops_storage.size().get(),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+        }
+    }
+
+    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
         PaintBuffers {
             paint_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
@@ -233,36 +299,7 @@ impl PaintShaderTypes {
         }
     }
 
-    pub(crate) fn create_buffers(&self, device: &wgpu::Device) -> PaintBuffers {
-        PaintBuffers {
-            paint_uniform: device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.paint_uniform.size().get(),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            gradients_storage: device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.gradients_storage.size().get(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            radial_stops_storage: device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.radial_stops_storage.size().get(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            angular_stops_storage: device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.angular_stops_storage.size().get(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-        }
-    }
-
-    pub(crate) fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut PaintBuffers) {
+    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers) {
         {
             let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
                 queue

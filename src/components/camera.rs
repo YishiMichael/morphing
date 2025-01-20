@@ -1,9 +1,13 @@
+use std::sync::OnceLock;
+
 use encase::ShaderType;
 use geometric_algebra::ppga3d as pga;
 use geometric_algebra::GeometricProduct;
 use geometric_algebra::One;
 use wgpu::util::DeviceExt;
 
+use super::component::Component;
+use super::component::ComponentShaderTypes;
 use super::paint::QueueWriteBufferMutWrapper;
 
 #[derive(Clone)]
@@ -16,18 +20,20 @@ pub(crate) struct CameraShaderTypes {
     camera_uniform: CameraUniform,
 }
 
-pub(crate) struct CameraBuffers {
-    pub(crate) camera_uniform: wgpu::Buffer,
+struct CameraBuffers {
+    camera_uniform: wgpu::Buffer,
 }
 
 #[derive(ShaderType)]
-pub(crate) struct CameraUniform {
+struct CameraUniform {
     view_motor: nalgebra::Matrix2x4<f32>,
     projection_matrix: nalgebra::Matrix4<f32>,
 }
 
-impl Camera {
-    pub(crate) fn to_shader_types(&self) -> CameraShaderTypes {
+impl Component for Camera {
+    type ShaderTypes = CameraShaderTypes;
+
+    fn to_shader_types(&self) -> Self::ShaderTypes {
         CameraShaderTypes {
             camera_uniform: CameraUniform {
                 view_motor: nalgebra::Matrix2x4::from_column_slice(&Into::<[f32; 8]>::into(
@@ -39,27 +45,44 @@ impl Camera {
     }
 }
 
-impl CameraShaderTypes {
-    pub(crate) fn create_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[
-                // pub(VERTEX) @binding(0) var<uniform> u_camera: CameraUniform;
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: Some(CameraUniform::min_size()),
+static CAMERA_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+
+impl ComponentShaderTypes for CameraShaderTypes {
+    type Buffers = CameraBuffers;
+
+    fn bind_group_layout(device: &wgpu::Device) -> &'static wgpu::BindGroupLayout {
+        CAMERA_BIND_GROUP_LAYOUT.get_or_init(|| {
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[
+                    // pub(VERTEX) @binding(0) var<uniform> u_camera: CameraUniform;
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(CameraUniform::min_size()),
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-            ],
+                ],
+            })
         })
     }
 
-    pub(crate) fn create_buffers_init(&self, device: &wgpu::Device) -> CameraBuffers {
+    fn bind_group_from_buffers(device: &wgpu::Device, buffers: &Self::Buffers) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: CameraShaderTypes::bind_group_layout(device),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffers.camera_uniform.as_entire_binding(),
+            }],
+        })
+    }
+
+    fn new_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
         CameraBuffers {
             camera_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
@@ -73,7 +96,7 @@ impl CameraShaderTypes {
         }
     }
 
-    pub(crate) fn create_buffers(&self, device: &wgpu::Device) -> CameraBuffers {
+    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
         CameraBuffers {
             camera_uniform: device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
@@ -84,7 +107,7 @@ impl CameraShaderTypes {
         }
     }
 
-    pub(crate) fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut CameraBuffers) {
+    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers) {
         {
             let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
                 queue

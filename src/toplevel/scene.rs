@@ -7,13 +7,13 @@ use super::config::Config;
 use super::renderer::Renderer;
 use super::world::World;
 
-pub trait Present: 'static {
+pub trait Presentation: 'static {
     fn present(&self, time: f32, time_interval: Range<f32>, renderer: &Renderer);
 }
 
 pub(crate) struct PresentationCollection {
     time: Arc<f32>,
-    presentations: Vec<(Range<Arc<f32>>, Box<dyn Present>)>,
+    presentations: Vec<(Range<f32>, Box<dyn Presentation>)>,
 }
 
 impl PresentationCollection {
@@ -29,10 +29,9 @@ impl PresentationCollection {
     }
 
     pub(crate) fn present_all(&self, time: f32, renderer: &Renderer) {
-        for (time_range, presentation) in &self.presentations {
-            let time_range = *time_range.start..*time_range.end;
-            if time_range.contains(&time) {
-                presentation.present(time, time_range, renderer);
+        for (time_interval, presentation) in &self.presentations {
+            if time_interval.contains(&time) {
+                presentation.present(time, time_interval.clone(), renderer);
             }
         }
     }
@@ -65,9 +64,10 @@ impl<'w> Supervisor<'w> {
 
     pub(crate) fn archive_presentation<P>(&self, time_interval: Range<Arc<f32>>, presentation: P)
     where
-        P: Present,
+        P: Presentation,
     {
         if !Arc::<f32>::ptr_eq(&time_interval.start, &time_interval.end) {
+            let time_interval = *time_interval.start..*time_interval.end;
             self.presentation_collection
                 .borrow_mut()
                 .presentations
@@ -97,16 +97,16 @@ impl<'w> Supervisor<'w> {
 
 // use super::timelines::timeline::Supervisor;
 
-pub trait Scene: Sized {
+pub trait Scene {
     fn construct(self, supervisor: &Supervisor);
 
-    fn run(self, config: Config) -> anyhow::Result<()> {
-        let world = World::new(config.style, config.typst);
-        let supervisor = Supervisor::new(&world);
-        self.construct(&supervisor);
-        App::instantiate_and_run(supervisor.into_collection(), config.window, config.video)?;
-        Ok(())
-    }
+    // fn run(self, config: Config) -> anyhow::Result<()> {
+    //     let world = World::new(config.style, config.typst);
+    //     let supervisor = Supervisor::new(&world);
+    //     self.construct(&supervisor);
+    //     App::instantiate_and_run(supervisor.into_collection(), config.window, config.video)?;
+    //     Ok(())
+    // }
 }
 
 // #[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]

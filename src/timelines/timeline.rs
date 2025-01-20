@@ -1,17 +1,18 @@
-use super::super::toplevel::scene::Present;
+use super::super::toplevel::scene::Presentation;
 
 pub trait Timeline {
-    type Presentation: Present;
+    type Presentation: Presentation;
 
-    fn presentation(self) -> Self::Presentation;
+    fn presentation(self, device: &wgpu::Device) -> Self::Presentation;
 }
 
 pub mod steady {
     use std::ops::Range;
 
+    use crate::mobjects::mobject::MobjectRealization;
+
     use super::super::super::mobjects::mobject::Mobject;
-    use super::super::super::toplevel::renderer::Renderer;
-    use super::Present;
+    use super::Presentation;
     use super::Timeline;
 
     pub struct SteadyTimeline<M> {
@@ -22,19 +23,31 @@ pub mod steady {
     where
         M: Mobject,
     {
-        type Presentation = Self;
+        type Presentation = SteadyTimelinePresentation<M::Realization>;
 
-        fn presentation(self) -> Self::Presentation {
-            self
+        fn presentation(self, device: &wgpu::Device) -> Self::Presentation {
+            SteadyTimelinePresentation {
+                realization: self.mobject.realize(device),
+            }
         }
     }
 
-    impl<M> Present for SteadyTimeline<M>
+    pub struct SteadyTimelinePresentation<MR> {
+        realization: MR,
+    }
+
+    impl<MR> Presentation for SteadyTimelinePresentation<MR>
     where
-        M: Mobject,
+        MR: MobjectRealization,
     {
-        fn present(&self, _time: f32, _time_interval: Range<f32>, renderer: &Renderer) {
-            self.mobject.render(renderer);
+        fn present(
+            &self,
+            _time: f32,
+            _time_interval: Range<f32>,
+            queue: &wgpu::Queue,
+            render_pass: &mut wgpu::RenderPass,
+        ) {
+            self.mobject.render(queue, render_pass);
         }
     }
 }
@@ -45,7 +58,7 @@ pub mod dynamic {
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::toplevel::renderer::Renderer;
     use super::super::rates::Rate;
-    use super::Present;
+    use super::Presentation;
     use super::Timeline;
 
     pub trait ContentPresent: 'static {
@@ -113,7 +126,7 @@ pub mod dynamic {
         pub(crate) rate: R,
     }
 
-    impl<CP, ME, R> Present for DynamicTimelinePresentation<CP, ME, R>
+    impl<CP, ME, R> Presentation for DynamicTimelinePresentation<CP, ME, R>
     where
         CP: ContentPresent,
         ME: DynamicTimelineMetric,

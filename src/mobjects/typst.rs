@@ -13,10 +13,10 @@ use super::super::components::path::PathBuilder;
 use super::super::components::stroke::DashPattern;
 use super::super::components::stroke::Stroke;
 use super::super::components::transform::Transform;
-use super::super::toplevel::renderer::Renderer;
 use super::super::toplevel::world::World;
 use super::mobject::Mobject;
 use super::mobject::MobjectBuilder;
+use super::shape::PlanarTrianglesRealization;
 use super::shape::ShapeMobject;
 
 pub struct Typst(String);
@@ -68,24 +68,26 @@ impl TypstMobject {
 
     fn typst_path_to_path(path: &typst::visualize::Path) -> Path {
         let mut builder = PathBuilder::new();
-        path.0.iter().for_each(|path_item| match path_item {
-            &typst::visualize::PathItem::MoveTo(start) => {
-                builder.move_to(start.x.to_pt() as f32, start.y.to_pt() as f32)
+        for path_item in &path.0 {
+            match path_item {
+                &typst::visualize::PathItem::MoveTo(start) => {
+                    builder.move_to(start.x.to_pt() as f32, start.y.to_pt() as f32)
+                }
+                &typst::visualize::PathItem::LineTo(end) => {
+                    builder.line_to(end.x.to_pt() as f32, end.y.to_pt() as f32)
+                }
+                &typst::visualize::PathItem::CubicTo(handle_start, handle_end, end) => builder
+                    .curve_to(
+                        handle_start.x.to_pt() as f32,
+                        handle_start.y.to_pt() as f32,
+                        handle_end.x.to_pt() as f32,
+                        handle_end.y.to_pt() as f32,
+                        end.x.to_pt() as f32,
+                        end.y.to_pt() as f32,
+                    ),
+                &typst::visualize::PathItem::ClosePath => builder.close(),
             }
-            &typst::visualize::PathItem::LineTo(end) => {
-                builder.line_to(end.x.to_pt() as f32, end.y.to_pt() as f32)
-            }
-            &typst::visualize::PathItem::CubicTo(handle_start, handle_end, end) => builder
-                .curve_to(
-                    handle_start.x.to_pt() as f32,
-                    handle_start.y.to_pt() as f32,
-                    handle_end.x.to_pt() as f32,
-                    handle_end.y.to_pt() as f32,
-                    end.x.to_pt() as f32,
-                    end.y.to_pt() as f32,
-                ),
-            &typst::visualize::PathItem::ClosePath => builder.close(),
-        });
+        }
         builder.build()
     }
 
@@ -438,10 +440,13 @@ impl TypstMobject {
 }
 
 impl Mobject for TypstMobject {
-    fn render(&self, renderer: &Renderer) {
+    type Realization = Vec<PlanarTrianglesRealization>;
+
+    fn realize(&self, device: &wgpu::Device) -> Self::Realization {
         self.tokens
             .iter()
-            .for_each(|TypstMobjectToken { mobject, .. }| mobject.render(renderer));
+            .flat_map(|TypstMobjectToken { mobject, .. }| mobject.realize(device))
+            .collect()
     }
 }
 

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use itertools::Itertools;
+use pollster::FutureExt;
 
 pub struct Renderer {
     pub(crate) window: Arc<winit::window::Window>,
@@ -19,15 +19,17 @@ impl Renderer {
             ..Default::default()
         });
         let surface = instance.create_surface(window.clone())?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface),
-        }))
-        .ok_or(wgpu::core::instance::RequestAdapterError::NotFound)?;
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                force_fallback_adapter: false,
+                compatible_surface: Some(&surface),
+            })
+            .block_on()
+            .ok_or(wgpu::core::instance::RequestAdapterError::NotFound)?;
 
-        let (device, queue) = pollster::block_on(
-            adapter.request_device(
+        let (device, queue) = (adapter
+            .request_device(
                 &wgpu::DeviceDescriptor {
                     label: None,
                     required_features: [
@@ -41,23 +43,19 @@ impl Renderer {
                     memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,
-            ),
-        )?;
+            )
+            .block_on())?;
 
         let config = {
             let window_size = window.inner_size();
             let wgpu::SurfaceCapabilities {
-                formats,
                 present_modes,
                 alpha_modes,
                 ..
             } = surface.get_capabilities(&adapter);
             wgpu::SurfaceConfiguration {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                format: formats
-                    .into_iter()
-                    .find_or_first(|format| format.is_srgb())
-                    .unwrap(),
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
                 width: window_size.width,
                 height: window_size.height,
                 present_mode: present_modes.into_iter().next().unwrap(),
@@ -78,5 +76,22 @@ impl Renderer {
 
     pub(crate) fn request_redraw(&self) {
         self.window.request_redraw();
+    }
+
+    pub(crate) fn create_texture(&self) -> wgpu::Texture {
+        self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: self.window.inner_size().width,
+                height: self.window.inner_size().height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[wgpu::TextureFormat::Bgra8UnormSrgb],
+        })
     }
 }

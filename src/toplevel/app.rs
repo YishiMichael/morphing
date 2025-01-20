@@ -1,10 +1,19 @@
+use std::ffi::OsStr;
 use std::ops::Range;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Instant;
 
+use pollster::FutureExt;
+
+use super::config::Config;
 use super::config::VideoConfig;
 use super::config::WindowConfig;
 use super::renderer::Renderer;
 use super::scene::PresentationCollection;
+use super::scene::Scene;
 
 struct Progress {
     time_interval: Range<f32>,
@@ -76,37 +85,51 @@ impl Progress {
     }
 }
 
-pub(crate) struct App {
-    window_config: WindowConfig,
-    video_config: VideoConfig,
-    renderer: Option<Renderer>,
+struct AppState {
     progress: Progress,
     control_pressed: bool,
-    presentation_collection: PresentationCollection,
+}
+
+pub struct App {
+    config: Config,
+    scenes: Vec<Box<dyn Scene>>,
+    state: Option<AppState>,
+    window: Option<Arc<winit::window::Window>>,
+    // renderer: OnceLock<Renderer>,
+    // progress: Progress,
+    // control_pressed: bool,
+    // presentation_collection: Option<PresentationCollection>,
 }
 
 impl App {
-    pub(crate) fn instantiate_and_run(
-        presentation_collection: PresentationCollection,
-        window_config: WindowConfig,
-        video_config: VideoConfig,
-    ) -> Result<(), winit::error::EventLoopError> {
-        env_logger::init();
-        let event_loop = winit::event_loop::EventLoop::new().unwrap();
-        let mut app = Self {
-            window_config,
-            video_config,
-            renderer: None,
-            progress: Progress::new(presentation_collection.full_time()),
-            control_pressed: false,
-            presentation_collection,
-        };
-        event_loop.run_app(&mut app)
+    pub fn new(
+        // presentation_collection: PresentationCollection,
+        // window_config: WindowConfig,
+        // video_config: VideoConfig,
+        config: Config,
+    ) -> Self {
+        // env_logger::init();
+        // let event_loop = winit::event_loop::EventLoop::new().unwrap();
+        Self {
+            // window_config,
+            // video_config,
+            config,
+            scenes: Vec::new(),
+            state: None,
+            window: None,
+            // renderer: OnceLock::new(),
+            // progress: Progress::new(presentation_collection.full_time()),
+            // control_pressed: false,
+            // presentation_collection: None,
+        }
+        // event_loop.run_app(&mut app)
     }
+
+    pub fn run<S>(&mut self, scene: S) -> Result<(), winit::error::EventLoopError> {}
 
     fn render(&self, time: f32) {
         self.presentation_collection
-            .present_all(time, self.renderer.as_ref().unwrap())
+            .present_all(time, self.renderer.get().unwrap())
     }
 
     fn on_redraw_requested(&mut self) {
@@ -167,22 +190,53 @@ impl App {
                 "s" if control_pressed => {
                     let time = self.progress.set_speed_level(|_| 0);
                     self.render(time);
-                    let save_path = rfd::FileDialog::new()
+                    if let Some(save_file) = rfd::AsyncFileDialog::new()
                         .add_filter("MP4", &["mp4"])
                         .add_filter("PNG", &["png"])
-                        .save_file();
-                    dbg!(save_path);
+                        .save_file()
+                        .block_on()
+                    {
+                        let path: PathBuf = save_file.into();
+                        match path.extension().map(OsStr::to_str).flatten() {
+                            Some("mp4") => self.save_video(path),
+                            Some("png") => self.save_image(path),
+                            _ => panic!("Unsupported output file extension: {path:?}"),
+                        }
+                    }
                 }
                 _ => {}
             },
             _ => {}
         }
     }
+
+    fn save_video(&self, path: PathBuf) {
+        let mut ffmpeg = essi_ffmpeg::FFmpeg::new()
+            .stderr(Stdio::inherit())
+            .input_with_file("-".into())
+            .done()
+            .output_as_file(path)
+            .done()
+            .start()
+            .unwrap();
+
+        let texture = self.renderer.get().unwrap().create_texture();
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let full_time = self.progress.time_interval.end;
+        let fps = self.video_config.fps;
+        // (0..=(full_time / fps).ceil() as u32).for_each(|i| i as f32 * fps)
+        // ffmpeg.stdin()
+    }
+
+    fn save_image(&self, path: PathBuf) {
+        todo!()
+    }
 }
 
 impl winit::application::ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        if self.renderer.is_none() {
+        self.renderer.get_or_init(|| {
             let window = event_loop
                 .create_window(
                     winit::window::Window::default_attributes()
@@ -191,10 +245,11 @@ impl winit::application::ApplicationHandler for App {
                         ),
                 )
                 .unwrap();
-            self.renderer = Some(Renderer::new(window).unwrap());
+            let renderer = Renderer::new(window).unwrap();
             self.progress.set_base_speed(self.window_config.base_speed);
             self.progress.set_speed_level(|_| 1);
-        }
+            renderer
+        });
     }
 
     fn window_event(
@@ -227,6 +282,6 @@ impl winit::application::ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
-        self.renderer.as_ref().unwrap().request_redraw();
+        self.renderer.get().unwrap().request_redraw();
     }
 }
