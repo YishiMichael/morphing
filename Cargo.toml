@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0.95"
 bezier-rs = "0.4.0"
 comemo = "0.4.0"
+egui = "0.30.0"
 encase = { version = "0.10.0", features = ["nalgebra"] }
 env_logger = "0.11.6"
 essi-ffmpeg = "0.2.0"

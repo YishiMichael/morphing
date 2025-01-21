@@ -1,5 +1,3 @@
-use crate::components::component::Component;
-use crate::components::component::ComponentShaderTypes;
 use std::sync::OnceLock;
 
 use encase::ShaderType;
@@ -10,15 +8,17 @@ use lyon::tessellation::{
 use palette::WithAlpha;
 use wgpu::util::DeviceExt;
 
-use crate::components::camera::{Camera, CameraShaderTypes};
-use crate::components::paint::{Paint, PaintShaderTypes};
-use crate::components::transform::TransformShaderTypes;
-use crate::toplevel::palette::{TEAL, WHITE};
-
+use super::super::components::camera::{Camera, CameraShaderTypes};
+use super::super::components::component::Component;
+use super::super::components::component::ComponentShaderTypes;
 use super::super::components::fill::Fill;
+use super::super::components::paint::{Paint, PaintShaderTypes};
 use super::super::components::path::Path;
 use super::super::components::stroke::Stroke;
 use super::super::components::transform::Transform;
+use super::super::components::transform::TransformShaderTypes;
+use super::super::toplevel::palette::{TEAL, WHITE};
+use super::super::toplevel::world::World;
 use super::mobject::{Mobject, MobjectBuilder, MobjectRealization};
 
 #[derive(Clone)]
@@ -55,9 +55,9 @@ impl StrokeVertexConstructor<Vertex> for VertexConstructor {
 }
 
 impl MobjectRealization for Vec<PlanarTrianglesRealization> {
-    fn render(&self, queue: &wgpu::Queue, render_pass: &mut wgpu::RenderPass) {
+    fn render(&self, render_pass: &mut wgpu::RenderPass) {
         for planar_triangles_realization in self {
-            planar_triangles_realization.render(queue, render_pass);
+            planar_triangles_realization.render(render_pass);
         }
     }
 }
@@ -156,7 +156,7 @@ impl PlanarTrianglesRealization {
 }
 
 impl MobjectRealization for PlanarTrianglesRealization {
-    fn render(&self, _queue: &wgpu::Queue, render_pass: &mut wgpu::RenderPass) {
+    fn render(&self, render_pass: &mut wgpu::RenderPass) {
         render_pass.set_pipeline(self.pipeline);
         render_pass.set_bind_group(0, &self.transform_bind_group, &[]);
         render_pass.set_bind_group(1, &self.paint_bind_group, &[]);
@@ -296,7 +296,7 @@ pub struct Rect {
 impl MobjectBuilder for Rect {
     type Instantiation = ShapeMobject;
 
-    fn instantiate(self, _world: &crate::toplevel::world::World) -> Self::Instantiation {
+    fn instantiate(self, _world: &World) -> Self::Instantiation {
         ShapeMobject {
             transform: Transform::default(),
             path: Path::from_iter(std::iter::once(bezier_rs::Subpath::new_rect(

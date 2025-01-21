@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-pub trait Rate: 'static {
+pub trait Rate {
     fn eval(&self, t: f32) -> f32;
 }
 
@@ -12,26 +12,6 @@ pub trait ApplyRate {
     fn apply_rate<R>(self, rate: R) -> Self::Output<R>
     where
         R: Rate;
-}
-
-pub struct IdentityRate;
-
-impl Rate for IdentityRate {
-    fn eval(&self, t: f32) -> f32 {
-        t
-    }
-}
-
-pub struct ComposeRate<R0, R1>(pub(crate) R0, pub(crate) R1);
-
-impl<R0, R1> Rate for ComposeRate<R0, R1>
-where
-    R0: Rate,
-    R1: Rate,
-{
-    fn eval(&self, t: f32) -> f32 {
-        self.0.eval(self.1.eval(t))
-    }
 }
 
 pub struct ClampRate(Range<f32>);

@@ -452,15 +452,14 @@ impl Mobject for TypstMobject {
 
 #[cfg(test)]
 mod typst_tests {
-    use crate::toplevel::config::TypstConfig;
-
-    use super::super::super::toplevel::config::StyleConfig;
+    use super::super::super::toplevel::settings::StyleSettings;
+    use super::super::super::toplevel::settings::TypstSettings;
     use super::super::super::toplevel::world::World;
     use super::TypstMobject;
 
     #[test]
     fn test_typst_mobject() -> () {
-        let world = World::new(StyleConfig::default(), TypstConfig::default());
+        let world = World::new(StyleSettings::default(), TypstSettings::default());
         let mob = TypstMobject::instantiate(
             "typst \\ text text #[text] text $ a b c - d^2 $".to_string(),
             &world,

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use comemo::Track;
 
-use super::config::StyleConfig;
-use super::config::TypstConfig;
+use super::settings::StyleSettings;
+use super::settings::TypstSettings;
 
 // use super::scene::BakedWorldline;
 // use super::scene::Worldline;
@@ -13,16 +13,16 @@ use super::config::TypstConfig;
 
 pub struct World {
     // cache_path: LazyLock<PathBuf>,
-    pub style_config: StyleConfig,
+    pub style_settings: StyleSettings,
     pub typst_world: TypstWorld,
 }
 
 impl World {
-    pub(crate) fn new(style_config: StyleConfig, typst_config: TypstConfig) -> Self {
+    pub(crate) fn new(style_settings: StyleSettings, typst_settings: TypstSettings) -> Self {
         Self {
             // cache_path: LazyLock::new(|| Self::init_cache_path().unwrap()),
-            style_config,
-            typst_world: TypstWorld::new(typst_config),
+            style_settings,
+            typst_world: TypstWorld::new(typst_settings),
         }
     }
 
@@ -74,8 +74,8 @@ pub struct TypstWorld {
 }
 
 impl TypstWorld {
-    fn new(config: TypstConfig) -> Self {
-        let inputs = config
+    fn new(settings: TypstSettings) -> Self {
+        let inputs = settings
             .inputs
             .iter()
             .map(|(k, v)| {
@@ -86,21 +86,21 @@ impl TypstWorld {
             })
             .collect();
         let fonts = typst_kit::fonts::FontSearcher::new()
-            .include_system_fonts(config.include_system_fonts)
-            .include_embedded_fonts(config.include_embedded_fonts)
-            .search_with(config.font_paths);
+            .include_system_fonts(settings.include_system_fonts)
+            .include_embedded_fonts(settings.include_embedded_fonts)
+            .search_with(settings.font_paths);
         let user_agent = concat!("typst/", env!("CARGO_PKG_VERSION"));
         let downloader = match std::env::var("TYPST_CERT") {
             Ok(cert) => typst_kit::download::Downloader::with_path(user_agent, cert.into()),
             Err(_) => typst_kit::download::Downloader::new(user_agent),
         };
         let package_storage = typst_kit::package::PackageStorage::new(
-            config.package_cache_path,
-            config.package_path,
+            settings.package_cache_path,
+            settings.package_path,
             downloader,
         );
         Self {
-            root: config.root,
+            root: settings.root,
             // root: config
             // .root
             // .canonicalize()

@@ -4,97 +4,140 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::Instant;
 
 use pollster::FutureExt;
 
 use super::config::Config;
 use super::config::VideoConfig;
-use super::config::WindowConfig;
 use super::renderer::Renderer;
 use super::scene::PresentationCollection;
 use super::scene::Scene;
 
+#[derive(Clone, Copy)]
+enum ProgressSpeed {
+    Forward_0_50x,
+    Forward_0_75x,
+    Forward_1_00x,
+    Forward_1_25x,
+    Forward_1_50x,
+    Forward_2_00x,
+    Backward_0_50x,
+    Backward_0_75x,
+    Backward_1_00x,
+    Backward_1_25x,
+    Backward_1_50x,
+    Backward_2_00x,
+}
+
+impl ProgressSpeed {
+    fn value(&self) -> f32 {
+        match self {
+            Self::Forward_0_50x => 0.50,
+            Self::Forward_0_75x => 0.75,
+            Self::Forward_1_00x => 1.00,
+            Self::Forward_1_25x => 1.25,
+            Self::Forward_1_50x => 1.50,
+            Self::Forward_2_00x => 2.00,
+            Self::Backward_0_50x => -0.50,
+            Self::Backward_0_75x => -0.75,
+            Self::Backward_1_00x => -1.00,
+            Self::Backward_1_25x => -1.25,
+            Self::Backward_1_50x => -1.50,
+            Self::Backward_2_00x => -2.00,
+        }
+    }
+
+    fn display_str(&self) -> &'static str {
+        match self {
+            Self::Forward_0_50x => "0.5x",
+            Self::Forward_0_75x => "0.75x",
+            Self::Forward_1_00x => "speed",
+            Self::Forward_1_25x => "1.25x",
+            Self::Forward_1_50x => "1.5x",
+            Self::Forward_2_00x => "2x",
+            Self::Backward_0_50x => "-0.5x",
+            Self::Backward_0_75x => "-0.75",
+            Self::Backward_1_00x => "-1x",
+            Self::Backward_1_25x => "-1.25",
+            Self::Backward_1_50x => "-1.5x",
+            Self::Backward_2_00x => "-2x",
+        }
+    }
+}
+
 struct Progress {
     time_interval: Range<f32>,
-    anchor_time: f32,
-    instant: Instant,
+    // anchor_time: f32,
+    // instant: Instant,
+    time: f32,
     base_speed: f32,
-    speed_level: i32,
+    progress_speed: ProgressSpeed,
+    paused: bool,
 }
 
 impl Progress {
-    fn new(full_time: f32) -> Self {
+    fn new(full_time: f32, base_speed: f32) -> Self {
         Self {
             time_interval: 0.0..full_time,
-            anchor_time: 0.0,
-            instant: Instant::now(),
-            base_speed: 1.0,
-            speed_level: 0,
+            time: 0.0,
+            // instant: Instant::now(),
+            base_speed,
+            progress_speed: ProgressSpeed::Forward_1_00x,
+            paused: true,
         }
     }
 
-    fn speed(&self) -> f32 {
-        self.base_speed
-            * match self.speed_level {
-                0 => 0.0,
-                exponent @ 0.. => 2.0_f32.powi(exponent - 1),
-                exponent @ ..0 => -2.0_f32.powi(-exponent - 1),
+    fn progress_speed(&self) -> ProgressSpeed {
+        self.progress_speed
+    }
+
+    fn paused(&self) -> bool {
+        self.paused
+    }
+
+    // fn get_time(&mut self) -> f32 {
+    //     let mut time = self.anchor_time + self.instant.elapsed().as_secs_f32() * self.speed();
+    //     if !self.time_interval.contains(&time) {
+    //         time = time.clamp(self.time_interval.start, self.time_interval.end);
+    //         self.progress_speed = 0;
+    //         self.anchor_time = time;
+    //         self.instant = Instant::now();
+    //     }
+    //     time
+    // }
+
+    fn forward_time(&mut self, app_delta_time: f32) -> f32 {
+        if !self.paused {
+            self.time += app_delta_time * self.base_speed * self.progress_speed.value();
+            if !self.time_interval.contains(&self.time) {
+                self.paused = true;
+                self.time = self
+                    .time
+                    .clamp(self.time_interval.start, self.time_interval.end);
             }
-    }
-
-    fn get_time(&mut self) -> f32 {
-        let mut time = self.anchor_time + self.instant.elapsed().as_secs_f32() * self.speed();
-        if !self.time_interval.contains(&time) {
-            time = time.clamp(self.time_interval.start, self.time_interval.end);
-            self.speed_level = 0;
-            self.anchor_time = time;
-            self.instant = Instant::now();
         }
+        self.time
+    }
+
+    fn set_time(&mut self, time: f32) -> f32 {
+        self.time = time;
         time
     }
 
-    fn forward_time(&mut self, delta_time: f32) -> f32 {
-        let mut time = self.get_time() + delta_time;
-        if !self.time_interval.contains(&time) {
-            time = time.clamp(self.time_interval.start, self.time_interval.end);
-            self.speed_level = 0;
-        }
-        self.anchor_time = time;
-        self.instant = Instant::now();
-        time
+    fn set_progress_speed(&mut self, progress_speed: ProgressSpeed) {
+        self.progress_speed = progress_speed;
     }
 
-    fn set_base_speed(&mut self, base_speed: f32) -> f32 {
-        let time = self.get_time();
-        self.anchor_time = time;
-        self.instant = Instant::now();
-        self.base_speed = base_speed;
-        time
+    fn play_or_pause(&mut self) {
+        self.paused = !self.paused;
     }
-
-    fn set_speed_level<F>(&mut self, f: F) -> f32
-    where
-        F: FnOnce(i32) -> i32,
-    {
-        let time = self.get_time();
-        self.anchor_time = time;
-        self.instant = Instant::now();
-        self.speed_level = f(self.speed_level);
-        time
-    }
-}
-
-struct AppState {
-    progress: Progress,
-    control_pressed: bool,
 }
 
 pub struct App {
-    config: Config,
+    progress: Progress,
     scenes: Vec<Box<dyn Scene>>,
-    state: Option<AppState>,
-    window: Option<Arc<winit::window::Window>>,
+    config: Config,
+    // window: Option<Arc<winit::window::Window>>,
     // renderer: OnceLock<Renderer>,
     // progress: Progress,
     // control_pressed: bool,
@@ -102,21 +145,17 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(
-        // presentation_collection: PresentationCollection,
+    pub fn new(// presentation_collection: PresentationCollection,
         // window_config: WindowConfig,
         // video_config: VideoConfig,
-        config: Config,
+        // config: Config,
     ) -> Self {
         // env_logger::init();
         // let event_loop = winit::event_loop::EventLoop::new().unwrap();
         Self {
             // window_config,
             // video_config,
-            config,
-            scenes: Vec::new(),
             state: None,
-            window: None,
             // renderer: OnceLock::new(),
             // progress: Progress::new(presentation_collection.full_time()),
             // control_pressed: false,
@@ -124,8 +163,6 @@ impl App {
         }
         // event_loop.run_app(&mut app)
     }
-
-    pub fn run<S>(&mut self, scene: S) -> Result<(), winit::error::EventLoopError> {}
 
     fn render(&self, time: f32) {
         self.presentation_collection

@@ -4,31 +4,25 @@ use super::palette::BLACK;
 use super::palette::WHITE;
 
 #[derive(Default)]
-pub struct Config {
-    pub window: WindowConfig,
-    pub video: VideoConfig,
-    pub style: StyleConfig,
-    pub typst: TypstConfig,
+pub struct Settings {
+    pub scene: SceneSettings,
+    pub style: StyleSettings,
+    pub typst: TypstSettings,
+    pub player: PlayerSettings,
 }
 
-pub struct WindowConfig {
+pub struct SceneSettings {
     pub size: (u32, u32),
-    pub base_speed: f32,
-    pub forward_seconds: f32,
-    pub fast_forward_seconds: f32,
-}
-
-pub struct VideoConfig {
-    pub size: (u32, u32),
-    pub fps: f32,
-}
-
-pub struct StyleConfig {
-    pub color: palette::Srgb<f32>,
     pub background_color: palette::Srgb<f32>,
+    pub fps: f32,
+    pub play_speed: f32,
 }
 
-pub struct TypstConfig {
+pub struct StyleSettings {
+    pub color: palette::Srgb<f32>,
+}
+
+pub struct TypstSettings {
     pub root: PathBuf,
     pub inputs: Vec<(String, String)>,
     pub font_paths: Vec<PathBuf>,
@@ -38,36 +32,33 @@ pub struct TypstConfig {
     pub package_cache_path: Option<PathBuf>,
 }
 
-impl Default for WindowConfig {
-    fn default() -> Self {
-        Self {
-            size: (960, 540),
-            base_speed: 1.0,
-            forward_seconds: 5.0,
-            fast_forward_seconds: 30.0,
-        }
-    }
+pub struct PlayerSettings {
+    pub play_pause_key: egui::Key,
+    pub fast_forward_key: egui::Key,
+    pub fast_backward: egui::Key,
+    pub fast_skip_seconds: f32,
 }
 
-impl Default for VideoConfig {
+impl Default for SceneSettings {
     fn default() -> Self {
         Self {
             size: (1920, 1080),
+            background_color: BLACK.into(),
             fps: 60.0,
+            play_speed: 1.0,
         }
     }
 }
 
-impl Default for StyleConfig {
+impl Default for StyleSettings {
     fn default() -> Self {
         Self {
             color: WHITE.into(),
-            background_color: BLACK.into(),
         }
     }
 }
 
-impl Default for TypstConfig {
+impl Default for TypstSettings {
     fn default() -> Self {
         Self {
             root: PathBuf::from("."),
@@ -77,6 +68,17 @@ impl Default for TypstConfig {
             include_embedded_fonts: true,
             package_path: None,
             package_cache_path: None,
+        }
+    }
+}
+
+impl Default for PlayerSettings {
+    fn default() -> Self {
+        Self {
+            play_pause_key: egui::Key::Space,
+            fast_forward_key: egui::Key::ArrowRight,
+            fast_backward: egui::Key::ArrowLeft,
+            fast_skip_seconds: 5.0,
         }
     }
 }

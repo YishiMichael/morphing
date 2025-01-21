@@ -3,16 +3,13 @@ use std::sync::Arc;
 
 use super::super::mobjects::mobject::Mobject;
 use super::super::mobjects::mobject::MobjectBuilder;
+use super::super::mobjects::mobject::MobjectDiff;
 use super::super::toplevel::scene::Supervisor;
 use super::act::Act;
 use super::act::ApplyAct;
-use super::act::ComposeDiff;
-use super::act::Diff;
 use super::construct::ApplyConstruct;
 use super::construct::Construct;
 use super::rates::ApplyRate;
-use super::rates::ComposeRate;
-use super::rates::IdentityRate;
 use super::rates::Rate;
 use super::timeline::action::ActionTimelineContent;
 use super::timeline::continuous::ContinuousTimelineContent;
@@ -51,7 +48,7 @@ where
             *time_interval.start..*time_interval.end,
         );
         self.supervisor
-            .archive_presentation(time_interval, self.timeline.presentation());
+            .archive_timeline(time_interval, self.timeline);
         output
     }
 }
@@ -99,7 +96,7 @@ where
     {
         self.archive(|SteadyTimeline { mobject }, supervisor, _| {
             let mut mobject = mobject.clone();
-            act.act(&mobject).apply(&mut mobject);
+            act.act(&mobject).apply(&mut mobject, 1.0);
             supervisor.launch_timeline(SteadyTimeline { mobject })
         })
     }
@@ -242,7 +239,7 @@ where
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    type Output<C> = Alive<'w, DynamicTimeline<DiscreteTimelineContent<'w, M, C>, ME, R>>
+    type Output<C> = Alive<'w, DynamicTimeline<DiscreteTimelineContent<M>, ME, R>>
     where
         C: Construct<M>;
 
@@ -252,11 +249,19 @@ where
     {
         self.steady_mobject
             .archive(|SteadyTimeline { mobject }, supervisor, _| {
+                let child_supervisor = Supervisor::new(supervisor.world());
+                let mobject = construct
+                    .construct(
+                        child_supervisor.launch_timeline(SteadyTimeline {
+                            mobject: mobject.clone(),
+                        }),
+                        &child_supervisor,
+                    )
+                    .archive(|steady_timeline, _, _| steady_timeline.mobject.clone());
                 supervisor.launch_timeline(DynamicTimeline {
                     content: DiscreteTimelineContent {
                         mobject: mobject.clone(),
-                        construct,
-                        world: supervisor.world(),
+                        timeline_collection: child_supervisor.into_collection(),
                     },
                     metric: self.metric,
                     rate: self.rate,
@@ -265,25 +270,74 @@ where
     }
 }
 
-impl<'w, M, ME, R, D> ApplyAct<M> for Alive<'w, DynamicTimeline<ActionTimelineContent<M, D>, ME, R>>
+impl<'w, M, ME, R, MD> ApplyAct<M>
+    for Alive<'w, DynamicTimeline<ActionTimelineContent<M, MD>, ME, R>>
 where
     M: Mobject,
     ME: DynamicTimelineMetric,
     R: Rate,
-    D: Diff<M>,
+    MD: MobjectDiff<M>,
 {
-    type Output<A> = Alive<'w, DynamicTimeline<ActionTimelineContent<M, ComposeDiff<A::Diff, D>>, ME, R>> where A: Act<M>;
+    type Output<A> = Alive<'w, DynamicTimeline<ActionTimelineContent<M, ComposeMobjectDiff<A::Diff, MD>>, ME, R>> where A: Act<M>;
 
     fn apply_act<A>(self, act: A) -> Self::Output<A>
     where
         A: Act<M>,
     {
         let mobject = self.timeline.content.mobject.clone();
-        let diff = ComposeDiff(act.act(&mobject), self.timeline.content.diff.clone());
+        let diff = ComposeMobjectDiff(act.act(&mobject), self.timeline.content.diff.clone());
         self.supervisor.launch_timeline(DynamicTimeline {
             content: ActionTimelineContent { mobject, diff },
             metric: self.timeline.metric,
             rate: self.timeline.rate,
         })
+    }
+}
+
+struct IdentityRate;
+
+impl Rate for IdentityRate {
+    fn eval(&self, t: f32) -> f32 {
+        t
+    }
+}
+
+struct ComposeRate<R0, R1>(R0, R1);
+
+impl<R0, R1> Rate for ComposeRate<R0, R1>
+where
+    R0: Rate,
+    R1: Rate,
+{
+    fn eval(&self, t: f32) -> f32 {
+        self.0.eval(self.1.eval(t))
+    }
+}
+
+#[derive(Clone)]
+pub struct ComposeMobjectDiff<MD0, MD1>(pub(crate) MD0, pub(crate) MD1);
+
+impl<M, MD0, MD1> MobjectDiff<M> for ComposeMobjectDiff<MD0, MD1>
+where
+    M: Mobject,
+    MD0: MobjectDiff<M>,
+    MD1: MobjectDiff<M>,
+{
+    fn apply(&self, mobject: &mut M, alpha: f32) {
+        self.1.apply(mobject, alpha);
+        self.0.apply(mobject, alpha);
+    }
+
+    fn apply_realization(
+        &self,
+        mobject_realization: &mut M::Realization,
+        reference_mobject: &M,
+        alpha: f32,
+        queue: &wgpu::Queue,
+    ) {
+        self.1
+            .apply_realization(mobject_realization, reference_mobject, alpha, queue);
+        self.0
+            .apply_realization(mobject_realization, reference_mobject, alpha, queue);
     }
 }

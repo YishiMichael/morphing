@@ -4,7 +4,7 @@ use super::super::toplevel::world::World;
 
 // impl<T> VectorSpace for T where T: Clone + AddAssign + MulAssign<f32> {}
 
-pub trait Mobject: 'static + Clone {
+pub trait Mobject: Clone {
     // type Diff: VectorSpace;
 
     // fn apply_diff(&self, diff: Self::Diff) -> Self;
@@ -13,14 +13,28 @@ pub trait Mobject: 'static + Clone {
     fn realize(&self, device: &wgpu::Device) -> Self::Realization;
 }
 
-pub trait MobjectRealization: 'static {
-    fn render(&self, queue: &wgpu::Queue, render_pass: &mut wgpu::RenderPass);
+pub trait MobjectRealization {
+    fn render(&self, render_pass: &mut wgpu::RenderPass);
 }
 
 pub trait MobjectBuilder {
     type Instantiation: Mobject;
 
     fn instantiate(self, world: &World) -> Self::Instantiation;
+}
+
+pub trait MobjectDiff<M>: Clone
+where
+    M: Mobject,
+{
+    fn apply(&self, mobject: &mut M, alpha: f32);
+    fn apply_realization(
+        &self,
+        mobject_realization: &mut M::Realization,
+        reference_mobject: &M,
+        alpha: f32,
+        queue: &wgpu::Queue,
+    ); // mobject_realization write-only
 }
 
 // TODO: alive container morphisms
@@ -91,7 +105,7 @@ impl MobjectBuilder for () {
 }
 
 impl MobjectRealization for () {
-    fn render(&self, _queue: &wgpu::Queue, _render_pass: &mut wgpu::RenderPass) {}
+    fn render(&self, _render_pass: &mut wgpu::RenderPass) {}
 }
 
 // trait HomogeneousMobject<M> where M: Mobject {

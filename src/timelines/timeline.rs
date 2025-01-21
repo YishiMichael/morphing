@@ -1,17 +1,18 @@
 use super::super::toplevel::scene::Presentation;
 
 pub trait Timeline {
-    type Presentation: Presentation;
+    type Presentation<'t>: Presentation + 't
+    where
+        Self: 't;
 
-    fn presentation(self, device: &wgpu::Device) -> Self::Presentation;
+    fn presentation<'t>(&'t self, device: &wgpu::Device) -> Self::Presentation<'t>;
 }
 
 pub mod steady {
     use std::ops::Range;
 
-    use crate::mobjects::mobject::MobjectRealization;
-
     use super::super::super::mobjects::mobject::Mobject;
+    use super::super::super::mobjects::mobject::MobjectRealization;
     use super::Presentation;
     use super::Timeline;
 
@@ -23,9 +24,9 @@ pub mod steady {
     where
         M: Mobject,
     {
-        type Presentation = SteadyTimelinePresentation<M::Realization>;
+        type Presentation<'t> = SteadyTimelinePresentation<M::Realization> where M: 't;
 
-        fn presentation(self, device: &wgpu::Device) -> Self::Presentation {
+        fn presentation<'t>(&'t self, device: &wgpu::Device) -> Self::Presentation<'t> {
             SteadyTimelinePresentation {
                 realization: self.mobject.realize(device),
             }
@@ -44,10 +45,11 @@ pub mod steady {
             &self,
             _time: f32,
             _time_interval: Range<f32>,
-            queue: &wgpu::Queue,
+            _device: &wgpu::Device,
+            _queue: &wgpu::Queue,
             render_pass: &mut wgpu::RenderPass,
         ) {
-            self.mobject.render(queue, render_pass);
+            self.realization.render(render_pass);
         }
     }
 }
@@ -56,13 +58,18 @@ pub mod dynamic {
     use std::ops::Range;
 
     use super::super::super::mobjects::mobject::Mobject;
-    use super::super::super::toplevel::renderer::Renderer;
     use super::super::rates::Rate;
     use super::Presentation;
     use super::Timeline;
 
-    pub trait ContentPresent: 'static {
-        fn content_present(&self, time: f32, renderer: &Renderer);
+    pub trait ContentPresentation {
+        fn content_present(
+            &self,
+            time: f32,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            render_pass: &mut wgpu::RenderPass,
+        );
     }
 
     pub trait Collapse {
@@ -72,12 +79,17 @@ pub mod dynamic {
     }
 
     pub trait DynamicTimelineContent: Collapse {
-        type ContentPresentation: ContentPresent;
+        type ContentPresentation<'t>: ContentPresentation + 't
+        where
+            Self: 't;
 
-        fn content_presentation(self) -> Self::ContentPresentation;
+        fn content_presentation<'t>(
+            &'t self,
+            device: &wgpu::Device,
+        ) -> Self::ContentPresentation<'t>;
     }
 
-    pub trait DynamicTimelineMetric: 'static {
+    pub trait DynamicTimelineMetric {
         fn eval(&self, time: f32, time_interval: Range<f32>) -> f32;
     }
 
@@ -109,33 +121,42 @@ pub mod dynamic {
         ME: DynamicTimelineMetric,
         R: Rate,
     {
-        type Presentation = DynamicTimelinePresentation<CO::ContentPresentation, ME, R>;
+        type Presentation<'t> = DynamicTimelinePresentation<'t, CO::ContentPresentation<'t>, ME, R> where CO: 't, ME: 't, R: 't;
 
-        fn presentation(self) -> Self::Presentation {
+        fn presentation<'t>(&'t self, device: &wgpu::Device) -> Self::Presentation<'t> {
             DynamicTimelinePresentation {
-                content_presentation: self.content.content_presentation(),
-                metric: self.metric,
-                rate: self.rate,
+                content_presentation: self.content.content_presentation(device),
+                metric: &self.metric,
+                rate: &self.rate,
             }
         }
     }
 
-    pub struct DynamicTimelinePresentation<CP, ME, R> {
+    pub struct DynamicTimelinePresentation<'t, CP, ME, R> {
         pub(crate) content_presentation: CP,
-        pub(crate) metric: ME,
-        pub(crate) rate: R,
+        pub(crate) metric: &'t ME,
+        pub(crate) rate: &'t R,
     }
 
-    impl<CP, ME, R> Presentation for DynamicTimelinePresentation<CP, ME, R>
+    impl<CP, ME, R> Presentation for DynamicTimelinePresentation<'_, CP, ME, R>
     where
-        CP: ContentPresent,
+        CP: ContentPresentation,
         ME: DynamicTimelineMetric,
         R: Rate,
     {
-        fn present(&self, time: f32, time_interval: Range<f32>, renderer: &Renderer) {
+        fn present(
+            &self,
+            time: f32,
+            time_interval: Range<f32>,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            render_pass: &mut wgpu::RenderPass,
+        ) {
             self.content_presentation.content_present(
                 self.rate.eval(self.metric.eval(time, time_interval)),
-                renderer,
+                device,
+                queue,
+                render_pass,
             );
         }
     }
@@ -145,10 +166,10 @@ pub mod action {
     use std::cell::RefCell;
 
     use super::super::super::mobjects::mobject::Mobject;
-    use super::super::super::toplevel::renderer::Renderer;
-    use super::super::act::Diff;
+    use super::super::super::mobjects::mobject::MobjectDiff;
+    use super::super::super::mobjects::mobject::MobjectRealization;
     use super::dynamic::Collapse;
-    use super::dynamic::ContentPresent;
+    use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
 
     pub struct ActionTimelineContent<M, D> {
@@ -158,49 +179,61 @@ pub mod action {
         pub(crate) diff: D,
     }
 
-    impl<M, D> Collapse for ActionTimelineContent<M, D>
+    impl<M, MD> Collapse for ActionTimelineContent<M, MD>
     where
         M: Mobject,
-        D: Diff<M>,
+        MD: MobjectDiff<M>,
     {
         type Output = M;
 
         fn collapse(&self, time: f32) -> Self::Output {
             let mut mobject = self.mobject.clone();
-            self.diff.apply_partial(&mut mobject, time);
+            self.diff.apply(&mut mobject, time);
             mobject
         }
     }
 
-    impl<M, D> DynamicTimelineContent for ActionTimelineContent<M, D>
+    impl<M, MD> DynamicTimelineContent for ActionTimelineContent<M, MD>
     where
         M: Mobject,
-        D: Diff<M>,
+        MD: MobjectDiff<M>,
     {
-        type ContentPresentation = ActionTimelineContentPresentation<M, D>;
+        type ContentPresentation<'t> = ActionTimelineContentPresentation<'t, M::Realization, M, MD> where M: 't, MD: 't;
 
-        fn content_presentation(self) -> Self::ContentPresentation {
+        fn content_presentation<'t>(
+            &'t self,
+            device: &wgpu::Device,
+        ) -> Self::ContentPresentation<'t> {
             ActionTimelineContentPresentation {
-                mobject: RefCell::new(self.mobject),
-                diff: self.diff,
+                realization: RefCell::new(self.mobject.realize(device)),
+                reference_mobject: &self.mobject,
+                diff: &self.diff,
             }
         }
     }
 
-    pub struct ActionTimelineContentPresentation<M, D> {
-        mobject: RefCell<M>,
-        diff: D,
+    pub struct ActionTimelineContentPresentation<'t, MR, M, MD> {
+        realization: RefCell<MR>,
+        reference_mobject: &'t M,
+        diff: &'t MD,
     }
 
-    impl<M, D> ContentPresent for ActionTimelineContentPresentation<M, D>
+    impl<M, MD> ContentPresentation for ActionTimelineContentPresentation<'_, M::Realization, M, MD>
     where
         M: Mobject,
-        D: Diff<M>,
+        MD: MobjectDiff<M>,
     {
-        fn content_present(&self, time: f32, renderer: &Renderer) {
-            let mut mobject = self.mobject.borrow_mut();
-            self.diff.apply_partial(&mut mobject, time);
-            mobject.render(renderer);
+        fn content_present(
+            &self,
+            time: f32,
+            _device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            render_pass: &mut wgpu::RenderPass,
+        ) {
+            let mut realization = self.realization.borrow_mut();
+            self.diff
+                .apply_realization(&mut realization, &self.reference_mobject, time, queue);
+            realization.render(render_pass);
             // self.collapse(time).render(renderer);
         }
     }
@@ -210,10 +243,10 @@ pub mod continuous {
     use std::cell::RefCell;
 
     use super::super::super::mobjects::mobject::Mobject;
-    use super::super::super::toplevel::renderer::Renderer;
+    use super::super::super::mobjects::mobject::MobjectRealization;
     use super::super::update::Update;
     use super::dynamic::Collapse;
-    use super::dynamic::ContentPresent;
+    use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
 
     pub struct ContinuousTimelineContent<M, U> {
@@ -240,56 +273,68 @@ pub mod continuous {
         M: Mobject,
         U: Update<M>,
     {
-        type ContentPresentation = ContinuousTimelineContentPresentation<M, U>;
+        type ContentPresentation<'t> =
+            ContinuousTimelineContentPresentation<'t, M::Realization, M, U> where M: 't, U: 't;
 
-        fn content_presentation(self) -> Self::ContentPresentation {
+        fn content_presentation<'t>(
+            &'t self,
+            device: &wgpu::Device,
+        ) -> Self::ContentPresentation<'t> {
             ContinuousTimelineContentPresentation {
-                mobject: RefCell::new(self.mobject),
-                update: self.update,
+                realization: RefCell::new(self.mobject.realize(device)),
+                reference_mobject: &self.mobject,
+                update: &self.update,
             }
         }
     }
 
-    pub struct ContinuousTimelineContentPresentation<M, U> {
-        mobject: RefCell<M>,
-        update: U,
+    pub struct ContinuousTimelineContentPresentation<'t, MR, M, U> {
+        realization: RefCell<MR>,
+        reference_mobject: &'t M,
+        update: &'t U,
     }
 
-    impl<M, U> ContentPresent for ContinuousTimelineContentPresentation<M, U>
+    impl<M, U> ContentPresentation for ContinuousTimelineContentPresentation<'_, M::Realization, M, U>
     where
         M: Mobject,
         U: Update<M>,
     {
-        fn content_present(&self, time: f32, renderer: &Renderer) {
-            let mut mobject = self.mobject.borrow_mut();
-            self.update.update(&mut mobject, time);
-            mobject.render(renderer);
+        fn content_present(
+            &self,
+            time: f32,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            render_pass: &mut wgpu::RenderPass,
+        ) {
+            let mut realization = self.realization.borrow_mut();
+            self.update.update_realization(
+                &mut realization,
+                &self.reference_mobject,
+                time,
+                device,
+                queue,
+            );
+            realization.render(render_pass);
         }
     }
 }
 
 pub mod discrete {
     use super::super::super::mobjects::mobject::Mobject;
-    use super::super::super::toplevel::renderer::Renderer;
     use super::super::super::toplevel::scene::PresentationCollection;
-    use super::super::super::toplevel::scene::Supervisor;
-    use super::super::super::toplevel::world::World;
-    use super::super::construct::Construct;
+    use super::super::super::toplevel::scene::TimelineCollection;
     use super::dynamic::Collapse;
-    use super::dynamic::ContentPresent;
+    use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
-    use super::steady::SteadyTimeline;
 
-    pub struct DiscreteTimelineContent<'w, M, C> {
+    pub struct DiscreteTimelineContent<M> {
         pub(crate) mobject: M,
-        pub(crate) construct: C,
-        pub(crate) world: &'w World,
+        pub(crate) timeline_collection: TimelineCollection,
     }
 
-    impl<M, C> Collapse for DiscreteTimelineContent<'_, M, C>
+    impl<M> Collapse for DiscreteTimelineContent<M>
     where
         M: Mobject,
-        C: Construct<M>,
     {
         type Output = M;
 
@@ -298,42 +343,36 @@ pub mod discrete {
         }
     }
 
-    impl<M, C> DynamicTimelineContent for DiscreteTimelineContent<'_, M, C>
+    impl<M> DynamicTimelineContent for DiscreteTimelineContent<M>
     where
         M: Mobject,
-        C: Construct<M>,
     {
-        type ContentPresentation = DiscreteTimelineContentPresentation<C::Output>;
+        type ContentPresentation<'t> = DiscreteTimelineContentPresentation<'t> where M: 't;
 
-        fn content_presentation(self) -> Self::ContentPresentation {
-            let supervisor = Supervisor::new(self.world);
-            let mobject = self
-                .construct
-                .construct(
-                    supervisor.launch_timeline(SteadyTimeline {
-                        mobject: self.mobject,
-                    }),
-                    &supervisor,
-                )
-                .archive(|steady_timeline, _, _| steady_timeline.mobject.clone());
+        fn content_presentation<'t>(
+            &'t self,
+            device: &wgpu::Device,
+        ) -> Self::ContentPresentation<'t> {
             DiscreteTimelineContentPresentation {
-                mobject,
-                presentation_collection: supervisor.into_collection(),
+                presentation_collection: self.timeline_collection.presentation_collection(device),
             }
         }
     }
 
-    pub struct DiscreteTimelineContentPresentation<M> {
-        mobject: M,
-        presentation_collection: PresentationCollection,
+    pub struct DiscreteTimelineContentPresentation<'t> {
+        presentation_collection: PresentationCollection<'t>,
     }
 
-    impl<M> ContentPresent for DiscreteTimelineContentPresentation<M>
-    where
-        M: Mobject,
-    {
-        fn content_present(&self, time: f32, renderer: &Renderer) {
-            self.presentation_collection.present_all(time, renderer);
+    impl ContentPresentation for DiscreteTimelineContentPresentation<'_> {
+        fn content_present(
+            &self,
+            time: f32,
+            device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            render_pass: &mut wgpu::RenderPass,
+        ) {
+            self.presentation_collection
+                .present_collection(time, device, queue, render_pass);
         }
     }
 }

@@ -3,7 +3,7 @@ use super::super::toplevel::scene::Supervisor;
 use super::alive::Alive;
 use super::timeline::steady::SteadyTimeline;
 
-pub trait Construct<M>: 'static
+pub trait Construct<M>
 where
     M: Mobject,
 {

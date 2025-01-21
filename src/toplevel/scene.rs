@@ -2,51 +2,93 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::sync::Arc;
 
-use super::app::App;
-use super::config::Config;
-use super::renderer::Renderer;
+use super::super::timelines::timeline::Timeline;
 use super::world::World;
 
-pub trait Presentation: 'static {
-    fn present(&self, time: f32, time_interval: Range<f32>, renderer: &Renderer);
+trait DynTimeline {
+    fn dyn_presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn Presentation + 't>;
 }
 
-pub(crate) struct PresentationCollection {
-    time: Arc<f32>,
-    presentations: Vec<(Range<f32>, Box<dyn Presentation>)>,
+impl<T> DynTimeline for T
+where
+    T: Timeline,
+{
+    fn dyn_presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn Presentation + 't> {
+        Box::new(self.presentation(device))
+    }
 }
 
-impl PresentationCollection {
-    pub(crate) fn new() -> Self {
-        Self {
-            time: Arc::new(0.0),
-            presentations: Vec::new(),
-        }
+pub trait Presentation {
+    fn present(
+        &self,
+        time: f32,
+        time_interval: Range<f32>,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_pass: &mut wgpu::RenderPass,
+    );
+}
+
+pub(crate) struct PresentationCollection<'t> {
+    time: f32,
+    presentations: Vec<(Range<f32>, Box<dyn Presentation + 't>)>,
+}
+
+impl PresentationCollection<'_> {
+    pub(crate) fn time(&self) -> f32 {
+        self.time
     }
 
-    pub(crate) fn full_time(&self) -> f32 {
-        *self.time
-    }
-
-    pub(crate) fn present_all(&self, time: f32, renderer: &Renderer) {
+    pub(crate) fn present_collection(
+        &self,
+        time: f32,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_pass: &mut wgpu::RenderPass,
+    ) {
         for (time_interval, presentation) in &self.presentations {
             if time_interval.contains(&time) {
-                presentation.present(time, time_interval.clone(), renderer);
+                presentation.present(time, time_interval.clone(), device, queue, render_pass);
             }
+        }
+    }
+}
+
+pub(crate) struct TimelineCollection {
+    time: f32,
+    timelines: Vec<(Range<f32>, Box<dyn DynTimeline>)>,
+}
+
+impl TimelineCollection {
+    pub(crate) fn presentation_collection<'t>(
+        &'t self,
+        device: &wgpu::Device,
+    ) -> PresentationCollection<'t> {
+        PresentationCollection {
+            time: self.time,
+            presentations: self
+                .timelines
+                .iter()
+                .map(|(time_interval, timeline)| {
+                    (time_interval.clone(), timeline.dyn_presentation(device))
+                })
+                .collect(),
         }
     }
 }
 
 pub struct Supervisor<'w> {
     world: &'w World,
-    presentation_collection: RefCell<PresentationCollection>,
+    time: RefCell<Arc<f32>>,
+    timelines: RefCell<Vec<(Range<f32>, Box<dyn DynTimeline>)>>,
 }
 
 impl<'w> Supervisor<'w> {
     pub(crate) fn new(world: &'w World) -> Self {
         Self {
             world,
-            presentation_collection: RefCell::new(PresentationCollection::new()),
+            time: RefCell::new(Arc::new(0.0)),
+            timelines: RefCell::new(Vec::new()),
         }
     }
 
@@ -54,24 +96,26 @@ impl<'w> Supervisor<'w> {
         self.world
     }
 
-    pub(crate) fn into_collection(self) -> PresentationCollection {
-        self.presentation_collection.into_inner()
+    pub(crate) fn into_collection(self) -> TimelineCollection {
+        TimelineCollection {
+            time: *self.time.into_inner(),
+            timelines: self.timelines.into_inner(),
+        }
     }
 
     pub(crate) fn get_time(&self) -> Arc<f32> {
-        self.presentation_collection.borrow().time.clone()
+        self.time.borrow().clone()
     }
 
-    pub(crate) fn archive_presentation<P>(&self, time_interval: Range<Arc<f32>>, presentation: P)
+    pub(crate) fn archive_timeline<T>(&self, time_interval: Range<Arc<f32>>, timeline: T)
     where
-        P: Presentation,
+        T: Timeline + 'static,
     {
         if !Arc::<f32>::ptr_eq(&time_interval.start, &time_interval.end) {
             let time_interval = *time_interval.start..*time_interval.end;
-            self.presentation_collection
+            self.timelines
                 .borrow_mut()
-                .presentations
-                .push((time_interval, Box::new(presentation)));
+                .push((time_interval, Box::new(timeline)));
         }
     }
 
@@ -80,7 +124,7 @@ impl<'w> Supervisor<'w> {
             delta_time.is_sign_positive(),
             "`Supervisor::wait` expects a non-negative argument `delta_time`, got {delta_time}",
         );
-        let time = &mut self.presentation_collection.borrow_mut().time;
+        let mut time = self.time.borrow_mut();
         *time = Arc::new(**time + delta_time);
     }
 }
@@ -97,7 +141,23 @@ impl<'w> Supervisor<'w> {
 
 // use super::timelines::timeline::Supervisor;
 
-pub trait Scene {
+pub trait Scene: Default {
+    fn size() -> Option<(u32, u32)> {
+        None
+    }
+
+    fn background_color() -> Option<palette::Srgba> {
+        None
+    }
+
+    fn fps() -> Option<f32> {
+        None
+    }
+
+    fn play_speed() -> Option<f32> {
+        None
+    }
+
     fn construct(self, supervisor: &Supervisor);
 
     // fn run(self, config: Config) -> anyhow::Result<()> {
