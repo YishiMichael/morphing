@@ -1,6 +1,8 @@
+use std::fmt::Debug;
+
 use super::super::mobjects::mobject::Mobject;
 
-pub trait Update<M>
+pub trait Update<M>: 'static + Debug + serde::de::DeserializeOwned + serde::Serialize
 where
     M: Mobject,
 {

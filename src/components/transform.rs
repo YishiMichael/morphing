@@ -3,15 +3,18 @@ use std::sync::OnceLock;
 use encase::ShaderType;
 use geometric_algebra::ppga3d as pga;
 use geometric_algebra::One;
+use serde::Deserialize;
+use serde::Serialize;
 use wgpu::util::DeviceExt;
 
 use super::component::Component;
 use super::component::ComponentShaderTypes;
+use super::motor::Motor;
 use super::paint::QueueWriteBufferMutWrapper;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Transform {
-    motor: pga::Motor,
+    motor: Motor,
     scale: f32,
 }
 
@@ -35,7 +38,7 @@ impl Component for Transform {
     fn to_shader_types(&self) -> Self::ShaderTypes {
         TransformShaderTypes {
             transform_uniform: TransformUniform {
-                motor: nalgebra::Matrix4x2::from_column_slice(&Into::<[f32; 8]>::into(self.motor)), // transpose?
+                motor: self.motor.clone().into(),
                 scale: self.scale,
             },
         }
@@ -119,7 +122,7 @@ impl ComponentShaderTypes for TransformShaderTypes {
 impl Default for Transform {
     fn default() -> Self {
         Self {
-            motor: pga::Motor::one(),
+            motor: Motor(pga::Motor::one()),
             scale: 1.0,
         }
     }

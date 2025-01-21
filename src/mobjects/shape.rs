@@ -6,6 +6,8 @@ use lyon::tessellation::{
     StrokeVertexConstructor,
 };
 use palette::WithAlpha;
+use serde::Deserialize;
+use serde::Serialize;
 use wgpu::util::DeviceExt;
 
 use super::super::components::camera::{Camera, CameraShaderTypes};
@@ -21,7 +23,7 @@ use super::super::toplevel::palette::{TEAL, WHITE};
 use super::super::toplevel::world::World;
 use super::mobject::{Mobject, MobjectBuilder, MobjectRealization};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ShapeMobject {
     pub(crate) transform: Transform,
     pub(crate) path: Path,

@@ -2,8 +2,6 @@ use std::ffi::OsStr;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
-use std::sync::OnceLock;
 
 use pollster::FutureExt;
 
@@ -12,55 +10,58 @@ use super::config::VideoConfig;
 use super::renderer::Renderer;
 use super::scene::PresentationCollection;
 use super::scene::Scene;
+use super::settings::SceneSettings;
+use super::settings::Settings;
+use super::settings::VideoSettings;
 
 #[derive(Clone, Copy)]
 enum ProgressSpeed {
-    Forward_0_50x,
-    Forward_0_75x,
-    Forward_1_00x,
-    Forward_1_25x,
-    Forward_1_50x,
-    Forward_2_00x,
-    Backward_0_50x,
-    Backward_0_75x,
-    Backward_1_00x,
-    Backward_1_25x,
-    Backward_1_50x,
-    Backward_2_00x,
+    ForwardX0_50,
+    ForwardX0_75,
+    ForwardX1_00,
+    ForwardX1_25,
+    ForwardX1_50,
+    ForwardX2_00,
+    BackwardX0_50,
+    BackwardX0_75,
+    BackwardX1_00,
+    BackwardX1_25,
+    BackwardX1_50,
+    BackwardX2_00,
 }
 
 impl ProgressSpeed {
     fn value(&self) -> f32 {
         match self {
-            Self::Forward_0_50x => 0.50,
-            Self::Forward_0_75x => 0.75,
-            Self::Forward_1_00x => 1.00,
-            Self::Forward_1_25x => 1.25,
-            Self::Forward_1_50x => 1.50,
-            Self::Forward_2_00x => 2.00,
-            Self::Backward_0_50x => -0.50,
-            Self::Backward_0_75x => -0.75,
-            Self::Backward_1_00x => -1.00,
-            Self::Backward_1_25x => -1.25,
-            Self::Backward_1_50x => -1.50,
-            Self::Backward_2_00x => -2.00,
+            Self::ForwardX0_50 => 0.50,
+            Self::ForwardX0_75 => 0.75,
+            Self::ForwardX1_00 => 1.00,
+            Self::ForwardX1_25 => 1.25,
+            Self::ForwardX1_50 => 1.50,
+            Self::ForwardX2_00 => 2.00,
+            Self::BackwardX0_50 => -0.50,
+            Self::BackwardX0_75 => -0.75,
+            Self::BackwardX1_00 => -1.00,
+            Self::BackwardX1_25 => -1.25,
+            Self::BackwardX1_50 => -1.50,
+            Self::BackwardX2_00 => -2.00,
         }
     }
 
     fn display_str(&self) -> &'static str {
         match self {
-            Self::Forward_0_50x => "0.5x",
-            Self::Forward_0_75x => "0.75x",
-            Self::Forward_1_00x => "speed",
-            Self::Forward_1_25x => "1.25x",
-            Self::Forward_1_50x => "1.5x",
-            Self::Forward_2_00x => "2x",
-            Self::Backward_0_50x => "-0.5x",
-            Self::Backward_0_75x => "-0.75",
-            Self::Backward_1_00x => "-1x",
-            Self::Backward_1_25x => "-1.25",
-            Self::Backward_1_50x => "-1.5x",
-            Self::Backward_2_00x => "-2x",
+            Self::ForwardX0_50 => "0.5x",
+            Self::ForwardX0_75 => "0.75x",
+            Self::ForwardX1_00 => "speed",
+            Self::ForwardX1_25 => "1.25x",
+            Self::ForwardX1_50 => "1.5x",
+            Self::ForwardX2_00 => "2x",
+            Self::BackwardX0_50 => "-0.5x",
+            Self::BackwardX0_75 => "-0.75",
+            Self::BackwardX1_00 => "-1x",
+            Self::BackwardX1_25 => "-1.25",
+            Self::BackwardX1_50 => "-1.5x",
+            Self::BackwardX2_00 => "-2x",
         }
     }
 }
@@ -82,7 +83,7 @@ impl Progress {
             time: 0.0,
             // instant: Instant::now(),
             base_speed,
-            progress_speed: ProgressSpeed::Forward_1_00x,
+            progress_speed: ProgressSpeed::ForwardX1_00,
             paused: true,
         }
     }
@@ -133,10 +134,10 @@ impl Progress {
     }
 }
 
-pub struct App {
+pub(crate) struct App {
+    settings: Settings,
     progress: Progress,
     scenes: Vec<Box<dyn Scene>>,
-    config: Config,
     // window: Option<Arc<winit::window::Window>>,
     // renderer: OnceLock<Renderer>,
     // progress: Progress,

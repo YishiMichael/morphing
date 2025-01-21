@@ -4,15 +4,18 @@ use encase::ShaderType;
 use geometric_algebra::ppga3d as pga;
 use geometric_algebra::GeometricProduct;
 use geometric_algebra::One;
+use serde::Deserialize;
+use serde::Serialize;
 use wgpu::util::DeviceExt;
 
 use super::component::Component;
 use super::component::ComponentShaderTypes;
+use super::motor::Motor;
 use super::paint::QueueWriteBufferMutWrapper;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Camera {
-    view_motor: pga::Motor,
+    view_motor: Motor,
     projection_matrix: nalgebra::Matrix4<f32>,
 }
 
@@ -26,7 +29,7 @@ struct CameraBuffers {
 
 #[derive(ShaderType)]
 struct CameraUniform {
-    view_motor: nalgebra::Matrix2x4<f32>,
+    view_motor: nalgebra::Matrix4x2<f32>,
     projection_matrix: nalgebra::Matrix4<f32>,
 }
 
@@ -36,9 +39,7 @@ impl Component for Camera {
     fn to_shader_types(&self) -> Self::ShaderTypes {
         CameraShaderTypes {
             camera_uniform: CameraUniform {
-                view_motor: nalgebra::Matrix2x4::from_column_slice(&Into::<[f32; 8]>::into(
-                    self.view_motor,
-                )),
+                view_motor: self.view_motor.clone().into(),
                 projection_matrix: self.projection_matrix,
             },
         }
@@ -122,8 +123,9 @@ impl ComponentShaderTypes for CameraShaderTypes {
 impl Default for Camera {
     fn default() -> Self {
         Self {
-            view_motor: pga::Motor::one()
-                .geometric_product(pga::Translator::new(1.0, 0.0, 0.0, 5.0)),
+            view_motor: Motor(
+                pga::Motor::one().geometric_product(pga::Translator::new(1.0, 0.0, 0.0, 5.0)),
+            ),
             projection_matrix: nalgebra::Matrix4::new_perspective(
                 16.0 / 9.0,
                 40.0_f32.to_radians(),

@@ -1,11 +1,13 @@
 use itertools::Itertools;
+use serde::Deserialize;
+use serde::Serialize;
 
 use super::stroke::DashPattern;
 
 // #[derive(Clone)]
 // pub struct Path(pub lyon::path::Path);
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Path(Vec<bezier_rs::Subpath<ManipulatorGroupId>>);
 
 impl Path {
@@ -258,7 +260,7 @@ impl ttf_parser::OutlineBuilder for PathBuilder {
     }
 }
 
-#[derive(Clone, Hash, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Hash, PartialEq, Serialize)]
 pub struct ManipulatorGroupId(usize);
 
 impl bezier_rs::Identifier for ManipulatorGroupId {

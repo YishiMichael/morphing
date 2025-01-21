@@ -1,10 +1,14 @@
+use std::fmt::Debug;
+
 use super::super::toplevel::world::World;
 
 // pub trait VectorSpace: Clone + AddAssign + MulAssign<f32> {}
 
 // impl<T> VectorSpace for T where T: Clone + AddAssign + MulAssign<f32> {}
 
-pub trait Mobject: Clone {
+pub trait Mobject:
+    'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize
+{
     // type Diff: VectorSpace;
 
     // fn apply_diff(&self, diff: Self::Diff) -> Self;
@@ -21,20 +25,6 @@ pub trait MobjectBuilder {
     type Instantiation: Mobject;
 
     fn instantiate(self, world: &World) -> Self::Instantiation;
-}
-
-pub trait MobjectDiff<M>: Clone
-where
-    M: Mobject,
-{
-    fn apply(&self, mobject: &mut M, alpha: f32);
-    fn apply_realization(
-        &self,
-        mobject_realization: &mut M::Realization,
-        reference_mobject: &M,
-        alpha: f32,
-        queue: &wgpu::Queue,
-    ); // mobject_realization write-only
 }
 
 // TODO: alive container morphisms

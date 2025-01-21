@@ -1,12 +1,15 @@
 use std::ops::Range;
 use std::sync::Arc;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use super::super::mobjects::mobject::Mobject;
 use super::super::mobjects::mobject::MobjectBuilder;
-use super::super::mobjects::mobject::MobjectDiff;
 use super::super::toplevel::scene::Supervisor;
 use super::act::Act;
 use super::act::ApplyAct;
+use super::act::MobjectDiff;
 use super::construct::ApplyConstruct;
 use super::construct::Construct;
 use super::rates::ApplyRate;
@@ -239,7 +242,7 @@ where
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    type Output<C> = Alive<'w, DynamicTimeline<DiscreteTimelineContent<M>, ME, R>>
+    type Output<C> = Alive<'w, DynamicTimeline<DiscreteTimelineContent<C::Output>, ME, R>>
     where
         C: Construct<M>;
 
@@ -294,6 +297,7 @@ where
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
 struct IdentityRate;
 
 impl Rate for IdentityRate {
@@ -302,6 +306,7 @@ impl Rate for IdentityRate {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
 struct ComposeRate<R0, R1>(R0, R1);
 
 impl<R0, R1> Rate for ComposeRate<R0, R1>
@@ -314,7 +319,7 @@ where
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ComposeMobjectDiff<MD0, MD1>(pub(crate) MD0, pub(crate) MD1);
 
 impl<M, MD0, MD1> MobjectDiff<M> for ComposeMobjectDiff<MD0, MD1>

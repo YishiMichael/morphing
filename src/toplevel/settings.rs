@@ -1,27 +1,45 @@
 use std::path::PathBuf;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use super::palette::BLACK;
 use super::palette::WHITE;
 
 #[derive(Default)]
 pub struct Settings {
-    pub scene: SceneSettings,
-    pub style: StyleSettings,
-    pub typst: TypstSettings,
     pub player: PlayerSettings,
+    pub scene: SceneSettings,
 }
 
+pub struct PlayerSettings {
+    pub play_pause_key: egui::Key,
+    pub fast_forward_key: egui::Key,
+    pub fast_backward: egui::Key,
+    pub fast_skip_seconds: f32,
+}
+
+#[derive(Default, Deserialize, Serialize)]
 pub struct SceneSettings {
+    pub video: VideoSettings,
+    pub style: StyleSettings,
+    pub typst: TypstSettings,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct VideoSettings {
     pub size: (u32, u32),
     pub background_color: palette::Srgb<f32>,
     pub fps: f32,
     pub play_speed: f32,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct StyleSettings {
     pub color: palette::Srgb<f32>,
 }
 
+#[derive(Deserialize, Serialize)]
 pub struct TypstSettings {
     pub root: PathBuf,
     pub inputs: Vec<(String, String)>,
@@ -32,14 +50,18 @@ pub struct TypstSettings {
     pub package_cache_path: Option<PathBuf>,
 }
 
-pub struct PlayerSettings {
-    pub play_pause_key: egui::Key,
-    pub fast_forward_key: egui::Key,
-    pub fast_backward: egui::Key,
-    pub fast_skip_seconds: f32,
+impl Default for PlayerSettings {
+    fn default() -> Self {
+        Self {
+            play_pause_key: egui::Key::Space,
+            fast_forward_key: egui::Key::ArrowRight,
+            fast_backward: egui::Key::ArrowLeft,
+            fast_skip_seconds: 5.0,
+        }
+    }
 }
 
-impl Default for SceneSettings {
+impl Default for VideoSettings {
     fn default() -> Self {
         Self {
             size: (1920, 1080),
@@ -68,17 +90,6 @@ impl Default for TypstSettings {
             include_embedded_fonts: true,
             package_path: None,
             package_cache_path: None,
-        }
-    }
-}
-
-impl Default for PlayerSettings {
-    fn default() -> Self {
-        Self {
-            play_pause_key: egui::Key::Space,
-            fast_forward_key: egui::Key::ArrowRight,
-            fast_backward: egui::Key::ArrowLeft,
-            fast_skip_seconds: 5.0,
         }
     }
 }

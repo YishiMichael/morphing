@@ -2,21 +2,27 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::sync::Arc;
 
+use itertools::Itertools;
+use serde::Deserialize;
+use serde::Serialize;
+
 use super::super::timelines::timeline::Timeline;
+use super::settings::SceneSettings;
+use super::settings::VideoSettings;
 use super::world::World;
 
-trait DynTimeline {
-    fn dyn_presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn Presentation + 't>;
-}
+// trait DynTimeline {
+//     fn dyn_presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation>;
+// }
 
-impl<T> DynTimeline for T
-where
-    T: Timeline,
-{
-    fn dyn_presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn Presentation + 't> {
-        Box::new(self.presentation(device))
-    }
-}
+// impl<T> DynTimeline for T
+// where
+//     T: Timeline,
+// {
+//     fn dyn_presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation> {
+//         Box::new(self.presentation(device))
+//     }
+// }
 
 pub trait Presentation {
     fn present(
@@ -29,9 +35,14 @@ pub trait Presentation {
     );
 }
 
+struct PresentationEntry<'t> {
+    time_interval: Range<f32>,
+    presentation: Box<dyn 't + Presentation>,
+}
+
 pub(crate) struct PresentationCollection<'t> {
     time: f32,
-    presentations: Vec<(Range<f32>, Box<dyn Presentation + 't>)>,
+    presentation_entries: Vec<PresentationEntry<'t>>,
 }
 
 impl PresentationCollection<'_> {
@@ -46,7 +57,11 @@ impl PresentationCollection<'_> {
         queue: &wgpu::Queue,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        for (time_interval, presentation) in &self.presentations {
+        for PresentationEntry {
+            time_interval,
+            presentation,
+        } in &self.presentation_entries
+        {
             if time_interval.contains(&time) {
                 presentation.present(time, time_interval.clone(), device, queue, render_pass);
             }
@@ -54,9 +69,17 @@ impl PresentationCollection<'_> {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct TimelineEntry {
+    time_interval: Range<f32>,
+    #[serde(with = "serde_traitobject")]
+    timeline: Box<dyn Timeline>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct TimelineCollection {
     time: f32,
-    timelines: Vec<(Range<f32>, Box<dyn DynTimeline>)>,
+    timeline_entries: Vec<TimelineEntry>,
 }
 
 impl TimelineCollection {
@@ -66,12 +89,18 @@ impl TimelineCollection {
     ) -> PresentationCollection<'t> {
         PresentationCollection {
             time: self.time,
-            presentations: self
-                .timelines
+            presentation_entries: self
+                .timeline_entries
                 .iter()
-                .map(|(time_interval, timeline)| {
-                    (time_interval.clone(), timeline.dyn_presentation(device))
-                })
+                .map(
+                    |TimelineEntry {
+                         time_interval,
+                         timeline,
+                     }| PresentationEntry {
+                        time_interval: time_interval.clone(),
+                        presentation: timeline.presentation(device),
+                    },
+                )
                 .collect(),
         }
     }
@@ -80,7 +109,7 @@ impl TimelineCollection {
 pub struct Supervisor<'w> {
     world: &'w World,
     time: RefCell<Arc<f32>>,
-    timelines: RefCell<Vec<(Range<f32>, Box<dyn DynTimeline>)>>,
+    timeline_entries: RefCell<Vec<TimelineEntry>>,
 }
 
 impl<'w> Supervisor<'w> {
@@ -88,7 +117,7 @@ impl<'w> Supervisor<'w> {
         Self {
             world,
             time: RefCell::new(Arc::new(0.0)),
-            timelines: RefCell::new(Vec::new()),
+            timeline_entries: RefCell::new(Vec::new()),
         }
     }
 
@@ -99,7 +128,7 @@ impl<'w> Supervisor<'w> {
     pub(crate) fn into_collection(self) -> TimelineCollection {
         TimelineCollection {
             time: *self.time.into_inner(),
-            timelines: self.timelines.into_inner(),
+            timeline_entries: self.timeline_entries.into_inner(),
         }
     }
 
@@ -109,13 +138,14 @@ impl<'w> Supervisor<'w> {
 
     pub(crate) fn archive_timeline<T>(&self, time_interval: Range<Arc<f32>>, timeline: T)
     where
-        T: Timeline + 'static,
+        T: Timeline,
     {
         if !Arc::<f32>::ptr_eq(&time_interval.start, &time_interval.end) {
             let time_interval = *time_interval.start..*time_interval.end;
-            self.timelines
-                .borrow_mut()
-                .push((time_interval, Box::new(timeline)));
+            self.timeline_entries.borrow_mut().push(TimelineEntry {
+                time_interval,
+                timeline: Box::new(timeline),
+            });
         }
     }
 
@@ -141,22 +171,10 @@ impl<'w> Supervisor<'w> {
 
 // use super::timelines::timeline::Supervisor;
 
-pub trait Scene: Default {
-    fn size() -> Option<(u32, u32)> {
-        None
-    }
-
-    fn background_color() -> Option<palette::Srgba> {
-        None
-    }
-
-    fn fps() -> Option<f32> {
-        None
-    }
-
-    fn play_speed() -> Option<f32> {
-        None
-    }
+pub trait Scene {
+    // fn configure_settings(&self, app_scene_settings: SceneSettings) -> SceneSettings {
+    //     app_scene_settings
+    // }
 
     fn construct(self, supervisor: &Supervisor);
 
@@ -168,6 +186,22 @@ pub trait Scene: Default {
     //     Ok(())
     // }
 }
+
+#[derive(Deserialize, Serialize)]
+struct SceneTimelineCollectionEntry<'w> {
+    name: String,
+    video_settings: VideoSettings,
+    timeline_collection: TimelineCollection<'w>,
+}
+
+pub fn read_app_scene_settings() -> SceneSettings {
+    let (_, settings) = std::env::args().collect_tuple().unwrap();
+    ron::de::from_str(&settings).unwrap()
+}
+
+pub fn write_scene_timelines<S>(name: String, scene: S, scene_settings: SceneSettings) {}
+
+// pub fn run() {}
 
 // #[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 // pub struct Worldline {

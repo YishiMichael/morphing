@@ -1,5 +1,6 @@
+use std::fmt::Debug;
+
 use super::super::mobjects::mobject::Mobject;
-use super::super::mobjects::mobject::MobjectDiff;
 
 pub trait Act<M>
 where
@@ -25,4 +26,19 @@ where
     fn apply_act<A>(self, act: A) -> Self::Output<A>
     where
         A: Act<M>;
+}
+
+pub trait MobjectDiff<M>:
+    'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize
+where
+    M: Mobject,
+{
+    fn apply(&self, mobject: &mut M, alpha: f32);
+    fn apply_realization(
+        &self,
+        mobject_realization: &mut M::Realization,
+        reference_mobject: &M,
+        alpha: f32,
+        queue: &wgpu::Queue,
+    ); // mobject_realization write-only
 }
