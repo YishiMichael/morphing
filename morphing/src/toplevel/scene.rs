@@ -1,8 +1,8 @@
 use std::cell::RefCell;
+use std::io::Read;
 use std::ops::Range;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -12,18 +12,60 @@ use super::settings::SceneSettings;
 use super::settings::VideoSettings;
 use super::world::World;
 
-// trait DynTimeline {
-//     fn dyn_presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation>;
-// }
+pub use morphing_macros::scene;
 
-// impl<T> DynTimeline for T
-// where
-//     T: Timeline,
-// {
-//     fn dyn_presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation> {
-//         Box::new(self.presentation(device))
-//     }
-// }
+pub struct Supervisor<'w> {
+    world: &'w World,
+    time: RefCell<Arc<f32>>,
+    timeline_entries: RefCell<Vec<TimelineEntry>>,
+}
+
+impl<'w> Supervisor<'w> {
+    pub(crate) fn new(world: &'w World) -> Self {
+        Self {
+            world,
+            time: RefCell::new(Arc::new(0.0)),
+            timeline_entries: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn into_timeline_collection(self) -> TimelineCollection {
+        TimelineCollection {
+            time: *self.time.into_inner(),
+            timeline_entries: self.timeline_entries.into_inner(),
+        }
+    }
+
+    pub(crate) fn world(&self) -> &'w World {
+        self.world
+    }
+
+    pub(crate) fn get_time(&self) -> Arc<f32> {
+        self.time.borrow().clone()
+    }
+
+    pub(crate) fn archive_timeline<T>(&self, time_interval: Range<Arc<f32>>, timeline: T)
+    where
+        T: Timeline,
+    {
+        if !Arc::<f32>::ptr_eq(&time_interval.start, &time_interval.end) {
+            let time_interval = *time_interval.start..*time_interval.end;
+            self.timeline_entries.borrow_mut().push(TimelineEntry {
+                time_interval,
+                timeline: Box::new(timeline),
+            });
+        }
+    }
+
+    pub fn wait(&self, delta_time: f32) {
+        assert!(
+            delta_time.is_sign_positive(),
+            "`Supervisor::wait` expects a non-negative argument `delta_time`, got {delta_time}",
+        );
+        let mut time = self.time.borrow_mut();
+        *time = Arc::new(**time + delta_time);
+    }
+}
 
 struct PresentationEntry<'t> {
     time_interval: Range<f32>,
@@ -96,112 +138,56 @@ impl TimelineCollection {
     }
 }
 
-pub struct Supervisor<'w> {
-    world: &'w World,
-    time: Arc<f32>,
-    timeline_entries: RefCell<Vec<TimelineEntry>>,
-}
-
-impl<'w> Supervisor<'w> {
-    pub(crate) fn new(world: &'w World) -> Self {
-        Self {
-            world,
-            time: Arc::new(0.0),
-            timeline_entries: RefCell::new(Vec::new()),
-        }
-    }
-
-    pub(crate) fn world(&self) -> &'w World {
-        self.world
-    }
-
-    pub(crate) fn into_timeline_collection(self) -> TimelineCollection {
-        TimelineCollection {
-            time: *self.time,
-            timeline_entries: self.timeline_entries.into_inner(),
-        }
-    }
-
-    pub(crate) fn get_time(&self) -> Arc<f32> {
-        self.time.clone()
-    }
-
-    pub(crate) fn archive_timeline<T>(&self, time_interval: Range<Arc<f32>>, timeline: T)
-    where
-        T: Timeline,
-    {
-        if !Arc::<f32>::ptr_eq(&time_interval.start, &time_interval.end) {
-            let time_interval = *time_interval.start..*time_interval.end;
-            self.timeline_entries.borrow_mut().push(TimelineEntry {
-                time_interval,
-                timeline: Box::new(timeline),
-            });
-        }
-    }
-
-    pub fn wait(&mut self, delta_time: f32) {
-        assert!(
-            delta_time.is_sign_positive(),
-            "`Supervisor::wait` expects a non-negative argument `delta_time`, got {delta_time}",
-        );
-        self.time = Arc::new(*self.time + delta_time);
-    }
-}
-
-// use std::collections::HashMap;
-
-// use itertools::Itertools;
-// use serde::Deserialize;
-// use serde::Serialize;
-
-// use super::world::WORLD;
-
-// use std::sync::Arc;
-
-// use super::timelines::timeline::Supervisor;
-
-pub trait Scene {
-    // fn configure_settings(&self, app_scene_settings: SceneSettings) -> SceneSettings {
-    //     app_scene_settings
-    // }
-
-    fn construct(self, supervisor: &mut Supervisor);
-
-    // fn run(self, config: Config) -> anyhow::Result<()> {
-    //     let world = World::new(config.style, config.typst);
-    //     let supervisor = Supervisor::new(&world);
-    //     self.construct(&supervisor);
-    //     App::instantiate_and_run(supervisor.into_collection(), config.window, config.video)?;
-    //     Ok(())
-    // }
-}
-
 #[derive(Debug, Deserialize, Serialize)]
-struct SceneTimelineCollectionModule {
-    name: String,
+pub struct SceneTimelineCollectionModule {
+    name: &'static str,
     video_settings: VideoSettings,
     timeline_collection: TimelineCollection,
 }
 
-pub fn read_app_scene_settings() -> SceneSettings {
-    let (_, settings) = std::env::args().collect_tuple().unwrap();
-    ron::de::from_str(&settings).unwrap()
+impl SceneTimelineCollectionModule {
+    pub fn new<S>(name: &'static str, scene_settings: SceneSettings, scene_fn: S) -> Self
+    where
+        S: FnOnce(&Supervisor),
+    {
+        let world = World::new(scene_settings.style, scene_settings.typst);
+        let supervisor = Supervisor::new(&world);
+        scene_fn(&supervisor);
+        Self {
+            name,
+            video_settings: scene_settings.video,
+            timeline_collection: supervisor.into_timeline_collection(),
+        }
+    }
 }
 
-pub fn write_scene_timelines<S>(name: String, scene: S, scene_settings: SceneSettings)
+pub fn execute<S>(scene: S)
 where
-    S: Scene,
+    S: FnOnce(SceneSettings) -> SceneTimelineCollectionModule,
 {
-    let world = World::new(scene_settings.style, scene_settings.typst);
-    let mut supervisor = Supervisor::new(&world);
-    scene.construct(&mut supervisor);
-    let module = SceneTimelineCollectionModule {
-        name,
-        video_settings: scene_settings.video,
-        timeline_collection: supervisor.into_timeline_collection(),
-    };
+    let mut buf = String::new();
+    let _ = std::io::stdin().read_to_string(&mut buf);
+    let scene_settings = ron::de::from_str(&buf).unwrap();
+    let module = scene(scene_settings);
     println!("{}", ron::ser::to_string(&module).unwrap());
 }
+
+// pub fn read_app_scene_settings() -> SceneSettings {
+//     let (_, settings) = std::env::args().collect_tuple().unwrap();
+//     ron::de::from_str(&settings).unwrap()
+// }
+
+// pub fn write_scene_timelines<S>(name: String, scene: S, scene_settings: SceneSettings)
+// where
+//     S: Scene,
+// {
+//     let module = SceneTimelineCollectionModule {
+//         name,
+//         video_settings: scene_settings.video,
+//         timeline_collection: supervisor.into_timeline_collection(),
+//     };
+//     println!("{}", ron::ser::to_string(&module).unwrap());
+// }
 
 // pub fn run() {}
 

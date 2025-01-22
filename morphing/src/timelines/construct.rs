@@ -12,7 +12,7 @@ where
     fn construct<'a>(
         self,
         input: Alive<'a, SteadyTimeline<M>>,
-        supervisor: &mut Supervisor,
+        supervisor: &Supervisor,
     ) -> Alive<'a, SteadyTimeline<Self::Output>>;
 }
 

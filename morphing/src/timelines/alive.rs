@@ -252,13 +252,13 @@ where
     {
         self.steady_mobject
             .archive(|SteadyTimeline { mobject }, supervisor, _| {
-                let mut child_supervisor = Supervisor::new(supervisor.world());
+                let child_supervisor = Supervisor::new(supervisor.world());
                 let input_mobject = mobject.clone();
                 let input = child_supervisor.launch_timeline(SteadyTimeline {
                     mobject: input_mobject,
                 });
                 let output_mobject = construct
-                    .construct(input, &mut child_supervisor)
+                    .construct(input, &child_supervisor)
                     .archive(|steady_timeline, _, _| steady_timeline.mobject.clone());
                 supervisor.launch_timeline(DynamicTimeline {
                     content: DiscreteTimelineContent {
@@ -297,7 +297,7 @@ where
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct IdentityRate;
+pub struct IdentityRate;
 
 impl Rate for IdentityRate {
     fn eval(&self, t: f32) -> f32 {
@@ -306,7 +306,7 @@ impl Rate for IdentityRate {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct ComposeRate<R0, R1>(R0, R1);
+pub struct ComposeRate<R0, R1>(R0, R1);
 
 impl<R0, R1> Rate for ComposeRate<R0, R1>
 where

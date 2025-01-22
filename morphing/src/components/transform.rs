@@ -18,11 +18,11 @@ pub struct Transform {
     scale: f32,
 }
 
-pub(crate) struct TransformShaderTypes {
+pub struct TransformShaderTypes {
     transform_uniform: TransformUniform,
 }
 
-struct TransformBuffers {
+pub struct TransformBuffers {
     transform_uniform: wgpu::Buffer,
 }
 

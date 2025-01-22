@@ -24,14 +24,14 @@ pub struct Gradient {
     pub angular_stops: Vec<(f32, palette::Srgba<f32>)>,
 }
 
-struct PaintBuffers {
+pub struct PaintBuffers {
     paint_uniform: wgpu::Buffer,
     gradients_storage: wgpu::Buffer,
     radial_stops_storage: wgpu::Buffer,
     angular_stops_storage: wgpu::Buffer,
 }
 
-pub(crate) struct PaintShaderTypes {
+pub struct PaintShaderTypes {
     paint_uniform: PaintUniform,
     gradients_storage: Vec<GradientStorage>,
     radial_stops_storage: Vec<GradientStopStorage>,

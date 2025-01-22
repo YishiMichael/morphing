@@ -1,11 +1,9 @@
 use std::fmt::Debug;
 use std::ops::Range;
-// use std::sync::LazyLock;
 
 pub trait Timeline:
     'static + Debug + serde_traitobject::Serialize + serde_traitobject::Deserialize
 {
-    // fn id(&self) -> &'static str;
     fn presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation>;
 }
 
@@ -19,14 +17,6 @@ pub trait Presentation {
         render_pass: &mut wgpu::RenderPass,
     );
 }
-
-// static TIMELINE_REGISTRY: LazyLock<serde_flexitos::MapRegistry<dyn Timeline>> =
-//     LazyLock::new(|| {
-//         let mut registry = serde_flexitos::MapRegistry::<dyn Timeline>::new("timeline");
-//         // TODO: the hard part, register a deserializer that can handle Constant<T> generically.
-//         //registry.register(Constant::ID, |d| Ok(Box::new(erased_serde::deserialize::<Constant<T>>(d)?)));
-//         registry
-//     });
 
 pub mod steady {
     use std::ops::Range;
@@ -48,8 +38,6 @@ pub mod steady {
     where
         M: Mobject,
     {
-        // type Presentation<'t> = SteadyTimelinePresentation<M::Realization> where M: 't;
-
         fn presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation> {
             Box::new(SteadyTimelinePresentation {
                 realization: self.mobject.realize(device),
@@ -156,8 +144,6 @@ pub mod dynamic {
         ME: DynamicTimelineMetric,
         R: Rate,
     {
-        // type Presentation<'t> = DynamicTimelinePresentation<'t, CO::ContentPresentation<'t>, ME, R> where CO: 't, ME: 't, R: 't;
-
         fn presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation> {
             Box::new(DynamicTimelinePresentation {
                 content_presentation: self.content.content_presentation(device),
@@ -213,8 +199,6 @@ pub mod action {
     #[derive(Debug, Deserialize, Serialize)]
     pub struct ActionTimelineContent<M, D> {
         pub(crate) mobject: M,
-        // pub(crate) source_mobject: M,
-        // pub(crate) target_mobject: M,
         pub(crate) diff: D,
     }
 
@@ -273,7 +257,6 @@ pub mod action {
             self.diff
                 .apply_realization(&mut realization, &self.reference_mobject, time, queue);
             realization.render(render_pass);
-            // self.collapse(time).render(renderer);
         }
     }
 }

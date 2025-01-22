@@ -1,3 +1,4 @@
+use std::ops::BitOr;
 use std::sync::Arc;
 
 use pollster::FutureExt;
@@ -38,7 +39,7 @@ impl Renderer {
                         wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
                     ]
                     .into_iter()
-                    .fold(wgpu::Features::empty(), std::ops::BitOr::bitor),
+                    .fold(wgpu::Features::empty(), BitOr::bitor),
                     required_limits: wgpu::Limits::default(),
                     memory_hints: wgpu::MemoryHints::Performance,
                 },

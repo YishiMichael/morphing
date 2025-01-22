@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::path::PathBuf;
 
 use comemo::Track;
@@ -230,7 +231,7 @@ impl typst::World for TypstWorld {
     }
 }
 
-impl std::ops::Deref for TypstWorld {
+impl Deref for TypstWorld {
     type Target = dyn typst::World;
 
     fn deref(&self) -> &Self::Target {

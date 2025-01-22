@@ -19,11 +19,11 @@ pub struct Camera {
     projection_matrix: nalgebra::Matrix4<f32>,
 }
 
-pub(crate) struct CameraShaderTypes {
+pub struct CameraShaderTypes {
     camera_uniform: CameraUniform,
 }
 
-struct CameraBuffers {
+pub struct CameraBuffers {
     camera_uniform: wgpu::Buffer,
 }
 

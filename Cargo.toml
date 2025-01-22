@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "morphing",
+    "morphing_macros",
     "examples",
     "winit-egui-wgpu-template",
 ]

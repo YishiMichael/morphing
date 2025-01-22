@@ -1,3 +1,2 @@
 [toolchain]
-# this is currently tracking the version used by metatypedev/metatype
-channel = "1.81"
+channel = "nightly"

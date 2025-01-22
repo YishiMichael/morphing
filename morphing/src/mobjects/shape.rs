@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::OnceLock;
 
 use encase::ShaderType;
@@ -66,7 +67,7 @@ impl MobjectRealization for Vec<PlanarTrianglesRealization> {
 
 static PLANAR_TRNANGLES_PIPELINE: OnceLock<wgpu::RenderPipeline> = OnceLock::new();
 
-pub(crate) struct PlanarTrianglesRealization {
+pub struct PlanarTrianglesRealization {
     pipeline: &'static wgpu::RenderPipeline,
     transform_bind_group: wgpu::BindGroup,
     paint_bind_group: wgpu::BindGroup,
@@ -80,7 +81,7 @@ impl PlanarTrianglesRealization {
         PLANAR_TRNANGLES_PIPELINE.get_or_init(|| {
             let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
-                source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(include_str!(
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
                     "../shaders/planar_triangles.wgsl"
                 ))),
             });
