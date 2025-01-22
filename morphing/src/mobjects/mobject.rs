@@ -17,7 +17,7 @@ pub trait Mobject:
     fn realize(&self, device: &wgpu::Device) -> Self::Realization;
 }
 
-pub trait MobjectRealization {
+pub trait MobjectRealization: 'static {
     fn render(&self, render_pass: &mut wgpu::RenderPass);
 }
 

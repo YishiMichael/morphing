@@ -3,8 +3,6 @@ use std::ops::Range;
 
 use itertools::Itertools;
 use palette::Srgba;
-use serde::Deserialize;
-use serde::Serialize;
 use ttf_parser::OutlineBuilder;
 
 use super::super::components::fill::Fill;
@@ -40,13 +38,13 @@ impl MobjectBuilder for Typst {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 struct TypstMobjectToken {
     span: Option<Range<usize>>,
     mobject: ShapeMobject,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct TypstMobject {
     text: String,
     tokens: Vec<TypstMobjectToken>,

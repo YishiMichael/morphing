@@ -30,10 +30,10 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
     let block = quote::quote! {
         fn #scene_name(
             #scene_settings: ::morphing::toplevel::settings::SceneSettings,
-        ) -> ::morphing::toplevel::scene::SceneTimelineCollectionModule {
+        ) -> ::morphing::toplevel::scene::SceneTimelines {
             #scene_fn
             #override_settings_stmt
-            ::morphing::toplevel::scene::SceneTimelineCollectionModule::new(stringify!(#scene_name), #scene_settings, #scene_name)
+            ::morphing::toplevel::scene::SceneTimelines::new(stringify!(#scene_name), #scene_settings, #scene_name)
         }
     };
     block.into()

@@ -4,8 +4,6 @@ use encase::ShaderType;
 use geometric_algebra::ppga3d as pga;
 use geometric_algebra::GeometricProduct;
 use geometric_algebra::One;
-use serde::Deserialize;
-use serde::Serialize;
 use wgpu::util::DeviceExt;
 
 use super::component::Component;
@@ -13,7 +11,7 @@ use super::component::ComponentShaderTypes;
 use super::motor::Motor;
 use super::paint::QueueWriteBufferMutWrapper;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Camera {
     view_motor: Motor,
     projection_matrix: nalgebra::Matrix4<f32>,

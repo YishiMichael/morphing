@@ -4,10 +4,48 @@ use std::ops::Range;
 pub trait Timeline:
     'static + Debug + serde_traitobject::Serialize + serde_traitobject::Deserialize
 {
-    fn presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation>;
+    fn presentation(&self, device: &wgpu::Device) -> Box<dyn Presentation>;
 }
 
-pub trait Presentation {
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct TimelineEntry {
+    time_interval: Range<f32>,
+    #[serde(with = "serde_traitobject")]
+    timeline: Box<dyn Timeline>,
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct TimelineEntries(Vec<TimelineEntry>);
+
+impl TimelineEntries {
+    pub(crate) fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub(crate) fn push<T>(&mut self, time_interval: Range<f32>, timeline: T)
+    where
+        T: Timeline,
+    {
+        self.0.push(TimelineEntry {
+            time_interval,
+            timeline: Box::new(timeline),
+        });
+    }
+
+    pub(crate) fn presentation(&self, device: &wgpu::Device) -> PresentationEntries {
+        PresentationEntries(
+            self.0
+                .iter()
+                .map(|timeline_entry| PresentationEntry {
+                    time_interval: timeline_entry.time_interval.clone(),
+                    presentation: timeline_entry.timeline.presentation(device),
+                })
+                .collect(),
+        )
+    }
+}
+
+pub trait Presentation: 'static {
     fn present(
         &self,
         time: f32,
@@ -18,18 +56,44 @@ pub trait Presentation {
     );
 }
 
+struct PresentationEntry {
+    time_interval: Range<f32>,
+    presentation: Box<dyn Presentation>,
+}
+
+pub(crate) struct PresentationEntries(Vec<PresentationEntry>);
+
+impl PresentationEntries {
+    pub(crate) fn present(
+        &self,
+        time: f32,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_pass: &mut wgpu::RenderPass,
+    ) {
+        for presentation_entry in &self.0 {
+            if presentation_entry.time_interval.contains(&time) {
+                presentation_entry.presentation.present(
+                    time,
+                    presentation_entry.time_interval.clone(),
+                    device,
+                    queue,
+                    render_pass,
+                );
+            }
+        }
+    }
+}
+
 pub mod steady {
     use std::ops::Range;
-
-    use serde::Deserialize;
-    use serde::Serialize;
 
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::mobjects::mobject::MobjectRealization;
     use super::Presentation;
     use super::Timeline;
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     pub struct SteadyTimeline<M> {
         pub(crate) mobject: M,
     }
@@ -38,7 +102,7 @@ pub mod steady {
     where
         M: Mobject,
     {
-        fn presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation> {
+        fn presentation(&self, device: &wgpu::Device) -> Box<dyn Presentation> {
             Box::new(SteadyTimelinePresentation {
                 realization: self.mobject.realize(device),
             })
@@ -70,15 +134,12 @@ pub mod dynamic {
     use std::fmt::Debug;
     use std::ops::Range;
 
-    use serde::Deserialize;
-    use serde::Serialize;
-
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::rates::Rate;
     use super::Presentation;
     use super::Timeline;
 
-    pub trait ContentPresentation {
+    pub trait ContentPresentation: 'static {
         fn content_present(
             &self,
             time: f32,
@@ -95,25 +156,20 @@ pub mod dynamic {
     }
 
     pub trait DynamicTimelineContent:
-        'static + Debug + serde::de::DeserializeOwned + Serialize + Collapse
+        'static + Debug + serde::de::DeserializeOwned + serde::Serialize + Collapse
     {
-        type ContentPresentation<'t>: 't + ContentPresentation
-        where
-            Self: 't;
+        type ContentPresentation: ContentPresentation;
 
-        fn content_presentation<'t>(
-            &'t self,
-            device: &wgpu::Device,
-        ) -> Self::ContentPresentation<'t>;
+        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation;
     }
 
     pub trait DynamicTimelineMetric:
-        'static + Debug + serde::de::DeserializeOwned + Serialize
+        'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize
     {
         fn eval(&self, time: f32, time_interval: Range<f32>) -> f32;
     }
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct RelativeTimelineMetric;
 
     impl DynamicTimelineMetric for RelativeTimelineMetric {
@@ -122,7 +178,7 @@ pub mod dynamic {
         }
     }
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct AbsoluteTimelineMetric;
 
     impl DynamicTimelineMetric for AbsoluteTimelineMetric {
@@ -131,7 +187,7 @@ pub mod dynamic {
         }
     }
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     pub struct DynamicTimeline<CO, ME, R> {
         pub(crate) content: CO,
         pub(crate) metric: ME,
@@ -144,22 +200,22 @@ pub mod dynamic {
         ME: DynamicTimelineMetric,
         R: Rate,
     {
-        fn presentation<'t>(&'t self, device: &wgpu::Device) -> Box<dyn 't + Presentation> {
+        fn presentation(&self, device: &wgpu::Device) -> Box<dyn Presentation> {
             Box::new(DynamicTimelinePresentation {
                 content_presentation: self.content.content_presentation(device),
-                metric: &self.metric,
-                rate: &self.rate,
+                metric: self.metric.clone(),
+                rate: self.rate.clone(),
             })
         }
     }
 
-    pub struct DynamicTimelinePresentation<'t, CP, ME, R> {
-        pub(crate) content_presentation: CP,
-        pub(crate) metric: &'t ME,
-        pub(crate) rate: &'t R,
+    pub struct DynamicTimelinePresentation<CP, ME, R> {
+        content_presentation: CP,
+        metric: ME,
+        rate: R,
     }
 
-    impl<CP, ME, R> Presentation for DynamicTimelinePresentation<'_, CP, ME, R>
+    impl<CP, ME, R> Presentation for DynamicTimelinePresentation<CP, ME, R>
     where
         CP: ContentPresentation,
         ME: DynamicTimelineMetric,
@@ -186,9 +242,6 @@ pub mod dynamic {
 pub mod action {
     use std::cell::RefCell;
 
-    use serde::Deserialize;
-    use serde::Serialize;
-
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::mobjects::mobject::MobjectRealization;
     use super::super::act::MobjectDiff;
@@ -196,7 +249,7 @@ pub mod action {
     use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     pub struct ActionTimelineContent<M, D> {
         pub(crate) mobject: M,
         pub(crate) diff: D,
@@ -221,27 +274,24 @@ pub mod action {
         M: Mobject,
         MD: MobjectDiff<M>,
     {
-        type ContentPresentation<'t> = ActionTimelineContentPresentation<'t, M::Realization, M, MD> where M: 't, MD: 't;
+        type ContentPresentation = ActionTimelineContentPresentation<M::Realization, M, MD>;
 
-        fn content_presentation<'t>(
-            &'t self,
-            device: &wgpu::Device,
-        ) -> Self::ContentPresentation<'t> {
+        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation {
             ActionTimelineContentPresentation {
                 realization: RefCell::new(self.mobject.realize(device)),
-                reference_mobject: &self.mobject,
-                diff: &self.diff,
+                reference_mobject: self.mobject.clone(),
+                diff: self.diff.clone(),
             }
         }
     }
 
-    pub struct ActionTimelineContentPresentation<'t, MR, M, MD> {
+    pub struct ActionTimelineContentPresentation<MR, M, MD> {
         realization: RefCell<MR>,
-        reference_mobject: &'t M,
-        diff: &'t MD,
+        reference_mobject: M,
+        diff: MD,
     }
 
-    impl<M, MD> ContentPresentation for ActionTimelineContentPresentation<'_, M::Realization, M, MD>
+    impl<M, MD> ContentPresentation for ActionTimelineContentPresentation<M::Realization, M, MD>
     where
         M: Mobject,
         MD: MobjectDiff<M>,
@@ -264,9 +314,6 @@ pub mod action {
 pub mod continuous {
     use std::cell::RefCell;
 
-    use serde::Deserialize;
-    use serde::Serialize;
-
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::mobjects::mobject::MobjectRealization;
     use super::super::update::Update;
@@ -274,7 +321,7 @@ pub mod continuous {
     use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     pub struct ContinuousTimelineContent<M, U> {
         pub(crate) mobject: M,
         pub(crate) update: U,
@@ -299,28 +346,24 @@ pub mod continuous {
         M: Mobject,
         U: Update<M>,
     {
-        type ContentPresentation<'t> =
-            ContinuousTimelineContentPresentation<'t, M::Realization, M, U> where M: 't, U: 't;
+        type ContentPresentation = ContinuousTimelineContentPresentation<M::Realization, M, U>;
 
-        fn content_presentation<'t>(
-            &'t self,
-            device: &wgpu::Device,
-        ) -> Self::ContentPresentation<'t> {
+        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation {
             ContinuousTimelineContentPresentation {
                 realization: RefCell::new(self.mobject.realize(device)),
-                reference_mobject: &self.mobject,
-                update: &self.update,
+                reference_mobject: self.mobject.clone(),
+                update: self.update.clone(),
             }
         }
     }
 
-    pub struct ContinuousTimelineContentPresentation<'t, MR, M, U> {
+    pub struct ContinuousTimelineContentPresentation<MR, M, U> {
         realization: RefCell<MR>,
-        reference_mobject: &'t M,
-        update: &'t U,
+        reference_mobject: M,
+        update: U,
     }
 
-    impl<M, U> ContentPresentation for ContinuousTimelineContentPresentation<'_, M::Realization, M, U>
+    impl<M, U> ContentPresentation for ContinuousTimelineContentPresentation<M::Realization, M, U>
     where
         M: Mobject,
         U: Update<M>,
@@ -346,20 +389,17 @@ pub mod continuous {
 }
 
 pub mod discrete {
-    use serde::Deserialize;
-    use serde::Serialize;
-
     use super::super::super::mobjects::mobject::Mobject;
-    use super::super::super::toplevel::scene::PresentationCollection;
-    use super::super::super::toplevel::scene::TimelineCollection;
     use super::dynamic::Collapse;
     use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
+    use super::PresentationEntries;
+    use super::TimelineEntries;
 
-    #[derive(Debug, Deserialize, Serialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     pub struct DiscreteTimelineContent<M> {
         pub(crate) mobject: M,
-        pub(crate) timeline_collection: TimelineCollection,
+        pub(crate) timeline_entries: TimelineEntries,
     }
 
     impl<M> Collapse for DiscreteTimelineContent<M>
@@ -377,23 +417,20 @@ pub mod discrete {
     where
         M: Mobject,
     {
-        type ContentPresentation<'t> = DiscreteTimelineContentPresentation<'t> where M: 't;
+        type ContentPresentation = DiscreteTimelineContentPresentation;
 
-        fn content_presentation<'t>(
-            &'t self,
-            device: &wgpu::Device,
-        ) -> Self::ContentPresentation<'t> {
+        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation {
             DiscreteTimelineContentPresentation {
-                presentation_collection: self.timeline_collection.presentation_collection(device),
+                presentation_entries: self.timeline_entries.presentation(device),
             }
         }
     }
 
-    pub struct DiscreteTimelineContentPresentation<'t> {
-        presentation_collection: PresentationCollection<'t>,
+    pub struct DiscreteTimelineContentPresentation {
+        presentation_entries: PresentationEntries,
     }
 
-    impl ContentPresentation for DiscreteTimelineContentPresentation<'_> {
+    impl ContentPresentation for DiscreteTimelineContentPresentation {
         fn content_present(
             &self,
             time: f32,
@@ -401,8 +438,8 @@ pub mod discrete {
             queue: &wgpu::Queue,
             render_pass: &mut wgpu::RenderPass,
         ) {
-            self.presentation_collection
-                .present_collection(time, device, queue, render_pass);
+            self.presentation_entries
+                .present(time, device, queue, render_pass);
         }
     }
 }

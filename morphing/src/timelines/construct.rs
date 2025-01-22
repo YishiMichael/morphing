@@ -1,6 +1,6 @@
 use super::super::mobjects::mobject::Mobject;
-use super::super::toplevel::scene::Supervisor;
 use super::alive::Alive;
+use super::alive::Supervisor;
 use super::timeline::steady::SteadyTimeline;
 
 pub trait Construct<M>

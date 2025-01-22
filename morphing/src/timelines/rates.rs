@@ -1,10 +1,7 @@
 use std::fmt::Debug;
 use std::ops::Range;
 
-use serde::Deserialize;
-use serde::Serialize;
-
-pub trait Rate: 'static + Debug + serde::de::DeserializeOwned + Serialize {
+pub trait Rate: 'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize {
     fn eval(&self, t: f32) -> f32;
 }
 
@@ -18,7 +15,7 @@ pub trait ApplyRate {
         R: Rate;
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ClampRate(Range<f32>);
 
 impl Rate for ClampRate {
@@ -35,7 +32,7 @@ pub trait Clamp: Sized + ApplyRate {
 
 impl<T> Clamp for T where T: ApplyRate {}
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct SpeedRate(f32);
 
 impl Rate for SpeedRate {
@@ -52,7 +49,7 @@ pub trait Speed: Sized + ApplyRate {
 
 impl<T> Speed for T where T: ApplyRate {}
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct SmoothRate;
 
 impl Rate for SmoothRate {
@@ -69,7 +66,7 @@ pub trait Smooth: Sized + ApplyRate {
 
 impl<T> Smooth for T where T: ApplyRate {}
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct SmootherRate;
 
 impl Rate for SmootherRate {

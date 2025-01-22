@@ -7,8 +7,6 @@ use lyon::tessellation::{
     StrokeVertexConstructor,
 };
 use palette::WithAlpha;
-use serde::Deserialize;
-use serde::Serialize;
 use wgpu::util::DeviceExt;
 
 use super::super::components::camera::{Camera, CameraShaderTypes};
@@ -24,7 +22,7 @@ use super::super::toplevel::palette::{TEAL, WHITE};
 use super::super::toplevel::world::World;
 use super::mobject::{Mobject, MobjectBuilder, MobjectRealization};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ShapeMobject {
     pub(crate) transform: Transform,
     pub(crate) path: Path,
@@ -291,10 +289,7 @@ impl Mobject for ShapeMobject {
 
 // TODO: port ctors from bezier_rs::Subpath
 
-pub struct Rect {
-    pub min: nalgebra::Vector2<f64>,
-    pub max: nalgebra::Vector2<f64>,
-}
+pub struct Rect(pub nalgebra::Vector2<f64>);
 
 impl MobjectBuilder for Rect {
     type Instantiation = ShapeMobject;
@@ -303,8 +298,8 @@ impl MobjectBuilder for Rect {
         ShapeMobject {
             transform: Transform::default(),
             path: Path::from_iter(std::iter::once(bezier_rs::Subpath::new_rect(
-                glam::DVec2::new(self.min.x, self.min.y),
-                glam::DVec2::new(self.max.x, self.max.y),
+                -glam::DVec2::new(self.0.x, self.0.y) / 2.0,
+                glam::DVec2::new(self.0.x, self.0.y) / 2.0,
             ))),
             fill: Some(Fill {
                 options: FillOptions::default(),

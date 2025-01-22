@@ -15,14 +15,14 @@ geometric_algebra = "0.3.0"
 glam = "0.24.2"
 itertools = "0.13.0"
 lyon = { version = "1.0.1", features = ["serialization"] }
-morphing_macros = { path = "../morphing_macros" }
+morphing-macros = { path = "../morphing_macros" }
 nalgebra = { version = "0.33.2", features = ["serde-serialize"] }
 palette = { version = "0.7.6", features = ["serializing"] }
 parking_lot = "0.12.3"
 pollster = "0.4.0"
 rfd = "0.15.2"
 ron = "0.8.1"
-serde = "1.0.217" # to be removed
+serde = "1.0.217"
 serde_traitobject = "0.2.8"
 ttf-parser = "0.24.1"
 typst = "0.12.0"

@@ -1,12 +1,10 @@
+use std::cell::RefCell;
 use std::ops::Range;
 use std::sync::Arc;
 
-use serde::Deserialize;
-use serde::Serialize;
-
 use super::super::mobjects::mobject::Mobject;
 use super::super::mobjects::mobject::MobjectBuilder;
-use super::super::toplevel::scene::Supervisor;
+use super::super::toplevel::world::World;
 use super::act::Act;
 use super::act::ApplyAct;
 use super::act::MobjectDiff;
@@ -24,8 +22,81 @@ use super::timeline::dynamic::DynamicTimelineMetric;
 use super::timeline::dynamic::RelativeTimelineMetric;
 use super::timeline::steady::SteadyTimeline;
 use super::timeline::Timeline;
+use super::timeline::TimelineEntries;
 use super::update::ApplyUpdate;
 use super::update::Update;
+
+pub struct Supervisor<'w> {
+    world: &'w World,
+    time: RefCell<Arc<f32>>,
+    timeline_entries: RefCell<TimelineEntries>,
+}
+
+impl<'w> Supervisor<'w> {
+    pub(crate) fn new(world: &'w World) -> Self {
+        Self {
+            world,
+            time: RefCell::new(Arc::new(0.0)),
+            timeline_entries: RefCell::new(TimelineEntries::new()),
+        }
+    }
+
+    // fn into_timeline_collection(self) -> TimelineCollection {
+    //     TimelineCollection {
+    //         time: *self.time.into_inner(),
+    //         timeline_entries: self.timeline_entries.into_inner(),
+    //     }
+    // }
+
+    pub(crate) fn get_time(&self) -> Arc<f32> {
+        self.time.borrow().clone()
+    }
+
+    pub(crate) fn into_timeline_entries(self) -> TimelineEntries {
+        self.timeline_entries.into_inner()
+    }
+
+    fn launch_timeline<T>(&self, timeline: T) -> Alive<'_, T>
+    where
+        T: Timeline,
+    {
+        Alive {
+            spawn_time: self.get_time(),
+            timeline,
+            supervisor: self,
+        }
+    }
+
+    fn archive_timeline<T>(&self, time_interval: Range<Arc<f32>>, timeline: T)
+    where
+        T: Timeline,
+    {
+        if !Arc::<f32>::ptr_eq(&time_interval.start, &time_interval.end) {
+            let time_interval = *time_interval.start..*time_interval.end;
+            self.timeline_entries
+                .borrow_mut()
+                .push(time_interval, timeline);
+        }
+    }
+
+    pub fn spawn<MB>(&self, mobject_builder: MB) -> Alive<'_, SteadyTimeline<MB::Instantiation>>
+    where
+        MB: MobjectBuilder,
+    {
+        self.launch_timeline(SteadyTimeline {
+            mobject: mobject_builder.instantiate(self.world),
+        })
+    }
+
+    pub fn wait(&self, delta_time: f32) {
+        assert!(
+            delta_time.is_sign_positive(),
+            "`Supervisor::wait` expects a non-negative argument `delta_time`, got {delta_time}",
+        );
+        let mut time = self.time.borrow_mut();
+        *time = Arc::new(**time + delta_time);
+    }
+}
 
 pub struct Alive<'w, T>
 where
@@ -53,28 +124,6 @@ where
         self.supervisor
             .archive_timeline(time_interval, self.timeline);
         output
-    }
-}
-
-impl Supervisor<'_> {
-    pub fn spawn<MB>(&self, mobject_builder: MB) -> Alive<'_, SteadyTimeline<MB::Instantiation>>
-    where
-        MB: MobjectBuilder,
-    {
-        self.launch_timeline(SteadyTimeline {
-            mobject: mobject_builder.instantiate(self.world()),
-        })
-    }
-
-    pub(crate) fn launch_timeline<T>(&self, timeline: T) -> Alive<'_, T>
-    where
-        T: Timeline,
-    {
-        Alive {
-            spawn_time: self.get_time(),
-            timeline,
-            supervisor: self,
-        }
     }
 }
 
@@ -252,7 +301,7 @@ where
     {
         self.steady_mobject
             .archive(|SteadyTimeline { mobject }, supervisor, _| {
-                let child_supervisor = Supervisor::new(supervisor.world());
+                let child_supervisor = Supervisor::new(supervisor.world);
                 let input_mobject = mobject.clone();
                 let input = child_supervisor.launch_timeline(SteadyTimeline {
                     mobject: input_mobject,
@@ -263,7 +312,7 @@ where
                 supervisor.launch_timeline(DynamicTimeline {
                     content: DiscreteTimelineContent {
                         mobject: output_mobject,
-                        timeline_collection: child_supervisor.into_timeline_collection(),
+                        timeline_entries: child_supervisor.into_timeline_entries(),
                     },
                     metric: self.metric,
                     rate: self.rate,
@@ -296,7 +345,7 @@ where
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct IdentityRate;
 
 impl Rate for IdentityRate {
@@ -305,7 +354,7 @@ impl Rate for IdentityRate {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ComposeRate<R0, R1>(R0, R1);
 
 impl<R0, R1> Rate for ComposeRate<R0, R1>
@@ -318,8 +367,8 @@ where
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ComposeMobjectDiff<MD0, MD1>(pub(crate) MD0, pub(crate) MD1);
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ComposeMobjectDiff<MD0, MD1>(MD0, MD1);
 
 impl<M, MD0, MD1> MobjectDiff<M> for ComposeMobjectDiff<MD0, MD1>
 where
