@@ -15,6 +15,7 @@ geometric_algebra = "0.3.0"
 glam = "0.24.2"
 itertools = "0.13.0"
 lyon = { version = "1.0.1", features = ["serialization"] }
+morphing_macros = { path = "../morphing_macros" }
 nalgebra = { version = "0.33.2", features = ["serde-serialize"] }
 palette = { version = "0.7.6", features = ["serializing"] }
 parking_lot = "0.12.3"
