@@ -1,0 +1,31 @@
+[package]
+name = "morphing"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+bezier-rs = { version = "0.4.0", features = ["serde"] }
+comemo = "0.4.0"
+egui = "0.30.0"
+encase = { version = "0.10.0", features = ["nalgebra"] }
+env_logger = "0.11.6"
+essi-ffmpeg = "0.2.0"
+geometric_algebra = "0.3.0"
+glam = "0.24.2"
+itertools = "0.13.0"
+lyon = { version = "1.0.1", features = ["serialization"] }
+nalgebra = { version = "0.33.2", features = ["serde-serialize"] }
+palette = { version = "0.7.6", features = ["serializing"] }
+parking_lot = "0.12.3"
+pollster = "0.4.0"
+rfd = "0.15.2"
+ron = "0.8.1"
+serde = "1.0.217" # to be removed
+serde_traitobject = "0.2.8"
+ttf-parser = "0.24.1"
+typst = "0.12.0"
+typst-kit = { version = "0.12.0", features = ["embed-fonts"] }
+typst-svg = "0.12.0" # to be removed
+wgpu = "23.0.1"
+winit = "0.30.8"
