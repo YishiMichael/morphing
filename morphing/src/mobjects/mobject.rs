@@ -65,22 +65,22 @@ pub trait MobjectBuilder {
 // #[derive(Clone)]
 // pub struct EmptyMobject;
 
-impl Mobject for () {
-    type Realization = ();
+// impl Mobject for () {
+//     type Realization = ();
 
-    fn realize(&self, _device: &wgpu::Device) -> Self::Realization {
-        ()
-    }
-}
+//     fn realize(&self, _device: &wgpu::Device) -> Self::Realization {
+//         ()
+//     }
+// }
 
-impl MobjectBuilder for () {
-    type Instantiation = ();
+// impl MobjectBuilder for () {
+//     type Instantiation = ();
 
-    fn instantiate(self, _world: &World) -> Self::Instantiation {
-        ()
-    }
-}
+//     fn instantiate(self, _world: &World) -> Self::Instantiation {
+//         ()
+//     }
+// }
 
-impl MobjectRealization for () {
-    fn render(&self, _render_pass: &mut wgpu::RenderPass) {}
-}
+// impl MobjectRealization for () {
+//     fn render(&self, _render_pass: &mut wgpu::RenderPass) {}
+// }

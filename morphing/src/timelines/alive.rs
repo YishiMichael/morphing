@@ -45,10 +45,7 @@ pub struct Alive<'s, T> {
     timeline: T,
 }
 
-impl<'w, T> Alive<'w, T>
-where
-    T: Clone + Timeline,
-{
+impl<'w, T> Alive<'w, T> {
     fn new(supervisor: &'w Supervisor, timeline: T) -> Self {
         Self {
             supervisor,
@@ -59,6 +56,7 @@ where
 
     fn archive<F, O>(self, f: F) -> O
     where
+        T: Clone + Timeline,
         F: FnOnce(&'w Supervisor, Range<f32>, T) -> O,
     {
         let Alive {
@@ -176,7 +174,7 @@ pub mod traits {
     }
 }
 
-pub mod unit_impl {
+pub mod base_impl {
     use std::sync::Arc;
 
     use super::super::super::mobjects::mobject::Mobject;
@@ -540,7 +538,7 @@ pub mod unit_impl {
     }
 }
 
-pub mod tuple_impl {
+pub mod derived_impl {
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::act::Act;
     use super::super::construct::Construct;
@@ -557,70 +555,83 @@ pub mod tuple_impl {
     use super::traits::Spawn;
     use super::Supervisor;
 
-    impl<T0, T1> Spawn for (T0, T1)
+    pub trait Container1<T0> {
+        type Output<U0>;
+
+        fn map1<F, U0>(self, f: F) -> Self::Output<U0>
+        where
+            F: FnMut(T0) -> U0;
+    }
+
+    impl<T0, const N: usize> Container1<T0> for [T0; N] {
+        type Output<U0> = [U0; N];
+
+        fn map1<F, U0>(self, f: F) -> Self::Output<U0>
+        where
+            F: FnMut(T0) -> U0,
+        {
+            self.map(f)
+        }
+    }
+
+    impl<T0, const N: usize> Spawn for [T0; N]
     where
         T0: Spawn,
-        T1: Spawn,
     {
-        type Output<'s> = (T0::Output<'s>, T1::Output<'s>);
+        type Output<'s> = <Self as Container1<T0>>::Output<T0::Output<'s>>;
 
         fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
-            (self.0.spawn(supervisor), self.1.spawn(supervisor))
+            self.map1(|element| element.spawn(supervisor))
         }
     }
 
-    impl<T0, T1> Destroy for (T0, T1)
+    impl<T0, const N: usize> Destroy for [T0; N]
     where
         T0: Destroy,
-        T1: Destroy,
     {
         fn destroy(self) {
-            (self.0.destroy(), self.1.destroy());
+            self.map1(|element| element.destroy());
         }
     }
 
-    impl<T0, T1> Animate for (T0, T1)
+    impl<T0, const N: usize> Animate for [T0; N]
     where
         T0: Animate,
-        T1: Animate,
     {
-        type Output = (T0::Output, T1::Output);
+        type Output = <Self as Container1<T0>>::Output<T0::Output>;
 
         fn animate(self) -> Self::Output {
-            (self.0.animate(), self.1.animate())
+            self.map1(|element| element.animate())
         }
     }
 
-    impl<T0, T1> Animating for (T0, T1)
+    impl<T0, const N: usize> Animating for [T0; N]
     where
         T0: Animating,
-        T1: Animating,
     {
-        type Output = (T0::Output, T1::Output);
+        type Output = <Self as Container1<T0>>::Output<T0::Output>;
 
         fn animating(self) -> Self::Output {
-            (self.0.animating(), self.1.animating())
+            self.map1(|element| element.animating())
         }
     }
 
-    impl<T0, T1> Collapse for (T0, T1)
+    impl<T0, const N: usize> Collapse for [T0; N]
     where
         T0: Collapse,
-        T1: Collapse,
     {
-        type Output = (T0::Output, T1::Output);
+        type Output = <Self as Container1<T0>>::Output<T0::Output>;
 
         fn collapse(self) -> Self::Output {
-            (self.0.collapse(), self.1.collapse())
+            self.map1(|element| element.collapse())
         }
     }
 
-    impl<T0, T1> ApplyRate for (T0, T1)
+    impl<T0, const N: usize> ApplyRate for [T0; N]
     where
         T0: ApplyRate,
-        T1: ApplyRate,
     {
-        type Output<RA> = (T0::Output<RA>, T1::Output<RA>)
+        type Output<RA> = <Self as Container1<T0>>::Output<T0::Output<RA>>
         where
             RA: Rate;
 
@@ -628,20 +639,16 @@ pub mod tuple_impl {
         where
             RA: Rate,
         {
-            (
-                self.0.apply_rate(rate.clone()),
-                self.1.apply_rate(rate.clone()),
-            )
+            self.map1(|element| element.apply_rate(rate.clone()))
         }
     }
 
-    impl<M, T0, T1> ApplyAct<M> for (T0, T1)
+    impl<M, T0, const N: usize> ApplyAct<M> for [T0; N]
     where
         M: Mobject,
         T0: ApplyAct<M>,
-        T1: ApplyAct<M>,
     {
-        type Output<A> = (T0::Output<A>, T1::Output<A>)
+        type Output<A> = <Self as Container1<T0>>::Output<T0::Output<A>>
         where
             A: Act<M>;
 
@@ -649,17 +656,16 @@ pub mod tuple_impl {
         where
             A: Act<M>,
         {
-            (self.0.apply_act(act.clone()), self.1.apply_act(act.clone()))
+            self.map1(|element| element.apply_act(act.clone()))
         }
     }
 
-    impl<M, T0, T1> ApplyUpdate<M> for (T0, T1)
+    impl<M, T0, const N: usize> ApplyUpdate<M> for [T0; N]
     where
         M: Mobject,
         T0: ApplyUpdate<M>,
-        T1: ApplyUpdate<M>,
     {
-        type Output<U> = (T0::Output<U>, T1::Output<U>)
+        type Output<U> = <Self as Container1<T0>>::Output<T0::Output<U>>
         where
             U: Update<M>;
 
@@ -667,20 +673,16 @@ pub mod tuple_impl {
         where
             U: Update<M>,
         {
-            (
-                self.0.apply_update(update.clone()),
-                self.1.apply_update(update.clone()),
-            )
+            self.map1(|element| element.apply_update(update.clone()))
         }
     }
 
-    impl<M, T0, T1> ApplyConstruct<M> for (T0, T1)
+    impl<M, T0, const N: usize> ApplyConstruct<M> for [T0; N]
     where
         M: Mobject,
         T0: ApplyConstruct<M>,
-        T1: ApplyConstruct<M>,
     {
-        type Output<C> = (T0::Output<C>, T1::Output<C>)
+        type Output<C> = <Self as Container1<T0>>::Output<T0::Output<C>>
         where
             C: Construct<M>;
 
@@ -688,10 +690,295 @@ pub mod tuple_impl {
         where
             C: Construct<M>,
         {
-            (
-                self.0.apply_construct(construct.clone()),
-                self.1.apply_construct(construct.clone()),
-            )
+            self.map1(|element| element.apply_construct(construct.clone()))
         }
     }
+    ////////
+
+    macro_rules! impl_tuple {
+        ($($index:tt),*) => {
+            paste::paste! {
+                impl<$([<T $index>],)*> Spawn for ($([<T $index>],)*)
+                where
+                    $([<T $index>]: Spawn,)*
+                {
+                    type Output<'s> = ($([<T $index>]::Output<'s>,)*);
+
+                    #[allow(unused_variables)]
+                    fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
+                        ($(self.$index.spawn(supervisor),)*)
+                    }
+                }
+
+                impl<$([<T $index>],)*> Destroy for ($([<T $index>],)*)
+                where
+                    $([<T $index>]: Destroy,)*
+                {
+                    fn destroy(self) {
+                        ($(self.$index.destroy(),)*);
+                    }
+                }
+
+                impl<$([<T $index>],)*> Animate for ($([<T $index>],)*)
+                where
+                    $([<T $index>]: Animate,)*
+                {
+                    type Output = ($([<T $index>]::Output,)*);
+
+                    fn animate(self) -> Self::Output {
+                        ($(self.$index.animate(),)*)
+                    }
+                }
+
+                impl<$([<T $index>],)*> Animating for ($([<T $index>],)*)
+                where
+                    $([<T $index>]: Animating,)*
+                {
+                    type Output = ($([<T $index>]::Output,)*);
+
+                    fn animating(self) -> Self::Output {
+                        ($(self.$index.animating(),)*)
+                    }
+                }
+
+                impl<$([<T $index>],)*> Collapse for ($([<T $index>],)*)
+                where
+                    $([<T $index>]: Collapse,)*
+                {
+                    type Output = ($([<T $index>]::Output,)*);
+
+                    fn collapse(self) -> Self::Output {
+                        ($(self.$index.collapse(),)*)
+                    }
+                }
+
+                impl<$([<T $index>],)*> ApplyRate for ($([<T $index>],)*)
+                where
+                    $([<T $index>]: ApplyRate,)*
+                {
+                    type Output<RA> = ($([<T $index>]::Output<RA>,)*)
+                    where
+                        RA: Rate;
+
+                    #[allow(unused_variables)]
+                    fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
+                    where
+                        RA: Rate,
+                    {
+                        ($(self.$index.apply_rate(rate.clone()),)*)
+                    }
+                }
+
+                impl<M, $([<T $index>],)*> ApplyAct<M> for ($([<T $index>],)*)
+                where
+                    M: Mobject,
+                    $([<T $index>]: ApplyAct<M>,)*
+                {
+                    type Output<A> = ($([<T $index>]::Output<A>,)*)
+                    where
+                        A: Act<M>;
+
+                    #[allow(unused_variables)]
+                    fn apply_act<A>(self, act: A) -> Self::Output<A>
+                    where
+                        A: Act<M>,
+                    {
+                        ($(self.$index.apply_act(act.clone()),)*)
+                    }
+                }
+
+                impl<M, $([<T $index>],)*> ApplyUpdate<M> for ($([<T $index>],)*)
+                where
+                    M: Mobject,
+                    $([<T $index>]: ApplyUpdate<M>,)*
+                {
+                    type Output<U> = ($([<T $index>]::Output<U>,)*)
+                    where
+                        U: Update<M>;
+
+                    #[allow(unused_variables)]
+                    fn apply_update<U>(self, update: U) -> Self::Output<U>
+                    where
+                        U: Update<M>,
+                    {
+                        ($(self.$index.apply_update(update.clone()),)*)
+                    }
+                }
+
+                impl<M, $([<T $index>],)*> ApplyConstruct<M> for ($([<T $index>],)*)
+                where
+                    M: Mobject,
+                    $([<T $index>]: ApplyConstruct<M>,)*
+                {
+                    type Output<C> = ($([<T $index>]::Output<C>,)*)
+                    where
+                        C: Construct<M>;
+
+                    #[allow(unused_variables)]
+                    fn apply_construct<C>(self, construct: C) -> Self::Output<C>
+                    where
+                        C: Construct<M>,
+                    {
+                        ($(self.$index.apply_construct(construct.clone()),)*)
+                    }
+                }
+            }
+        };
+    }
+
+    impl_tuple!();
+    impl_tuple!(0);
+    impl_tuple!(0, 1);
+    impl_tuple!(0, 1, 2);
+    impl_tuple!(0, 1, 2, 3);
+    impl_tuple!(0, 1, 2, 3, 4);
+    impl_tuple!(0, 1, 2, 3, 4, 5);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 }
+
+// pub mod array_impl {
+//     use super::super::super::mobjects::mobject::Mobject;
+//     use super::super::act::Act;
+//     use super::super::construct::Construct;
+//     use super::super::rates::Rate;
+//     use super::super::update::Update;
+//     use super::traits::Animate;
+//     use super::traits::Animating;
+//     use super::traits::ApplyAct;
+//     use super::traits::ApplyConstruct;
+//     use super::traits::ApplyRate;
+//     use super::traits::ApplyUpdate;
+//     use super::traits::Collapse;
+//     use super::traits::Destroy;
+//     use super::traits::Spawn;
+//     use super::Supervisor;
+
+//     impl<T, const N: usize> Spawn for [T; N]
+//     where
+//         T: Spawn,
+//     {
+//         type Output<'s> = [T::Output<'s>; N];
+
+//         fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
+//             self.map(|element| element.spawn(supervisor))
+//         }
+//     }
+
+//     impl<T, const N: usize> Destroy for [T; N]
+//     where
+//         T: Destroy,
+//     {
+//         fn destroy(self) {
+//             self.map(|element| element.destroy());
+//         }
+//     }
+
+//     impl<T, const N: usize> Animate for [T; N]
+//     where
+//         T: Animate,
+//     {
+//         type Output = [T::Output; N];
+
+//         fn animate(self) -> Self::Output {
+//             self.map(|element| element.animate())
+//         }
+//     }
+
+//     impl<T, const N: usize> Animating for [T; N]
+//     where
+//         T: Animating,
+//     {
+//         type Output = [T::Output; N];
+
+//         fn animating(self) -> Self::Output {
+//             self.map(|element| element.animating())
+//         }
+//     }
+
+//     impl<T, const N: usize> Collapse for [T; N]
+//     where
+//         T: Collapse,
+//     {
+//         type Output = [T::Output; N];
+
+//         fn collapse(self) -> Self::Output {
+//             self.map(|element| element.collapse())
+//         }
+//     }
+
+//     impl<T, const N: usize> ApplyRate for [T; N]
+//     where
+//         T: ApplyRate,
+//     {
+//         type Output<RA> = [T::Output<RA>; N]
+//         where
+//             RA: Rate;
+
+//         fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
+//         where
+//             RA: Rate,
+//         {
+//             self.map(|element| element.apply_rate(rate.clone()))
+//         }
+//     }
+
+//     impl<M, T, const N: usize> ApplyAct<M> for [T; N]
+//     where
+//         M: Mobject,
+//         T: ApplyAct<M>,
+//     {
+//         type Output<A> = [T::Output<A>; N]
+//         where
+//             A: Act<M>;
+
+//         fn apply_act<A>(self, act: A) -> Self::Output<A>
+//         where
+//             A: Act<M>,
+//         {
+//             self.map(|element| element.apply_act(act.clone()))
+//         }
+//     }
+
+//     impl<M, T, const N: usize> ApplyUpdate<M> for [T; N]
+//     where
+//         M: Mobject,
+//         T: ApplyUpdate<M>,
+//     {
+//         type Output<U> = [T::Output<U>; N]
+//         where
+//             U: Update<M>;
+
+//         fn apply_update<U>(self, update: U) -> Self::Output<U>
+//         where
+//             U: Update<M>,
+//         {
+//             self.map(|element| element.apply_update(update.clone()))
+//         }
+//     }
+
+//     impl<M, T, const N: usize> ApplyConstruct<M> for [T; N]
+//     where
+//         M: Mobject,
+//         T: ApplyConstruct<M>,
+//     {
+//         type Output<C> = [T::Output<C>; N]
+//         where
+//             C: Construct<M>;
+
+//         fn apply_construct<C>(self, construct: C) -> Self::Output<C>
+//         where
+//             C: Construct<M>,
+//         {
+//             self.map(|element| element.apply_construct(construct.clone()))
+//         }
+//     }
+// }
