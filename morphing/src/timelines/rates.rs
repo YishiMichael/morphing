@@ -5,14 +5,14 @@ pub trait Rate: 'static + Clone + Debug + serde::de::DeserializeOwned + serde::S
     fn eval(&self, t: f32) -> f32;
 }
 
-pub trait ApplyRate {
+pub trait ApplyRate: Sized {
     type Output<R>
     where
-        R: Clone + Rate;
+        R: Rate;
 
     fn apply_rate<R>(self, rate: R) -> Self::Output<R>
     where
-        R: Clone + Rate;
+        R: Rate;
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -24,7 +24,7 @@ impl Rate for ClampRate {
     }
 }
 
-pub trait Clamp: Sized + ApplyRate {
+pub trait Clamp: ApplyRate {
     fn clamp(self, range: Range<f32>) -> Self::Output<ClampRate> {
         self.apply_rate(ClampRate(range))
     }
@@ -41,7 +41,7 @@ impl Rate for SpeedRate {
     }
 }
 
-pub trait Speed: Sized + ApplyRate {
+pub trait Speed: ApplyRate {
     fn speed(self, speed: f32) -> Self::Output<SpeedRate> {
         self.apply_rate(SpeedRate(speed))
     }
@@ -58,7 +58,7 @@ impl Rate for SmoothRate {
     }
 }
 
-pub trait Smooth: Sized + ApplyRate {
+pub trait Smooth: ApplyRate {
     fn smooth(self) -> Self::Output<SmoothRate> {
         self.apply_rate(SmoothRate)
     }
@@ -75,7 +75,7 @@ impl Rate for SmootherRate {
     }
 }
 
-pub trait Smoother: Sized + ApplyRate {
+pub trait Smoother: ApplyRate {
     fn smooth(self) -> Self::Output<SmootherRate> {
         self.apply_rate(SmootherRate)
     }

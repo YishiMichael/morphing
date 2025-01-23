@@ -150,14 +150,19 @@ pub mod dynamic {
         );
     }
 
-    pub trait Collapse {
+    pub trait TimelineContentCollapse {
         type Output: Mobject;
 
-        fn collapse(self, time: f32) -> Self::Output;
+        fn content_collapse(self, time: f32) -> Self::Output;
     }
 
     pub trait DynamicTimelineContent:
-        'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize + Collapse
+        'static
+        + Clone
+        + Debug
+        + serde::de::DeserializeOwned
+        + serde::Serialize
+        + TimelineContentCollapse
     {
         type ContentPresentation: ContentPresentation;
 
@@ -197,9 +202,9 @@ pub mod dynamic {
 
     impl<CO, ME, R> Timeline for DynamicTimeline<CO, ME, R>
     where
-        CO: Clone + DynamicTimelineContent,
-        ME: Clone + DynamicTimelineMetric,
-        R: Clone + Rate,
+        CO: DynamicTimelineContent,
+        ME: DynamicTimelineMetric,
+        R: Rate,
     {
         fn presentation(&self, device: &wgpu::Device) -> Box<dyn Presentation> {
             Box::new(DynamicTimelinePresentation {
@@ -244,13 +249,13 @@ pub mod dynamic {
         pub(crate) mobject: M,
     }
 
-    impl<M> Collapse for IndeterminedTimelineContent<M>
+    impl<M> TimelineContentCollapse for IndeterminedTimelineContent<M>
     where
         M: Mobject,
     {
         type Output = M;
 
-        fn collapse(self, _time: f32) -> Self::Output {
+        fn content_collapse(self, _time: f32) -> Self::Output {
             self.mobject
         }
     }
@@ -294,9 +299,9 @@ pub mod action {
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::mobjects::mobject::MobjectRealization;
     use super::super::act::MobjectDiff;
-    use super::dynamic::Collapse;
     use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
+    use super::dynamic::TimelineContentCollapse;
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct ActionTimelineContent<M, D> {
@@ -304,14 +309,14 @@ pub mod action {
         pub(crate) diff: D,
     }
 
-    impl<M, MD> Collapse for ActionTimelineContent<M, MD>
+    impl<M, MD> TimelineContentCollapse for ActionTimelineContent<M, MD>
     where
         M: Mobject,
         MD: MobjectDiff<M>,
     {
         type Output = M;
 
-        fn collapse(self, time: f32) -> Self::Output {
+        fn content_collapse(self, time: f32) -> Self::Output {
             let mut mobject = self.mobject;
             self.diff.apply(&mut mobject, time);
             mobject
@@ -366,9 +371,9 @@ pub mod continuous {
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::mobjects::mobject::MobjectRealization;
     use super::super::update::Update;
-    use super::dynamic::Collapse;
     use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
+    use super::dynamic::TimelineContentCollapse;
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct ContinuousTimelineContent<M, U> {
@@ -376,14 +381,14 @@ pub mod continuous {
         pub(crate) update: U,
     }
 
-    impl<M, U> Collapse for ContinuousTimelineContent<M, U>
+    impl<M, U> TimelineContentCollapse for ContinuousTimelineContent<M, U>
     where
         M: Mobject,
         U: Update<M>,
     {
         type Output = M;
 
-        fn collapse(self, time: f32) -> Self::Output {
+        fn content_collapse(self, time: f32) -> Self::Output {
             let mut mobject = self.mobject;
             self.update.update(&mut mobject, time);
             mobject
@@ -442,9 +447,9 @@ pub mod discrete {
     use std::sync::Arc;
 
     use super::super::super::mobjects::mobject::Mobject;
-    use super::dynamic::Collapse;
     use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
+    use super::dynamic::TimelineContentCollapse;
     use super::PresentationEntries;
     use super::TimelineEntries;
 
@@ -454,13 +459,13 @@ pub mod discrete {
         pub(crate) timeline_entries: Arc<TimelineEntries>,
     }
 
-    impl<M> Collapse for DiscreteTimelineContent<M>
+    impl<M> TimelineContentCollapse for DiscreteTimelineContent<M>
     where
         M: Mobject,
     {
         type Output = M;
 
-        fn collapse(self, _time: f32) -> Self::Output {
+        fn content_collapse(self, _time: f32) -> Self::Output {
             self.mobject
         }
     }

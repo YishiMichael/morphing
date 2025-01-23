@@ -249,7 +249,10 @@ struct SlotCell<T> {
     accessed: bool,
 }
 
-impl<T: Clone> SlotCell<T> {
+impl<T> SlotCell<T>
+where
+    T: Clone,
+{
     /// Creates a new, empty cell.
     fn new() -> Self {
         Self {
