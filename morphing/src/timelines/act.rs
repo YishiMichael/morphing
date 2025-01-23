@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use super::super::mobjects::mobject::Mobject;
 
-pub trait Act<M>
+pub trait Act<M>: Clone
 where
     M: Mobject,
 {

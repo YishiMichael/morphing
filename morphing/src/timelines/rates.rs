@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::ops::Range;
 
-use super::alive::ApplyRate;
+use super::alive::traits::ApplyRate;
 
 pub trait Rate: 'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize {
     fn eval(&self, t: f32) -> f32;

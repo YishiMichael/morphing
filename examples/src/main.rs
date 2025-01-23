@@ -1,5 +1,5 @@
 use morphing::mobjects::shape::Rect;
-use morphing::timelines::alive::Destroy;
+use morphing::timelines::alive::traits::Destroy;
 use morphing::timelines::alive::Supervisor;
 use morphing::toplevel::scene::execute;
 use morphing::toplevel::scene::scene;

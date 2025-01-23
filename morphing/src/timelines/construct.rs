@@ -3,7 +3,7 @@ use super::alive::Alive;
 use super::alive::Supervisor;
 use super::timeline::steady::SteadyTimeline;
 
-pub trait Construct<M>
+pub trait Construct<M>: Clone
 where
     M: Mobject,
 {
