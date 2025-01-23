@@ -1,18 +1,10 @@
 use std::fmt::Debug;
 use std::ops::Range;
 
+use super::alive::ApplyRate;
+
 pub trait Rate: 'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize {
     fn eval(&self, t: f32) -> f32;
-}
-
-pub trait ApplyRate: Sized {
-    type Output<R>
-    where
-        R: Rate;
-
-    fn apply_rate<R>(self, rate: R) -> Self::Output<R>
-    where
-        R: Rate;
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

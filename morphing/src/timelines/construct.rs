@@ -15,16 +15,3 @@ where
         supervisor: &Supervisor,
     ) -> Alive<'a, SteadyTimeline<Self::Output>>;
 }
-
-pub trait ApplyConstruct<M>
-where
-    M: Mobject,
-{
-    type Output<C>
-    where
-        C: Construct<M>;
-
-    fn apply_construct<C>(self, construct: C) -> Self::Output<C>
-    where
-        C: Construct<M>;
-}

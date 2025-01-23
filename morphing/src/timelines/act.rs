@@ -15,19 +15,6 @@ where
     fn act(self, mobject: &M) -> Self::Diff;
 }
 
-pub trait ApplyAct<M>
-where
-    M: Mobject,
-{
-    type Output<A>
-    where
-        A: Act<M>;
-
-    fn apply_act<A>(self, act: A) -> Self::Output<A>
-    where
-        A: Act<M>;
-}
-
 pub trait MobjectDiff<M>:
     'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize
 where

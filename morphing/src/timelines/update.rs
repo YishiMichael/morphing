@@ -17,16 +17,3 @@ where
         queue: &wgpu::Queue,
     ); // mobject_realization write-only
 }
-
-pub trait ApplyUpdate<M>
-where
-    M: Mobject,
-{
-    type Output<U>
-    where
-        U: Update<M>;
-
-    fn apply_update<U>(self, update: U) -> Self::Output<U>
-    where
-        U: Update<M>;
-}

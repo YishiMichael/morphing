@@ -6,11 +6,8 @@ use super::super::mobjects::mobject::Mobject;
 use super::super::mobjects::mobject::MobjectBuilder;
 use super::super::toplevel::world::World;
 use super::act::Act;
-use super::act::ApplyAct;
 use super::act::MobjectDiff;
-use super::construct::ApplyConstruct;
 use super::construct::Construct;
-use super::rates::ApplyRate;
 use super::rates::Rate;
 use super::timeline::action::ActionTimelineContent;
 use super::timeline::continuous::ContinuousTimelineContent;
@@ -24,7 +21,6 @@ use super::timeline::dynamic::RelativeTimelineMetric;
 use super::timeline::steady::SteadyTimeline;
 use super::timeline::Timeline;
 use super::timeline::TimelineEntries;
-use super::update::ApplyUpdate;
 use super::update::Update;
 
 pub struct Supervisor<'w> {
@@ -50,48 +46,11 @@ impl<'w> Supervisor<'w> {
         self.timeline_entries.into_inner()
     }
 
-    fn launch_timeline<T>(supervisor: &'w Supervisor, timeline: T) -> Alive<'w, T>
+    pub fn spawn<SP>(&'w self, spawn: SP) -> SP::Output<'w>
     where
-        T: Timeline,
+        SP: Spawn,
     {
-        Alive {
-            supervisor,
-            spawn_time: supervisor.get_time(),
-            timeline,
-        }
-    }
-
-    fn archive_timeline<T, F, O>(alive: Alive<'w, T>, f: F) -> O
-    where
-        T: Clone + Timeline,
-        F: FnOnce(&'w Supervisor, Range<f32>, T) -> O,
-    {
-        let supervisor = alive.supervisor;
-        let arc_time_interval = alive.spawn_time..supervisor.get_time();
-        let time_interval = *arc_time_interval.start..*arc_time_interval.end;
-        let timeline = alive.timeline;
-        if Arc::ptr_eq(&arc_time_interval.start, &arc_time_interval.end) {
-            f(supervisor, time_interval, timeline)
-        } else {
-            let output = f(supervisor, time_interval.clone(), timeline.clone());
-            supervisor
-                .timeline_entries
-                .borrow_mut()
-                .push(time_interval, timeline);
-            output
-        }
-    }
-
-    pub fn spawn<MB>(&'w self, mobject_builder: MB) -> Alive<'_, SteadyTimeline<MB::Instantiation>>
-    where
-        MB: MobjectBuilder,
-    {
-        Self::launch_timeline(
-            self,
-            SteadyTimeline {
-                mobject: mobject_builder.instantiate(self.world),
-            },
-        )
+        spawn.spawn(self)
     }
 
     pub fn wait(&self, delta_time: f32) {
@@ -104,38 +63,220 @@ impl<'w> Supervisor<'w> {
     }
 }
 
-pub struct Alive<'s, T>
+pub trait Spawn {
+    type Output<'s>;
+
+    fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s>;
+}
+
+pub trait Destroy {
+    fn destroy(self);
+}
+
+pub trait Animate {
+    type Output;
+
+    fn animate(self) -> Self::Output;
+}
+
+pub trait Animating {
+    type Output;
+
+    fn animating(self) -> Self::Output;
+}
+
+pub trait Collapse {
+    type Output;
+
+    fn collapse(self) -> Self::Output;
+}
+
+pub trait ApplyRate: Sized {
+    type Output<R>
+    where
+        R: Rate;
+
+    fn apply_rate<R>(self, rate: R) -> Self::Output<R>
+    where
+        R: Rate;
+}
+
+pub trait ApplyAct<M>
 where
-    T: Timeline,
+    M: Mobject,
 {
+    type Output<A>
+    where
+        A: Act<M>;
+
+    fn apply_act<A>(self, act: A) -> Self::Output<A>
+    where
+        A: Act<M>;
+}
+
+pub trait ApplyUpdate<M>
+where
+    M: Mobject,
+{
+    type Output<U>
+    where
+        U: Update<M>;
+
+    fn apply_update<U>(self, update: U) -> Self::Output<U>
+    where
+        U: Update<M>;
+}
+
+pub trait ApplyConstruct<M>
+where
+    M: Mobject,
+{
+    type Output<C>
+    where
+        C: Construct<M>;
+
+    fn apply_construct<C>(self, construct: C) -> Self::Output<C>
+    where
+        C: Construct<M>;
+}
+
+pub struct Alive<'s, T> {
     supervisor: &'s Supervisor<'s>,
     spawn_time: Arc<f32>,
     timeline: T,
 }
 
-impl<M> Alive<'_, SteadyTimeline<M>>
+impl<'w, T> Alive<'w, T>
 where
-    M: Mobject,
+    T: Clone + Timeline,
 {
-    pub fn destroy(self) {
-        Supervisor::archive_timeline(self, |_, _, _| ())
+    fn new(supervisor: &'w Supervisor, timeline: T) -> Self {
+        Self {
+            supervisor,
+            spawn_time: supervisor.get_time(),
+            timeline,
+        }
+    }
+
+    fn archive<F, O>(self, f: F) -> O
+    where
+        F: FnOnce(&'w Supervisor, Range<f32>, T) -> O,
+    {
+        let Alive {
+            supervisor,
+            spawn_time,
+            timeline,
+        } = self;
+        let arc_time_interval = spawn_time..supervisor.get_time();
+        let time_interval = *arc_time_interval.start..*arc_time_interval.end;
+        if Arc::ptr_eq(&arc_time_interval.start, &arc_time_interval.end) {
+            f(supervisor, time_interval, timeline)
+        } else {
+            let output = f(supervisor, time_interval.clone(), timeline.clone());
+            supervisor
+                .timeline_entries
+                .borrow_mut()
+                .push(time_interval, timeline);
+            output
+        }
     }
 }
 
-impl<M> ApplyAct<M> for Alive<'_, SteadyTimeline<M>>
+impl<MB> Spawn for MB
+where
+    MB: MobjectBuilder,
+{
+    type Output<'s> = Alive<'s, SteadyTimeline<MB::Instantiation>>;
+
+    fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
+        Alive::new(
+            supervisor,
+            SteadyTimeline {
+                mobject: self.instantiate(supervisor.world),
+            },
+        )
+    }
+}
+
+impl<M> Destroy for Alive<'_, SteadyTimeline<M>>
 where
     M: Mobject,
 {
-    type Output<A> = Self where A: Act<M>;
+    fn destroy(self) {
+        self.archive(|_, _, _| ())
+    }
+}
 
-    fn apply_act<A>(self, act: A) -> Self::Output<A>
-    where
-        A: Act<M>,
-    {
-        Supervisor::archive_timeline(self, |supervisor, _, timeline| {
-            let mut mobject = timeline.mobject;
-            act.act(&mobject).apply(&mut mobject, 1.0);
-            Supervisor::launch_timeline(supervisor, SteadyTimeline { mobject })
+impl<'s, M> Animate for Alive<'s, SteadyTimeline<M>>
+where
+    M: Mobject,
+{
+    type Output = Alive<
+        's,
+        DynamicTimeline<IndeterminedTimelineContent<M>, RelativeTimelineMetric, IdentityRate>,
+    >;
+
+    fn animate(self) -> Self::Output {
+        self.archive(|supervisor, _, timeline| {
+            Alive::new(
+                supervisor,
+                DynamicTimeline {
+                    content: IndeterminedTimelineContent {
+                        mobject: timeline.mobject,
+                    },
+                    metric: RelativeTimelineMetric,
+                    rate: IdentityRate,
+                },
+            )
+        })
+    }
+}
+
+impl<'s, M> Animating for Alive<'s, SteadyTimeline<M>>
+where
+    M: Mobject,
+{
+    type Output = Alive<
+        's,
+        DynamicTimeline<IndeterminedTimelineContent<M>, AbsoluteTimelineMetric, IdentityRate>,
+    >;
+
+    fn animating(self) -> Self::Output {
+        self.archive(|supervisor, _, timeline| {
+            Alive::new(
+                supervisor,
+                DynamicTimeline {
+                    content: IndeterminedTimelineContent {
+                        mobject: timeline.mobject,
+                    },
+                    metric: AbsoluteTimelineMetric,
+                    rate: IdentityRate,
+                },
+            )
+        })
+    }
+}
+
+impl<'s, CO, ME, R> Collapse for Alive<'s, DynamicTimeline<CO, ME, R>>
+where
+    CO: DynamicTimelineContent,
+    ME: DynamicTimelineMetric,
+    R: Rate,
+{
+    type Output = Alive<'s, SteadyTimeline<CO::Output>>;
+
+    fn collapse(self) -> Self::Output {
+        self.archive(|supervisor, time_interval, timeline| {
+            Alive::new(
+                supervisor,
+                SteadyTimeline {
+                    mobject: timeline.content.content_collapse(
+                        timeline
+                            .rate
+                            .eval(timeline.metric.eval(time_interval.end, time_interval)),
+                    ),
+                },
+            )
         })
     }
 }
@@ -154,8 +295,8 @@ where
     where
         RA: Rate,
     {
-        Supervisor::archive_timeline(self, |supervisor, _, timeline| {
-            Supervisor::launch_timeline(
+        self.archive(|supervisor, _, timeline| {
+            Alive::new(
                 supervisor,
                 DynamicTimeline {
                     content: IndeterminedTimelineContent {
@@ -169,69 +310,20 @@ where
     }
 }
 
-impl<'s, M> Alive<'s, SteadyTimeline<M>>
+impl<M> ApplyAct<M> for Alive<'_, SteadyTimeline<M>>
 where
     M: Mobject,
 {
-    pub fn animate(
-        self,
-    ) -> Alive<
-        's,
-        DynamicTimeline<IndeterminedTimelineContent<M>, RelativeTimelineMetric, IdentityRate>,
-    > {
-        Supervisor::archive_timeline(self, |supervisor, _, timeline| {
-            Supervisor::launch_timeline(
-                supervisor,
-                DynamicTimeline {
-                    content: IndeterminedTimelineContent {
-                        mobject: timeline.mobject,
-                    },
-                    metric: RelativeTimelineMetric,
-                    rate: IdentityRate,
-                },
-            )
-        })
-    }
+    type Output<A> = Self where A: Act<M>;
 
-    pub fn animating(
-        self,
-    ) -> Alive<
-        's,
-        DynamicTimeline<IndeterminedTimelineContent<M>, AbsoluteTimelineMetric, IdentityRate>,
-    > {
-        Supervisor::archive_timeline(self, |supervisor, _, timeline| {
-            Supervisor::launch_timeline(
-                supervisor,
-                DynamicTimeline {
-                    content: IndeterminedTimelineContent {
-                        mobject: timeline.mobject,
-                    },
-                    metric: AbsoluteTimelineMetric,
-                    rate: IdentityRate,
-                },
-            )
-        })
-    }
-}
-
-impl<'s, CO, ME, R> Alive<'s, DynamicTimeline<CO, ME, R>>
-where
-    CO: DynamicTimelineContent,
-    ME: DynamicTimelineMetric,
-    R: Rate,
-{
-    pub fn collapse(self) -> Alive<'s, SteadyTimeline<CO::Output>> {
-        Supervisor::archive_timeline(self, |supervisor, time_interval, timeline| {
-            Supervisor::launch_timeline(
-                supervisor,
-                SteadyTimeline {
-                    mobject: timeline.content.content_collapse(
-                        timeline
-                            .rate
-                            .eval(timeline.metric.eval(time_interval.end, time_interval)),
-                    ),
-                },
-            )
+    fn apply_act<A>(self, act: A) -> Self::Output<A>
+    where
+        A: Act<M>,
+    {
+        self.archive(|supervisor, _, timeline| {
+            let mut mobject = timeline.mobject;
+            act.act(&mobject).apply(&mut mobject, 1.0);
+            Alive::new(supervisor, SteadyTimeline { mobject })
         })
     }
 }
@@ -250,10 +342,10 @@ where
     where
         A: Act<M>,
     {
-        Supervisor::archive_timeline(self, |supervisor, _, timeline| {
+        self.archive(|supervisor, _, timeline| {
             let mobject = timeline.content.mobject;
             let diff = act.act(&mobject);
-            Supervisor::launch_timeline(
+            Alive::new(
                 supervisor,
                 DynamicTimeline {
                     content: ActionTimelineContent { mobject, diff },
@@ -279,10 +371,10 @@ where
     where
         A: Act<M>,
     {
-        Supervisor::archive_timeline(self, |supervisor, _, timeline| {
+        self.archive(|supervisor, _, timeline| {
             let mobject = timeline.content.mobject;
             let diff = ComposeMobjectDiff(act.act(&mobject), timeline.content.diff);
-            Supervisor::launch_timeline(
+            Alive::new(
                 supervisor,
                 DynamicTimeline {
                     content: ActionTimelineContent { mobject, diff },
@@ -309,8 +401,8 @@ where
     where
         U: Update<M>,
     {
-        Supervisor::archive_timeline(self, |supervisor, _, timeline| {
-            Supervisor::launch_timeline(
+        self.archive(|supervisor, _, timeline| {
+            Alive::new(
                 supervisor,
                 DynamicTimeline {
                     content: ContinuousTimelineContent {
@@ -340,22 +432,21 @@ where
     where
         C: Construct<M>,
     {
-        Supervisor::archive_timeline(self, |supervisor, _, timeline| {
+        self.archive(|supervisor, _, timeline| {
             let child_supervisor = Supervisor::new(supervisor.world);
             let input_mobject = timeline.content.mobject;
-            let output_mobject = Supervisor::archive_timeline(
-                construct.construct(
-                    Supervisor::launch_timeline(
+            let output_mobject = construct
+                .construct(
+                    Alive::new(
                         &child_supervisor,
                         SteadyTimeline {
                             mobject: input_mobject,
                         },
                     ),
                     &child_supervisor,
-                ),
-                |_, _, steady_timeline| steady_timeline.mobject,
-            );
-            Supervisor::launch_timeline(
+                )
+                .archive(|_, _, steady_timeline| steady_timeline.mobject);
+            Alive::new(
                 supervisor,
                 DynamicTimeline {
                     content: DiscreteTimelineContent {
