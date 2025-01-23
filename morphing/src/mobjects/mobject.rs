@@ -2,16 +2,9 @@ use std::fmt::Debug;
 
 use super::super::toplevel::world::World;
 
-// pub trait VectorSpace: Clone + AddAssign + MulAssign<f32> {}
-
-// impl<T> VectorSpace for T where T: Clone + AddAssign + MulAssign<f32> {}
-
 pub trait Mobject:
     'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize
 {
-    // type Diff: VectorSpace;
-
-    // fn apply_diff(&self, diff: Self::Diff) -> Self;
     type Realization: MobjectRealization;
 
     fn realize(&self, device: &wgpu::Device) -> Self::Realization;
@@ -73,12 +66,6 @@ pub trait MobjectBuilder {
 // pub struct EmptyMobject;
 
 impl Mobject for () {
-    // type Diff = EmptyMobjectDiff;
-
-    // fn apply_diff(&self, _diff: Self::Diff) -> Self {
-    //     Self
-    // }
-
     type Realization = ();
 
     fn realize(&self, _device: &wgpu::Device) -> Self::Realization {
@@ -97,7 +84,3 @@ impl MobjectBuilder for () {
 impl MobjectRealization for () {
     fn render(&self, _render_pass: &mut wgpu::RenderPass) {}
 }
-
-// trait HomogeneousMobject<M> where M: Mobject {
-//     fn
-// }

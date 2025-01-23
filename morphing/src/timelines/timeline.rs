@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 pub trait Timeline:
-    'static + Debug + serde_traitobject::Serialize + serde_traitobject::Deserialize
+    'static + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
 {
     fn presentation(&self, device: &wgpu::Device) -> Box<dyn Presentation>;
 }
@@ -24,7 +24,7 @@ impl TimelineEntries {
 
     pub(crate) fn push<T>(&mut self, time_interval: Range<f32>, timeline: T)
     where
-        T: Timeline,
+        T: 'static + Timeline,
     {
         self.0.push(TimelineEntry {
             time_interval,
@@ -45,7 +45,7 @@ impl TimelineEntries {
     }
 }
 
-pub trait Presentation: 'static {
+pub trait Presentation {
     fn present(
         &self,
         time: f32,
@@ -93,7 +93,7 @@ pub mod steady {
     use super::Presentation;
     use super::Timeline;
 
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct SteadyTimeline<M> {
         pub(crate) mobject: M,
     }
@@ -135,6 +135,7 @@ pub mod dynamic {
     use std::ops::Range;
 
     use super::super::super::mobjects::mobject::Mobject;
+    use super::super::super::mobjects::mobject::MobjectRealization;
     use super::super::rates::Rate;
     use super::Presentation;
     use super::Timeline;
@@ -152,11 +153,11 @@ pub mod dynamic {
     pub trait Collapse {
         type Output: Mobject;
 
-        fn collapse(&self, time: f32) -> Self::Output;
+        fn collapse(self, time: f32) -> Self::Output;
     }
 
     pub trait DynamicTimelineContent:
-        'static + Debug + serde::de::DeserializeOwned + serde::Serialize + Collapse
+        'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize + Collapse
     {
         type ContentPresentation: ContentPresentation;
 
@@ -187,7 +188,7 @@ pub mod dynamic {
         }
     }
 
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct DynamicTimeline<CO, ME, R> {
         pub(crate) content: CO,
         pub(crate) metric: ME,
@@ -196,9 +197,9 @@ pub mod dynamic {
 
     impl<CO, ME, R> Timeline for DynamicTimeline<CO, ME, R>
     where
-        CO: DynamicTimelineContent,
-        ME: DynamicTimelineMetric,
-        R: Rate,
+        CO: Clone + DynamicTimelineContent,
+        ME: Clone + DynamicTimelineMetric,
+        R: Clone + Rate,
     {
         fn presentation(&self, device: &wgpu::Device) -> Box<dyn Presentation> {
             Box::new(DynamicTimelinePresentation {
@@ -237,6 +238,54 @@ pub mod dynamic {
             );
         }
     }
+
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+    pub struct IndeterminedTimelineContent<M> {
+        pub(crate) mobject: M,
+    }
+
+    impl<M> Collapse for IndeterminedTimelineContent<M>
+    where
+        M: Mobject,
+    {
+        type Output = M;
+
+        fn collapse(self, _time: f32) -> Self::Output {
+            self.mobject
+        }
+    }
+
+    impl<M> DynamicTimelineContent for IndeterminedTimelineContent<M>
+    where
+        M: Mobject,
+    {
+        type ContentPresentation = IndeterminedTimelineContentPresentation<M::Realization>;
+
+        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation {
+            IndeterminedTimelineContentPresentation {
+                realization: self.mobject.realize(device),
+            }
+        }
+    }
+
+    pub struct IndeterminedTimelineContentPresentation<MR> {
+        realization: MR,
+    }
+
+    impl<MR> ContentPresentation for IndeterminedTimelineContentPresentation<MR>
+    where
+        MR: MobjectRealization,
+    {
+        fn content_present(
+            &self,
+            _time: f32,
+            _device: &wgpu::Device,
+            _queue: &wgpu::Queue,
+            render_pass: &mut wgpu::RenderPass,
+        ) {
+            self.realization.render(render_pass);
+        }
+    }
 }
 
 pub mod action {
@@ -249,7 +298,7 @@ pub mod action {
     use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
 
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct ActionTimelineContent<M, D> {
         pub(crate) mobject: M,
         pub(crate) diff: D,
@@ -262,8 +311,8 @@ pub mod action {
     {
         type Output = M;
 
-        fn collapse(&self, time: f32) -> Self::Output {
-            let mut mobject = self.mobject.clone();
+        fn collapse(self, time: f32) -> Self::Output {
+            let mut mobject = self.mobject;
             self.diff.apply(&mut mobject, time);
             mobject
         }
@@ -321,7 +370,7 @@ pub mod continuous {
     use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
 
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct ContinuousTimelineContent<M, U> {
         pub(crate) mobject: M,
         pub(crate) update: U,
@@ -334,8 +383,8 @@ pub mod continuous {
     {
         type Output = M;
 
-        fn collapse(&self, time: f32) -> Self::Output {
-            let mut mobject = self.mobject.clone();
+        fn collapse(self, time: f32) -> Self::Output {
+            let mut mobject = self.mobject;
             self.update.update(&mut mobject, time);
             mobject
         }
@@ -363,9 +412,10 @@ pub mod continuous {
         update: U,
     }
 
-    impl<M, U> ContentPresentation for ContinuousTimelineContentPresentation<M::Realization, M, U>
+    impl<MR, M, U> ContentPresentation for ContinuousTimelineContentPresentation<MR, M, U>
     where
-        M: Mobject,
+        MR: MobjectRealization,
+        M: Mobject<Realization = MR>,
         U: Update<M>,
     {
         fn content_present(
@@ -389,6 +439,8 @@ pub mod continuous {
 }
 
 pub mod discrete {
+    use std::sync::Arc;
+
     use super::super::super::mobjects::mobject::Mobject;
     use super::dynamic::Collapse;
     use super::dynamic::ContentPresentation;
@@ -396,10 +448,10 @@ pub mod discrete {
     use super::PresentationEntries;
     use super::TimelineEntries;
 
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct DiscreteTimelineContent<M> {
         pub(crate) mobject: M,
-        pub(crate) timeline_entries: TimelineEntries,
+        pub(crate) timeline_entries: Arc<TimelineEntries>,
     }
 
     impl<M> Collapse for DiscreteTimelineContent<M>
@@ -408,8 +460,8 @@ pub mod discrete {
     {
         type Output = M;
 
-        fn collapse(&self, _time: f32) -> Self::Output {
-            self.mobject.clone()
+        fn collapse(self, _time: f32) -> Self::Output {
+            self.mobject
         }
     }
 

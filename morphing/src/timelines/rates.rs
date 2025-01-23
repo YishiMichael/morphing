@@ -8,11 +8,11 @@ pub trait Rate: 'static + Clone + Debug + serde::de::DeserializeOwned + serde::S
 pub trait ApplyRate {
     type Output<R>
     where
-        R: Rate;
+        R: Clone + Rate;
 
     fn apply_rate<R>(self, rate: R) -> Self::Output<R>
     where
-        R: Rate;
+        R: Clone + Rate;
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
