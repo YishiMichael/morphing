@@ -84,6 +84,9 @@ pub mod traits {
     use super::super::act::Act;
     use super::super::construct::Construct;
     use super::super::rates::Rate;
+    use super::super::timeline::dynamic::AbsoluteTimelineMetric;
+    use super::super::timeline::dynamic::DynamicTimelineMetric;
+    use super::super::timeline::dynamic::RelativeTimelineMetric;
     use super::super::update::Update;
     use super::Supervisor;
 
@@ -94,19 +97,27 @@ pub mod traits {
     }
 
     pub trait Destroy {
-        fn destroy(self);
-    }
-
-    pub trait Animate {
         type Output;
 
-        fn animate(self) -> Self::Output;
+        fn destroy(self) -> Self::Output;
     }
 
-    pub trait Animating {
-        type Output;
+    pub trait Quantize: Sized {
+        type Output<ME>
+        where
+            ME: DynamicTimelineMetric;
 
-        fn animating(self) -> Self::Output;
+        fn quantize<ME>(self, metric: ME) -> Self::Output<ME>
+        where
+            ME: DynamicTimelineMetric;
+
+        fn animate(self) -> Self::Output<RelativeTimelineMetric> {
+            self.quantize(RelativeTimelineMetric)
+        }
+
+        fn animating(self) -> Self::Output<AbsoluteTimelineMetric> {
+            self.quantize(AbsoluteTimelineMetric)
+        }
     }
 
     pub trait Collapse {
@@ -186,22 +197,19 @@ pub mod base_impl {
     use super::super::timeline::action::ActionTimelineContent;
     use super::super::timeline::continuous::ContinuousTimelineContent;
     use super::super::timeline::discrete::DiscreteTimelineContent;
-    use super::super::timeline::dynamic::AbsoluteTimelineMetric;
     use super::super::timeline::dynamic::DynamicTimeline;
     use super::super::timeline::dynamic::DynamicTimelineContent;
     use super::super::timeline::dynamic::DynamicTimelineMetric;
     use super::super::timeline::dynamic::IndeterminedTimelineContent;
-    use super::super::timeline::dynamic::RelativeTimelineMetric;
     use super::super::timeline::steady::SteadyTimeline;
     use super::super::update::Update;
-    use super::traits::Animate;
-    use super::traits::Animating;
     use super::traits::ApplyAct;
     use super::traits::ApplyConstruct;
     use super::traits::ApplyRate;
     use super::traits::ApplyUpdate;
     use super::traits::Collapse;
     use super::traits::Destroy;
+    use super::traits::Quantize;
     use super::traits::Spawn;
     use super::Alive;
     use super::Supervisor;
@@ -226,21 +234,25 @@ pub mod base_impl {
     where
         M: Mobject,
     {
-        fn destroy(self) {
+        type Output = ();
+
+        fn destroy(self) -> Self::Output {
             self.archive(|_, _, _| ())
         }
     }
 
-    impl<'s, M> Animate for Alive<'s, SteadyTimeline<M>>
+    impl<'s, M> Quantize for Alive<'s, SteadyTimeline<M>>
     where
         M: Mobject,
     {
-        type Output = Alive<
-            's,
-            DynamicTimeline<IndeterminedTimelineContent<M>, RelativeTimelineMetric, IdentityRate>,
-        >;
+        type Output<ME> = Alive<'s, DynamicTimeline<IndeterminedTimelineContent<M>, ME, IdentityRate>>
+        where
+            ME: DynamicTimelineMetric;
 
-        fn animate(self) -> Self::Output {
+        fn quantize<ME>(self, metric: ME) -> Self::Output<ME>
+        where
+            ME: DynamicTimelineMetric,
+        {
             self.archive(|supervisor, _, timeline| {
                 Alive::new(
                     supervisor,
@@ -248,32 +260,7 @@ pub mod base_impl {
                         content: IndeterminedTimelineContent {
                             mobject: timeline.mobject,
                         },
-                        metric: RelativeTimelineMetric,
-                        rate: IdentityRate,
-                    },
-                )
-            })
-        }
-    }
-
-    impl<'s, M> Animating for Alive<'s, SteadyTimeline<M>>
-    where
-        M: Mobject,
-    {
-        type Output = Alive<
-            's,
-            DynamicTimeline<IndeterminedTimelineContent<M>, AbsoluteTimelineMetric, IdentityRate>,
-        >;
-
-        fn animating(self) -> Self::Output {
-            self.archive(|supervisor, _, timeline| {
-                Alive::new(
-                    supervisor,
-                    DynamicTimeline {
-                        content: IndeterminedTimelineContent {
-                            mobject: timeline.mobject,
-                        },
-                        metric: AbsoluteTimelineMetric,
+                        metric,
                         rate: IdentityRate,
                     },
                 )
@@ -543,221 +530,279 @@ pub mod derived_impl {
     use super::super::act::Act;
     use super::super::construct::Construct;
     use super::super::rates::Rate;
+    use super::super::timeline::dynamic::DynamicTimelineMetric;
     use super::super::update::Update;
-    use super::traits::Animate;
-    use super::traits::Animating;
     use super::traits::ApplyAct;
     use super::traits::ApplyConstruct;
     use super::traits::ApplyRate;
     use super::traits::ApplyUpdate;
     use super::traits::Collapse;
     use super::traits::Destroy;
+    use super::traits::Quantize;
     use super::traits::Spawn;
     use super::Supervisor;
 
-    macro_rules! container {
-        (
-            $vis:vis trait ($($i:tt),*)
-        ) => {paste::paste!{
-            $vis trait [<Container ${count($i)}>]<$([<T ${index()} ${ignore($i)}>]),*> {
-                type Output<$([<U ${index()} ${ignore($i)}>]),*>;
+    macro_rules! morphism {
+        // (
+        //     $vis:vis trait ($($i:tt),*)
+        // ) => {paste::paste!{
+        //     $vis trait [<Container ${count($i)}>]<$($ty_param),*> {
+        //         type Output<$([<U ${index()} ${ignore($i)}>]),*>;
 
-                fn map<F, $([<U ${index()} ${ignore($i)}>]),*>(self, f: F) -> Self::Output<$([<U ${index()} ${ignore($i)}>]),*>
-                where
-                    $(F: Fn([<T ${index()} ${ignore($i)}>]) -> [<U ${index()} ${ignore($i)}>]),*;
-            }
-        }};
-        (
-            impl$(<$(const $const_param:ident: $const_param_ty:ty),*>)? (Fn($in_ty:ty) -> $out_ty:ty) for $fn_ty:ty
+        //         fn map<F, $([<U ${index()} ${ignore($i)}>]),*>(self, f: F) -> Self::Output<$([<U ${index()} ${ignore($i)}>]),*>
+        //         where
+        //             $(F: Fn($ty_param) -> [<U ${index()} ${ignore($i)}>]),*;
+        //     }
+        // }};
+        ($container:ident<$($lifetime:lifetime,)* $($ty_param:ident,)* $([$morphed_ty_param:ident],)* $(const $const_ty_param:ident: $const_ty_param_ty:ty,)*>) => {
+            // impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> [<Container ${count($in_ty_param)}>]<$($in_ty_param),*> for $in_ty {
+            //     type Output<$($out_ty_param),*> = $out_ty;
+
+            //     #[inline]
+            //     fn map<$fn_ty_param, $($out_ty_param),*>($self, $f: $fn_ty) -> Self::Output<$($out_ty_param),*>
+            //     where
+            //         $($fn_ty_param: Fn($in_ty_param) -> $out_ty_param),*
+            //     {
+            //         $body
+            //     }
+            // }
+
+            impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> Spawn
+            for
+                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
-                $fn_ty_param:ident: $(Fn($in_ty_param:ident) -> $out_ty_param:ident),*
+                $($morphed_ty_param: Spawn,)*
             {
-                $f:ident($self:ident) = $body:expr
-            }
-        ) => {paste::paste!{
-            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> [<Container ${count($in_ty_param)}>]<$($in_ty_param),*> for $in_ty {
-                type Output<$($out_ty_param),*> = $out_ty;
+                type Output<'s> = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output<'s>,)* $($const_ty_param,)*>);
 
-                #[inline]
-                fn map<$fn_ty_param, $($out_ty_param),*>($self, $f: $fn_ty) -> Self::Output<$($out_ty_param),*>
-                where
-                    $($fn_ty_param: Fn($in_ty_param) -> $out_ty_param),*
-                {
-                    $body
-                }
-            }
-
-            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Spawn for $in_ty
-            where
-                $($in_ty_param: Spawn),*
-            {
-                type Output<'s> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<'s>),*>;
-
+                #[allow(unused_variables)]
                 fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
-                    self.map(|element| element.spawn(supervisor))
+                    $container!(spawn, self, supervisor,)
                 }
             }
 
-            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Destroy for $in_ty
+            impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> Destroy
+            for
+                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
-                $($in_ty_param: Destroy),*
+                $($morphed_ty_param: Destroy,)*
             {
-                fn destroy(self) {
-                    self.map(|element| element.destroy());
+                type Output = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output,)* $($const_ty_param,)*>);
+
+                #[allow(unused_variables)]
+                fn destroy(self) -> Self::Output {
+                    $container!(destroy, self,)
                 }
             }
 
-            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Animate for $in_ty
+            impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> Quantize
+            for
+                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
-                $($in_ty_param: Animate),*
+                $($morphed_ty_param: Quantize,)*
             {
-                type Output = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output),*>;
+                type Output<ME> = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output<ME>,)* $($const_ty_param,)*>)
+                where
+                    ME: DynamicTimelineMetric;
 
-                fn animate(self) -> Self::Output {
-                    self.map(|element| element.animate())
+                #[allow(unused_variables)]
+                fn quantize<ME>(self, metric: ME) -> Self::Output<ME>
+                where
+                    ME: DynamicTimelineMetric,
+                {
+                    $container!(quantize, self, metric.clone(),)
                 }
             }
 
-            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Animating for $in_ty
+            impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> Collapse
+            for
+                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
-                $($in_ty_param: Animating),*
+                $($morphed_ty_param: Collapse,)*
             {
-                type Output = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output),*>;
+                type Output = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output,)* $($const_ty_param,)*>);
 
-                fn animating(self) -> Self::Output {
-                    self.map(|element| element.animating())
-                }
-            }
-
-            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Collapse for $in_ty
-            where
-                $($in_ty_param: Collapse),*
-            {
-                type Output = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output),*>;
-
+                #[allow(unused_variables)]
                 fn collapse(self) -> Self::Output {
-                    self.map(|element| element.collapse())
+                    $container!(collapse, self,)
                 }
             }
 
-            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> ApplyRate for $in_ty
+            impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> ApplyRate
+            for
+                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
-                $($in_ty_param: ApplyRate),*
+                $($morphed_ty_param: ApplyRate,)*
             {
-                type Output<RA> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<RA>),*>
+                type Output<RA> = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output<RA>,)* $($const_ty_param,)*>)
                 where
                     RA: Rate;
 
+                #[allow(unused_variables)]
                 fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
                 where
                     RA: Rate,
                 {
-                    self.map(|element| element.apply_rate(rate.clone()))
+                    $container!(apply_rate, self, rate.clone(),)
                 }
             }
 
-            impl<M, $($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> ApplyAct<M> for $in_ty
+            impl<$($lifetime,)* M, $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> ApplyAct<M>
+            for
+                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 M: Mobject,
-                $($in_ty_param: ApplyAct<M>),*
+                $($morphed_ty_param: ApplyAct<M>,)*
             {
-                type Output<A> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<A>),*>
+                type Output<A> = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output<A>,)* $($const_ty_param,)*>)
                 where
                     A: Act<M>;
 
+                #[allow(unused_variables)]
                 fn apply_act<A>(self, act: A) -> Self::Output<A>
                 where
                     A: Act<M>,
                 {
-                    self.map(|element| element.apply_act(act.clone()))
+                    $container!(apply_act, self, act.clone(),)
                 }
             }
 
-            impl<M, $($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> ApplyUpdate<M> for $in_ty
+            impl<$($lifetime,)* M, $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> ApplyUpdate<M>
+            for
+                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 M: Mobject,
-                $($in_ty_param: ApplyUpdate<M>),*
+                $($morphed_ty_param: ApplyUpdate<M>,)*
             {
-                type Output<U> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<U>),*>
+                type Output<U> = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output<U>,)* $($const_ty_param,)*>)
                 where
                     U: Update<M>;
 
+                #[allow(unused_variables)]
                 fn apply_update<U>(self, update: U) -> Self::Output<U>
                 where
                     U: Update<M>,
                 {
-                    self.map(|element| element.apply_update(update.clone()))
+                    $container!(apply_update, self, update.clone(),)
                 }
             }
 
-            impl<M, $($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> ApplyConstruct<M> for $in_ty
+            impl<$($lifetime,)* M, $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> ApplyConstruct<M>
+            for
+                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 M: Mobject,
-                $($in_ty_param: ApplyConstruct<M>),*
+                $($morphed_ty_param: ApplyConstruct<M>,)*
             {
-                type Output<C> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<C>),*>
+                type Output<C> = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output<C>,)* $($const_ty_param,)*>)
                 where
                     C: Construct<M>;
 
+                #[allow(unused_variables)]
                 fn apply_construct<C>(self, construct: C) -> Self::Output<C>
                 where
                     C: Construct<M>,
                 {
-                    self.map(|element| element.apply_construct(construct.clone()))
+                    $container!(apply_construct, self, construct.clone(),)
                 }
             }
+        };
+        (@tuple ($($i:tt,)*)) => {paste::paste!{
+            macro_rules! [<tuple_ ${count($i)} _impl>] {
+                (<$(${ignore($i)} $$[<T ${index()}>]:ty,)*>) => {
+                    ($(${ignore($i)} $$[<T ${index()}>],)*)
+                };
+                ($$method:ident, $$self:expr, $$($$variable:expr,)*) => {
+                    ($(${ignore($i)} $$self.${index()}.$$method($$($$variable),*),)*)
+                };
+            }
+            morphism!([<tuple_ ${count($i)} _impl>]<$(${ignore($i)} [[<T ${index()}>]],)*>);
         }};
+        (@array) => {
+            macro_rules! array_impl {
+                (<$$T:ty, $$N:ident,>) => {
+                    [$$T; $$N]
+                };
+                ($$method:ident, $$self:expr, $$($$variable:expr,)*) => {
+                    $$self.map(|element| element.$$method($$($$variable),*))
+                };
+            }
+            morphism!(array_impl<[T], const N: usize,>);
+        };
+        (@vec) => {
+            macro_rules! vec_impl {
+                (<$$T:ty,>) => {
+                    Vec<$$T>
+                };
+                ($$method:ident, $$self:expr, $$($$variable:expr,)*) => {
+                    $$self.into_iter().map(|element| element.$$method($$($$variable),*)).collect()
+                };
+            }
+            morphism!(vec_impl<[T],>);
+        };
     }
 
-    // pub trait Container1<T0> {
-    //     type Output<U0>;
+    morphism!(@tuple ());
+    morphism!(@tuple (_,));
+    morphism!(@tuple (_, _,));
+    morphism!(@tuple (_, _, _,));
+    morphism!(@tuple (_, _, _, _, ));
+    morphism!(@tuple (_, _, _, _, _,));
+    morphism!(@tuple (_, _, _, _, _, _,));
+    morphism!(@tuple (_, _, _, _, _, _, _,));
+    morphism!(@tuple (_, _, _, _, _, _, _, _, ));
+    morphism!(@tuple (_, _, _, _, _, _, _, _, _,));
+    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _,));
+    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _,));
+    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _, _, ));
+    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _, _, _,));
+    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _,));
+    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _,));
+    morphism!(@array);
+    morphism!(@vec);
 
-    //     fn map<F, U0>(self, f: F) -> Self::Output<U0>
-    //     where
-    //         F: Fn(T0) -> U0;
+    // macro_rules! tuple_0_impl {
+    //     (<$T:ty,>) => {
+    //         ($T,)
+    //     };
+    //     ($method:ident, $self:expr, $($variable:expr,)*) => {
+    //         ($self.0.$method($($variable),*),)
+    //     };
     // }
+    // morphism!(tuple_0_impl<[T0],>);
 
-    // pub trait Container2<T0, T1> {
-    //     type Output<U0, U1>;
-
-    //     fn map<F, U0, U1>(self, f: F) -> Self::Output<U0, U1>
-    //     where
-    //         F: Fn(T0) -> U0,
-    //         F: Fn(T1) -> U1;
+    // container!(pub trait ());
+    // container!(pub trait (_));
+    // container!(pub trait (_, _));
+    // container!(pub trait (_, _, _));
+    // container!(pub trait (_, _, _, _));
+    // container!(pub trait (_, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _));
+    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _));
+    // container! {
+    //     impl (Fn(Vec<T0>) -> Vec<U0>) for F where F: Fn(T0) -> U0 {
+    //         f(self) = self.into_iter().map(f).collect()
+    //     }
     // }
-
-    container!(pub trait ());
-    container!(pub trait (_));
-    container!(pub trait (_, _));
-    container!(pub trait (_, _, _));
-    container!(pub trait (_, _, _, _));
-    container!(pub trait (_, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _));
-    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _));
-    container! {
-        impl (Fn(Vec<T0>) -> Vec<U0>) for F where F: Fn(T0) -> U0 {
-            f(self) = self.into_iter().map(f).collect()
-        }
-    }
-    container! {
-        impl<const N: usize> (Fn([T0; N]) -> [U0; N]) for F where F: Fn(T0) -> U0 {
-            f(self) = self.map(f)
-        }
-    }
-    container! {
-        impl (Fn((T0, T1)) -> (U0, U1)) for F where F: Fn(T0) -> U0, Fn(T1) -> U1 {
-            f(self) = (f(self.0), f(self.1))
-        }
-    }
+    // container! {
+    //     impl<const N: usize> (Fn([T0; N]) -> [U0; N]) for F where F: Fn(T0) -> U0 {
+    //         f(self) = self.map(f)
+    //     }
+    // }
+    // container! {
+    //     impl (Fn((T0, T1)) -> (U0, U1)) for F where F: Fn(T0) -> U0, Fn(T1) -> U1 {
+    //         f(self) = (f(self.0), f(self.1))
+    //     }
+    // }
 
     // impl<T0, const N: usize> Container1<T0> for [T0; N] {
     //     type Output<U0> = [U0; N];
