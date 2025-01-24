@@ -1,8 +1,8 @@
 use morphing::mobjects::shape::Rect;
 use morphing::timelines::alive::traits::Destroy;
 use morphing::timelines::alive::Supervisor;
-use morphing::toplevel::scene::execute;
-use morphing::toplevel::scene::scene;
+use morphing::timelines::scene::execute;
+use morphing::timelines::scene::scene;
 use morphing::toplevel::settings::SceneSettings;
 
 fn override_settings(scene_settings: SceneSettings) -> SceneSettings {

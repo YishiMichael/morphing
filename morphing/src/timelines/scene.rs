@@ -1,11 +1,11 @@
 use std::io::Read;
 
-use super::super::timelines::alive::Supervisor;
-use super::super::timelines::timeline::PresentationEntries;
-use super::super::timelines::timeline::TimelineEntries;
-use super::settings::SceneSettings;
-use super::settings::VideoSettings;
-use super::world::World;
+use super::super::toplevel::settings::SceneSettings;
+use super::super::toplevel::settings::VideoSettings;
+use super::super::toplevel::world::World;
+use super::alive::Supervisor;
+use super::timeline::PresentationEntries;
+use super::timeline::TimelineEntries;
 
 pub use morphing_macros::scene;
 
@@ -30,6 +30,21 @@ impl SceneTimelines {
             video_settings: scene_settings.video,
             duration: *supervisor.get_time(),
             timeline_entries: supervisor.into_timeline_entries(),
+        }
+    }
+
+    fn presentation(self, device: &wgpu::Device) -> ScenePresentations {
+        let Self {
+            name,
+            video_settings,
+            duration,
+            timeline_entries,
+        } = self;
+        ScenePresentations {
+            name,
+            video_settings,
+            duration,
+            presentation_entries: timeline_entries.presentation(device),
         }
     }
 }
