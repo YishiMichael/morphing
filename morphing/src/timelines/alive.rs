@@ -555,294 +555,384 @@ pub mod derived_impl {
     use super::traits::Spawn;
     use super::Supervisor;
 
-    pub trait Container1<T0> {
-        type Output<U0>;
+    macro_rules! container {
+        (
+            $vis:vis trait ($($i:tt),*)
+        ) => {paste::paste!{
+            $vis trait [<Container ${count($i)}>]<$([<T ${index()} ${ignore($i)}>]),*> {
+                type Output<$([<U ${index()} ${ignore($i)}>]),*>;
 
-        fn map1<F, U0>(self, f: F) -> Self::Output<U0>
-        where
-            F: FnMut(T0) -> U0;
-    }
-
-    impl<T0, const N: usize> Container1<T0> for [T0; N] {
-        type Output<U0> = [U0; N];
-
-        fn map1<F, U0>(self, f: F) -> Self::Output<U0>
-        where
-            F: FnMut(T0) -> U0,
-        {
-            self.map(f)
-        }
-    }
-
-    impl<T0, const N: usize> Spawn for [T0; N]
-    where
-        T0: Spawn,
-    {
-        type Output<'s> = <Self as Container1<T0>>::Output<T0::Output<'s>>;
-
-        fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
-            self.map1(|element| element.spawn(supervisor))
-        }
-    }
-
-    impl<T0, const N: usize> Destroy for [T0; N]
-    where
-        T0: Destroy,
-    {
-        fn destroy(self) {
-            self.map1(|element| element.destroy());
-        }
-    }
-
-    impl<T0, const N: usize> Animate for [T0; N]
-    where
-        T0: Animate,
-    {
-        type Output = <Self as Container1<T0>>::Output<T0::Output>;
-
-        fn animate(self) -> Self::Output {
-            self.map1(|element| element.animate())
-        }
-    }
-
-    impl<T0, const N: usize> Animating for [T0; N]
-    where
-        T0: Animating,
-    {
-        type Output = <Self as Container1<T0>>::Output<T0::Output>;
-
-        fn animating(self) -> Self::Output {
-            self.map1(|element| element.animating())
-        }
-    }
-
-    impl<T0, const N: usize> Collapse for [T0; N]
-    where
-        T0: Collapse,
-    {
-        type Output = <Self as Container1<T0>>::Output<T0::Output>;
-
-        fn collapse(self) -> Self::Output {
-            self.map1(|element| element.collapse())
-        }
-    }
-
-    impl<T0, const N: usize> ApplyRate for [T0; N]
-    where
-        T0: ApplyRate,
-    {
-        type Output<RA> = <Self as Container1<T0>>::Output<T0::Output<RA>>
-        where
-            RA: Rate;
-
-        fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
-        where
-            RA: Rate,
-        {
-            self.map1(|element| element.apply_rate(rate.clone()))
-        }
-    }
-
-    impl<M, T0, const N: usize> ApplyAct<M> for [T0; N]
-    where
-        M: Mobject,
-        T0: ApplyAct<M>,
-    {
-        type Output<A> = <Self as Container1<T0>>::Output<T0::Output<A>>
-        where
-            A: Act<M>;
-
-        fn apply_act<A>(self, act: A) -> Self::Output<A>
-        where
-            A: Act<M>,
-        {
-            self.map1(|element| element.apply_act(act.clone()))
-        }
-    }
-
-    impl<M, T0, const N: usize> ApplyUpdate<M> for [T0; N]
-    where
-        M: Mobject,
-        T0: ApplyUpdate<M>,
-    {
-        type Output<U> = <Self as Container1<T0>>::Output<T0::Output<U>>
-        where
-            U: Update<M>;
-
-        fn apply_update<U>(self, update: U) -> Self::Output<U>
-        where
-            U: Update<M>,
-        {
-            self.map1(|element| element.apply_update(update.clone()))
-        }
-    }
-
-    impl<M, T0, const N: usize> ApplyConstruct<M> for [T0; N]
-    where
-        M: Mobject,
-        T0: ApplyConstruct<M>,
-    {
-        type Output<C> = <Self as Container1<T0>>::Output<T0::Output<C>>
-        where
-            C: Construct<M>;
-
-        fn apply_construct<C>(self, construct: C) -> Self::Output<C>
-        where
-            C: Construct<M>,
-        {
-            self.map1(|element| element.apply_construct(construct.clone()))
-        }
-    }
-    ////////
-
-    macro_rules! impl_tuple {
-        ($($index:tt),*) => {
-            paste::paste! {
-                impl<$([<T $index>],)*> Spawn for ($([<T $index>],)*)
+                fn map<F, $([<U ${index()} ${ignore($i)}>]),*>(self, f: F) -> Self::Output<$([<U ${index()} ${ignore($i)}>]),*>
                 where
-                    $([<T $index>]: Spawn,)*
-                {
-                    type Output<'s> = ($([<T $index>]::Output<'s>,)*);
+                    $(F: Fn([<T ${index()} ${ignore($i)}>]) -> [<U ${index()} ${ignore($i)}>]),*;
+            }
+        }};
+        (
+            impl$(<$(const $const_param:ident: $const_param_ty:ty),*>)? (Fn($in_ty:ty) -> $out_ty:ty) for $fn_ty:ty
+            where
+                $fn_ty_param:ident: $(Fn($in_ty_param:ident) -> $out_ty_param:ident),*
+            {
+                $f:ident($self:ident) = $body:expr
+            }
+        ) => {paste::paste!{
+            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> [<Container ${count($in_ty_param)}>]<$($in_ty_param),*> for $in_ty {
+                type Output<$($out_ty_param),*> = $out_ty;
 
-                    #[allow(unused_variables)]
-                    fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
-                        ($(self.$index.spawn(supervisor),)*)
-                    }
-                }
-
-                impl<$([<T $index>],)*> Destroy for ($([<T $index>],)*)
+                #[inline]
+                fn map<$fn_ty_param, $($out_ty_param),*>($self, $f: $fn_ty) -> Self::Output<$($out_ty_param),*>
                 where
-                    $([<T $index>]: Destroy,)*
+                    $($fn_ty_param: Fn($in_ty_param) -> $out_ty_param),*
                 {
-                    fn destroy(self) {
-                        ($(self.$index.destroy(),)*);
-                    }
-                }
-
-                impl<$([<T $index>],)*> Animate for ($([<T $index>],)*)
-                where
-                    $([<T $index>]: Animate,)*
-                {
-                    type Output = ($([<T $index>]::Output,)*);
-
-                    fn animate(self) -> Self::Output {
-                        ($(self.$index.animate(),)*)
-                    }
-                }
-
-                impl<$([<T $index>],)*> Animating for ($([<T $index>],)*)
-                where
-                    $([<T $index>]: Animating,)*
-                {
-                    type Output = ($([<T $index>]::Output,)*);
-
-                    fn animating(self) -> Self::Output {
-                        ($(self.$index.animating(),)*)
-                    }
-                }
-
-                impl<$([<T $index>],)*> Collapse for ($([<T $index>],)*)
-                where
-                    $([<T $index>]: Collapse,)*
-                {
-                    type Output = ($([<T $index>]::Output,)*);
-
-                    fn collapse(self) -> Self::Output {
-                        ($(self.$index.collapse(),)*)
-                    }
-                }
-
-                impl<$([<T $index>],)*> ApplyRate for ($([<T $index>],)*)
-                where
-                    $([<T $index>]: ApplyRate,)*
-                {
-                    type Output<RA> = ($([<T $index>]::Output<RA>,)*)
-                    where
-                        RA: Rate;
-
-                    #[allow(unused_variables)]
-                    fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
-                    where
-                        RA: Rate,
-                    {
-                        ($(self.$index.apply_rate(rate.clone()),)*)
-                    }
-                }
-
-                impl<M, $([<T $index>],)*> ApplyAct<M> for ($([<T $index>],)*)
-                where
-                    M: Mobject,
-                    $([<T $index>]: ApplyAct<M>,)*
-                {
-                    type Output<A> = ($([<T $index>]::Output<A>,)*)
-                    where
-                        A: Act<M>;
-
-                    #[allow(unused_variables)]
-                    fn apply_act<A>(self, act: A) -> Self::Output<A>
-                    where
-                        A: Act<M>,
-                    {
-                        ($(self.$index.apply_act(act.clone()),)*)
-                    }
-                }
-
-                impl<M, $([<T $index>],)*> ApplyUpdate<M> for ($([<T $index>],)*)
-                where
-                    M: Mobject,
-                    $([<T $index>]: ApplyUpdate<M>,)*
-                {
-                    type Output<U> = ($([<T $index>]::Output<U>,)*)
-                    where
-                        U: Update<M>;
-
-                    #[allow(unused_variables)]
-                    fn apply_update<U>(self, update: U) -> Self::Output<U>
-                    where
-                        U: Update<M>,
-                    {
-                        ($(self.$index.apply_update(update.clone()),)*)
-                    }
-                }
-
-                impl<M, $([<T $index>],)*> ApplyConstruct<M> for ($([<T $index>],)*)
-                where
-                    M: Mobject,
-                    $([<T $index>]: ApplyConstruct<M>,)*
-                {
-                    type Output<C> = ($([<T $index>]::Output<C>,)*)
-                    where
-                        C: Construct<M>;
-
-                    #[allow(unused_variables)]
-                    fn apply_construct<C>(self, construct: C) -> Self::Output<C>
-                    where
-                        C: Construct<M>,
-                    {
-                        ($(self.$index.apply_construct(construct.clone()),)*)
-                    }
+                    $body
                 }
             }
-        };
+
+            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Spawn for $in_ty
+            where
+                $($in_ty_param: Spawn),*
+            {
+                type Output<'s> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<'s>),*>;
+
+                fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
+                    self.map(|element| element.spawn(supervisor))
+                }
+            }
+
+            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Destroy for $in_ty
+            where
+                $($in_ty_param: Destroy),*
+            {
+                fn destroy(self) {
+                    self.map(|element| element.destroy());
+                }
+            }
+
+            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Animate for $in_ty
+            where
+                $($in_ty_param: Animate),*
+            {
+                type Output = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output),*>;
+
+                fn animate(self) -> Self::Output {
+                    self.map(|element| element.animate())
+                }
+            }
+
+            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Animating for $in_ty
+            where
+                $($in_ty_param: Animating),*
+            {
+                type Output = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output),*>;
+
+                fn animating(self) -> Self::Output {
+                    self.map(|element| element.animating())
+                }
+            }
+
+            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> Collapse for $in_ty
+            where
+                $($in_ty_param: Collapse),*
+            {
+                type Output = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output),*>;
+
+                fn collapse(self) -> Self::Output {
+                    self.map(|element| element.collapse())
+                }
+            }
+
+            impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> ApplyRate for $in_ty
+            where
+                $($in_ty_param: ApplyRate),*
+            {
+                type Output<RA> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<RA>),*>
+                where
+                    RA: Rate;
+
+                fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
+                where
+                    RA: Rate,
+                {
+                    self.map(|element| element.apply_rate(rate.clone()))
+                }
+            }
+
+            impl<M, $($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> ApplyAct<M> for $in_ty
+            where
+                M: Mobject,
+                $($in_ty_param: ApplyAct<M>),*
+            {
+                type Output<A> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<A>),*>
+                where
+                    A: Act<M>;
+
+                fn apply_act<A>(self, act: A) -> Self::Output<A>
+                where
+                    A: Act<M>,
+                {
+                    self.map(|element| element.apply_act(act.clone()))
+                }
+            }
+
+            impl<M, $($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> ApplyUpdate<M> for $in_ty
+            where
+                M: Mobject,
+                $($in_ty_param: ApplyUpdate<M>),*
+            {
+                type Output<U> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<U>),*>
+                where
+                    U: Update<M>;
+
+                fn apply_update<U>(self, update: U) -> Self::Output<U>
+                where
+                    U: Update<M>,
+                {
+                    self.map(|element| element.apply_update(update.clone()))
+                }
+            }
+
+            impl<M, $($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> ApplyConstruct<M> for $in_ty
+            where
+                M: Mobject,
+                $($in_ty_param: ApplyConstruct<M>),*
+            {
+                type Output<C> = <Self as [<Container ${count($in_ty_param)}>]<$($in_ty_param),*>>::Output<$($in_ty_param::Output<C>),*>
+                where
+                    C: Construct<M>;
+
+                fn apply_construct<C>(self, construct: C) -> Self::Output<C>
+                where
+                    C: Construct<M>,
+                {
+                    self.map(|element| element.apply_construct(construct.clone()))
+                }
+            }
+        }};
     }
 
-    impl_tuple!();
-    impl_tuple!(0);
-    impl_tuple!(0, 1);
-    impl_tuple!(0, 1, 2);
-    impl_tuple!(0, 1, 2, 3);
-    impl_tuple!(0, 1, 2, 3, 4);
-    impl_tuple!(0, 1, 2, 3, 4, 5);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
-    impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    // pub trait Container1<T0> {
+    //     type Output<U0>;
+
+    //     fn map<F, U0>(self, f: F) -> Self::Output<U0>
+    //     where
+    //         F: Fn(T0) -> U0;
+    // }
+
+    // pub trait Container2<T0, T1> {
+    //     type Output<U0, U1>;
+
+    //     fn map<F, U0, U1>(self, f: F) -> Self::Output<U0, U1>
+    //     where
+    //         F: Fn(T0) -> U0,
+    //         F: Fn(T1) -> U1;
+    // }
+
+    container!(pub trait ());
+    container!(pub trait (_));
+    container!(pub trait (_, _));
+    container!(pub trait (_, _, _));
+    container!(pub trait (_, _, _, _));
+    container!(pub trait (_, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _));
+    container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _));
+    container! {
+        impl (Fn(Vec<T0>) -> Vec<U0>) for F where F: Fn(T0) -> U0 {
+            f(self) = self.into_iter().map(f).collect()
+        }
+    }
+    container! {
+        impl<const N: usize> (Fn([T0; N]) -> [U0; N]) for F where F: Fn(T0) -> U0 {
+            f(self) = self.map(f)
+        }
+    }
+    container! {
+        impl (Fn((T0, T1)) -> (U0, U1)) for F where F: Fn(T0) -> U0, Fn(T1) -> U1 {
+            f(self) = (f(self.0), f(self.1))
+        }
+    }
+
+    // impl<T0, const N: usize> Container1<T0> for [T0; N] {
+    //     type Output<U0> = [U0; N];
+
+    //     #[inline]
+    //     fn map<F, U0>(self, f: F) -> Self::Output<U0>
+    //     where
+    //         F: Fn(T0) -> U0,
+    //     {
+    //         self.map(f)
+    //     }
+    // }
+
+    // impl<T0> Container1<T0> for Vec<T0> {
+    //     type Output<U0> = Vec<U0>;
+
+    //     #[inline]
+    //     fn map<F, U0>(self, f: F) -> Self::Output<U0>
+    //     where
+    //         F: Fn(T0) -> U0,
+    //     {
+    //         self.into_iter().map(f).collect()
+    //     }
+    // }
+
+    ////////
+
+    // macro_rules! impl_tuple {
+    //     ($($index:tt),*) => {
+    //         paste::paste! {
+    //             impl<$([<T $index>],)*> Spawn for ($([<T $index>],)*)
+    //             where
+    //                 $([<T $index>]: Spawn,)*
+    //             {
+    //                 type Output<'s> = ($([<T $index>]::Output<'s>,)*);
+
+    //                 #[allow(unused_variables)]
+    //                 fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
+    //                     ($(self.$index.spawn(supervisor),)*)
+    //                 }
+    //             }
+
+    //             impl<$([<T $index>],)*> Destroy for ($([<T $index>],)*)
+    //             where
+    //                 $([<T $index>]: Destroy,)*
+    //             {
+    //                 fn destroy(self) {
+    //                     ($(self.$index.destroy(),)*);
+    //                 }
+    //             }
+
+    //             impl<$([<T $index>],)*> Animate for ($([<T $index>],)*)
+    //             where
+    //                 $([<T $index>]: Animate,)*
+    //             {
+    //                 type Output = ($([<T $index>]::Output,)*);
+
+    //                 fn animate(self) -> Self::Output {
+    //                     ($(self.$index.animate(),)*)
+    //                 }
+    //             }
+
+    //             impl<$([<T $index>],)*> Animating for ($([<T $index>],)*)
+    //             where
+    //                 $([<T $index>]: Animating,)*
+    //             {
+    //                 type Output = ($([<T $index>]::Output,)*);
+
+    //                 fn animating(self) -> Self::Output {
+    //                     ($(self.$index.animating(),)*)
+    //                 }
+    //             }
+
+    //             impl<$([<T $index>],)*> Collapse for ($([<T $index>],)*)
+    //             where
+    //                 $([<T $index>]: Collapse,)*
+    //             {
+    //                 type Output = ($([<T $index>]::Output,)*);
+
+    //                 fn collapse(self) -> Self::Output {
+    //                     ($(self.$index.collapse(),)*)
+    //                 }
+    //             }
+
+    //             impl<$([<T $index>],)*> ApplyRate for ($([<T $index>],)*)
+    //             where
+    //                 $([<T $index>]: ApplyRate,)*
+    //             {
+    //                 type Output<RA> = ($([<T $index>]::Output<RA>,)*)
+    //                 where
+    //                     RA: Rate;
+
+    //                 #[allow(unused_variables)]
+    //                 fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
+    //                 where
+    //                     RA: Rate,
+    //                 {
+    //                     ($(self.$index.apply_rate(rate.clone()),)*)
+    //                 }
+    //             }
+
+    //             impl<M, $([<T $index>],)*> ApplyAct<M> for ($([<T $index>],)*)
+    //             where
+    //                 M: Mobject,
+    //                 $([<T $index>]: ApplyAct<M>,)*
+    //             {
+    //                 type Output<A> = ($([<T $index>]::Output<A>,)*)
+    //                 where
+    //                     A: Act<M>;
+
+    //                 #[allow(unused_variables)]
+    //                 fn apply_act<A>(self, act: A) -> Self::Output<A>
+    //                 where
+    //                     A: Act<M>,
+    //                 {
+    //                     ($(self.$index.apply_act(act.clone()),)*)
+    //                 }
+    //             }
+
+    //             impl<M, $([<T $index>],)*> ApplyUpdate<M> for ($([<T $index>],)*)
+    //             where
+    //                 M: Mobject,
+    //                 $([<T $index>]: ApplyUpdate<M>,)*
+    //             {
+    //                 type Output<U> = ($([<T $index>]::Output<U>,)*)
+    //                 where
+    //                     U: Update<M>;
+
+    //                 #[allow(unused_variables)]
+    //                 fn apply_update<U>(self, update: U) -> Self::Output<U>
+    //                 where
+    //                     U: Update<M>,
+    //                 {
+    //                     ($(self.$index.apply_update(update.clone()),)*)
+    //                 }
+    //             }
+
+    //             impl<M, $([<T $index>],)*> ApplyConstruct<M> for ($([<T $index>],)*)
+    //             where
+    //                 M: Mobject,
+    //                 $([<T $index>]: ApplyConstruct<M>,)*
+    //             {
+    //                 type Output<C> = ($([<T $index>]::Output<C>,)*)
+    //                 where
+    //                     C: Construct<M>;
+
+    //                 #[allow(unused_variables)]
+    //                 fn apply_construct<C>(self, construct: C) -> Self::Output<C>
+    //                 where
+    //                     C: Construct<M>,
+    //                 {
+    //                     ($(self.$index.apply_construct(construct.clone()),)*)
+    //                 }
+    //             }
+    //         }
+    //     };
+    // }
+
+    // impl_tuple!();
+    // impl_tuple!(0);
+    // impl_tuple!(0, 1);
+    // impl_tuple!(0, 1, 2);
+    // impl_tuple!(0, 1, 2, 3);
+    // impl_tuple!(0, 1, 2, 3, 4);
+    // impl_tuple!(0, 1, 2, 3, 4, 5);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 }
 
 // pub mod array_impl {
