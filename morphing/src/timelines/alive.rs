@@ -97,9 +97,7 @@ pub mod traits {
     }
 
     pub trait Destroy {
-        type Output;
-
-        fn destroy(self) -> Self::Output;
+        fn destroy(self);
     }
 
     pub trait Quantize: Sized {
@@ -176,6 +174,7 @@ pub mod traits {
     }
 
     impl<'w> Supervisor<'w> {
+        #[must_use]
         pub fn spawn<SP>(&'w self, spawn: SP) -> SP::Output<'w>
         where
             SP: Spawn,
@@ -220,6 +219,7 @@ pub mod base_impl {
     {
         type Output<'s> = Alive<'s, SteadyTimeline<MB::Instantiation>>;
 
+        #[must_use]
         fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
             Alive::new(
                 supervisor,
@@ -234,10 +234,8 @@ pub mod base_impl {
     where
         M: Mobject,
     {
-        type Output = ();
-
-        fn destroy(self) -> Self::Output {
-            self.archive(|_, _, _| ())
+        fn destroy(self) {
+            self.archive(|_, _, _| ());
         }
     }
 
@@ -249,6 +247,7 @@ pub mod base_impl {
         where
             ME: DynamicTimelineMetric;
 
+        #[must_use]
         fn quantize<ME>(self, metric: ME) -> Self::Output<ME>
         where
             ME: DynamicTimelineMetric,
@@ -276,6 +275,7 @@ pub mod base_impl {
     {
         type Output = Alive<'s, SteadyTimeline<CO::Output>>;
 
+        #[must_use]
         fn collapse(self) -> Self::Output {
             self.archive(|supervisor, time_interval, timeline| {
                 Alive::new(
@@ -302,6 +302,7 @@ pub mod base_impl {
         where
             RA: Rate;
 
+        #[must_use]
         fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
         where
             RA: Rate,
@@ -327,6 +328,7 @@ pub mod base_impl {
     {
         type Output<A> = Self where A: Act<M>;
 
+        #[must_use]
         fn apply_act<A>(self, act: A) -> Self::Output<A>
         where
             A: Act<M>,
@@ -349,6 +351,7 @@ pub mod base_impl {
         where
             A: Act<M>;
 
+        #[must_use]
         fn apply_act<A>(self, act: A) -> Self::Output<A>
         where
             A: Act<M>,
@@ -380,6 +383,7 @@ pub mod base_impl {
         where
             A: Act<M>;
 
+        #[must_use]
         fn apply_act<A>(self, act: A) -> Self::Output<A>
         where
             A: Act<M>,
@@ -410,6 +414,7 @@ pub mod base_impl {
         where
             U: Update<M>;
 
+        #[must_use]
         fn apply_update<U>(self, update: U) -> Self::Output<U>
         where
             U: Update<M>,
@@ -441,6 +446,7 @@ pub mod base_impl {
         where
             C: Construct<M>;
 
+        #[must_use]
         fn apply_construct<C>(self, construct: C) -> Self::Output<C>
         where
             C: Construct<M>,
@@ -542,39 +548,23 @@ pub mod derived_impl {
     use super::traits::Spawn;
     use super::Supervisor;
 
-    macro_rules! morphism {
-        // (
-        //     $vis:vis trait ($($i:tt),*)
-        // ) => {paste::paste!{
-        //     $vis trait [<Container ${count($i)}>]<$($ty_param),*> {
-        //         type Output<$([<U ${index()} ${ignore($i)}>]),*>;
-
-        //         fn map<F, $([<U ${index()} ${ignore($i)}>]),*>(self, f: F) -> Self::Output<$([<U ${index()} ${ignore($i)}>]),*>
-        //         where
-        //             $(F: Fn($ty_param) -> [<U ${index()} ${ignore($i)}>]),*;
-        //     }
-        // }};
-        ($container:ident<$($lifetime:lifetime,)* $($ty_param:ident,)* $([$morphed_ty_param:ident],)* $(const $const_ty_param:ident: $const_ty_param_ty:ty,)*>) => {
-            // impl<$($in_ty_param,)* $($(const $const_param: $const_param_ty,)*)?> [<Container ${count($in_ty_param)}>]<$($in_ty_param),*> for $in_ty {
-            //     type Output<$($out_ty_param),*> = $out_ty;
-
-            //     #[inline]
-            //     fn map<$fn_ty_param, $($out_ty_param),*>($self, $f: $fn_ty) -> Self::Output<$($out_ty_param),*>
-            //     where
-            //         $($fn_ty_param: Fn($in_ty_param) -> $out_ty_param),*
-            //     {
-            //         $body
-            //     }
-            // }
-
+    macro_rules! polymorphism {
+        (
+            $container:ident<
+                $($lifetime:lifetime,)*
+                $($ty_param:ident,)*
+                $(($morphed_ty_param:ident),)*
+                $(const $const_ty_param:ident: $const_ty_param_ty:ty,)*
+            >
+        ) => {
             impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> Spawn
-            for
-                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
+            for $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 $($morphed_ty_param: Spawn,)*
             {
                 type Output<'s> = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output<'s>,)* $($const_ty_param,)*>);
 
+                #[must_use]
                 #[allow(unused_variables)]
                 fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
                     $container!(spawn, self, supervisor,)
@@ -582,22 +572,19 @@ pub mod derived_impl {
             }
 
             impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> Destroy
-            for
-                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
+            for $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 $($morphed_ty_param: Destroy,)*
             {
-                type Output = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output,)* $($const_ty_param,)*>);
-
                 #[allow(unused_variables)]
-                fn destroy(self) -> Self::Output {
-                    $container!(destroy, self,)
+                fn destroy(self) {
+                    let _: $container!(<$($lifetime,)* $($ty_param,)* $(${ignore($morphed_ty_param)} (),)* $($const_ty_param,)*>)
+                        = $container!(destroy, self,);
                 }
             }
 
             impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> Quantize
-            for
-                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
+            for $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 $($morphed_ty_param: Quantize,)*
             {
@@ -605,6 +592,7 @@ pub mod derived_impl {
                 where
                     ME: DynamicTimelineMetric;
 
+                #[must_use]
                 #[allow(unused_variables)]
                 fn quantize<ME>(self, metric: ME) -> Self::Output<ME>
                 where
@@ -615,13 +603,13 @@ pub mod derived_impl {
             }
 
             impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> Collapse
-            for
-                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
+            for $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 $($morphed_ty_param: Collapse,)*
             {
                 type Output = $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param::Output,)* $($const_ty_param,)*>);
 
+                #[must_use]
                 #[allow(unused_variables)]
                 fn collapse(self) -> Self::Output {
                     $container!(collapse, self,)
@@ -629,8 +617,7 @@ pub mod derived_impl {
             }
 
             impl<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> ApplyRate
-            for
-                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
+            for $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 $($morphed_ty_param: ApplyRate,)*
             {
@@ -638,6 +625,7 @@ pub mod derived_impl {
                 where
                     RA: Rate;
 
+                #[must_use]
                 #[allow(unused_variables)]
                 fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
                 where
@@ -648,8 +636,7 @@ pub mod derived_impl {
             }
 
             impl<$($lifetime,)* M, $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> ApplyAct<M>
-            for
-                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
+            for $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 M: Mobject,
                 $($morphed_ty_param: ApplyAct<M>,)*
@@ -658,6 +645,7 @@ pub mod derived_impl {
                 where
                     A: Act<M>;
 
+                #[must_use]
                 #[allow(unused_variables)]
                 fn apply_act<A>(self, act: A) -> Self::Output<A>
                 where
@@ -668,8 +656,7 @@ pub mod derived_impl {
             }
 
             impl<$($lifetime,)* M, $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> ApplyUpdate<M>
-            for
-                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
+            for $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 M: Mobject,
                 $($morphed_ty_param: ApplyUpdate<M>,)*
@@ -678,6 +665,7 @@ pub mod derived_impl {
                 where
                     U: Update<M>;
 
+                #[must_use]
                 #[allow(unused_variables)]
                 fn apply_update<U>(self, update: U) -> Self::Output<U>
                 where
@@ -688,8 +676,7 @@ pub mod derived_impl {
             }
 
             impl<$($lifetime,)* M, $($ty_param,)* $($morphed_ty_param,)* $(const $const_ty_param: $const_ty_param_ty,)*> ApplyConstruct<M>
-            for
-                $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
+            for $container!(<$($lifetime,)* $($ty_param,)* $($morphed_ty_param,)* $($const_ty_param,)*>)
             where
                 M: Mobject,
                 $($morphed_ty_param: ApplyConstruct<M>,)*
@@ -698,6 +685,7 @@ pub mod derived_impl {
                 where
                     C: Construct<M>;
 
+                #[must_use]
                 #[allow(unused_variables)]
                 fn apply_construct<C>(self, construct: C) -> Self::Output<C>
                 where
@@ -707,8 +695,11 @@ pub mod derived_impl {
                 }
             }
         };
-        (@tuple ($($i:tt,)*)) => {paste::paste!{
-            macro_rules! [<tuple_ ${count($i)} _impl>] {
+    }
+
+    macro_rules! polymorphism_tuple {
+        ($($i:tt,)*) => {paste::paste!{
+            macro_rules! [<tuple_ ${count($i)} _macro>] {
                 (<$(${ignore($i)} $$[<T ${index()}>]:ty,)*>) => {
                     ($(${ignore($i)} $$[<T ${index()}>],)*)
                 };
@@ -716,404 +707,43 @@ pub mod derived_impl {
                     ($(${ignore($i)} $$self.${index()}.$$method($$($$variable),*),)*)
                 };
             }
-            morphism!([<tuple_ ${count($i)} _impl>]<$(${ignore($i)} [[<T ${index()}>]],)*>);
-        }};
-        (@array) => {
-            macro_rules! array_impl {
-                (<$$T:ty, $$N:ident,>) => {
-                    [$$T; $$N]
-                };
-                ($$method:ident, $$self:expr, $$($$variable:expr,)*) => {
-                    $$self.map(|element| element.$$method($$($$variable),*))
-                };
-            }
-            morphism!(array_impl<[T], const N: usize,>);
+            polymorphism!([<tuple_ ${count($i)} _macro>]<$(${ignore($i)} ([<T ${index()}>]),)*>);
+        }}
+    }
+    polymorphism_tuple!();
+    polymorphism_tuple!(_,);
+    polymorphism_tuple!(_, _,);
+    polymorphism_tuple!(_, _, _,);
+    polymorphism_tuple!(_, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _, _, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _, _, _, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _,);
+    polymorphism_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _,);
+
+    macro_rules! array_macro {
+        (<$T:ty, $N:ident,>) => {
+            [$T; $N]
         };
-        (@vec) => {
-            macro_rules! vec_impl {
-                (<$$T:ty,>) => {
-                    Vec<$$T>
-                };
-                ($$method:ident, $$self:expr, $$($$variable:expr,)*) => {
-                    $$self.into_iter().map(|element| element.$$method($$($$variable),*)).collect()
-                };
-            }
-            morphism!(vec_impl<[T],>);
+        ($method:ident, $self:expr, $($variable:expr,)*) => {
+            $self.map(|element| element.$method($($variable),*))
         };
     }
+    polymorphism!(array_macro<(T), const N: usize,>);
 
-    morphism!(@tuple ());
-    morphism!(@tuple (_,));
-    morphism!(@tuple (_, _,));
-    morphism!(@tuple (_, _, _,));
-    morphism!(@tuple (_, _, _, _, ));
-    morphism!(@tuple (_, _, _, _, _,));
-    morphism!(@tuple (_, _, _, _, _, _,));
-    morphism!(@tuple (_, _, _, _, _, _, _,));
-    morphism!(@tuple (_, _, _, _, _, _, _, _, ));
-    morphism!(@tuple (_, _, _, _, _, _, _, _, _,));
-    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _,));
-    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _,));
-    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _, _, ));
-    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _, _, _,));
-    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _,));
-    morphism!(@tuple (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _,));
-    morphism!(@array);
-    morphism!(@vec);
-
-    // macro_rules! tuple_0_impl {
-    //     (<$T:ty,>) => {
-    //         ($T,)
-    //     };
-    //     ($method:ident, $self:expr, $($variable:expr,)*) => {
-    //         ($self.0.$method($($variable),*),)
-    //     };
-    // }
-    // morphism!(tuple_0_impl<[T0],>);
-
-    // container!(pub trait ());
-    // container!(pub trait (_));
-    // container!(pub trait (_, _));
-    // container!(pub trait (_, _, _));
-    // container!(pub trait (_, _, _, _));
-    // container!(pub trait (_, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _));
-    // container!(pub trait (_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _));
-    // container! {
-    //     impl (Fn(Vec<T0>) -> Vec<U0>) for F where F: Fn(T0) -> U0 {
-    //         f(self) = self.into_iter().map(f).collect()
-    //     }
-    // }
-    // container! {
-    //     impl<const N: usize> (Fn([T0; N]) -> [U0; N]) for F where F: Fn(T0) -> U0 {
-    //         f(self) = self.map(f)
-    //     }
-    // }
-    // container! {
-    //     impl (Fn((T0, T1)) -> (U0, U1)) for F where F: Fn(T0) -> U0, Fn(T1) -> U1 {
-    //         f(self) = (f(self.0), f(self.1))
-    //     }
-    // }
-
-    // impl<T0, const N: usize> Container1<T0> for [T0; N] {
-    //     type Output<U0> = [U0; N];
-
-    //     #[inline]
-    //     fn map<F, U0>(self, f: F) -> Self::Output<U0>
-    //     where
-    //         F: Fn(T0) -> U0,
-    //     {
-    //         self.map(f)
-    //     }
-    // }
-
-    // impl<T0> Container1<T0> for Vec<T0> {
-    //     type Output<U0> = Vec<U0>;
-
-    //     #[inline]
-    //     fn map<F, U0>(self, f: F) -> Self::Output<U0>
-    //     where
-    //         F: Fn(T0) -> U0,
-    //     {
-    //         self.into_iter().map(f).collect()
-    //     }
-    // }
-
-    ////////
-
-    // macro_rules! impl_tuple {
-    //     ($($index:tt),*) => {
-    //         paste::paste! {
-    //             impl<$([<T $index>],)*> Spawn for ($([<T $index>],)*)
-    //             where
-    //                 $([<T $index>]: Spawn,)*
-    //             {
-    //                 type Output<'s> = ($([<T $index>]::Output<'s>,)*);
-
-    //                 #[allow(unused_variables)]
-    //                 fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
-    //                     ($(self.$index.spawn(supervisor),)*)
-    //                 }
-    //             }
-
-    //             impl<$([<T $index>],)*> Destroy for ($([<T $index>],)*)
-    //             where
-    //                 $([<T $index>]: Destroy,)*
-    //             {
-    //                 fn destroy(self) {
-    //                     ($(self.$index.destroy(),)*);
-    //                 }
-    //             }
-
-    //             impl<$([<T $index>],)*> Animate for ($([<T $index>],)*)
-    //             where
-    //                 $([<T $index>]: Animate,)*
-    //             {
-    //                 type Output = ($([<T $index>]::Output,)*);
-
-    //                 fn animate(self) -> Self::Output {
-    //                     ($(self.$index.animate(),)*)
-    //                 }
-    //             }
-
-    //             impl<$([<T $index>],)*> Animating for ($([<T $index>],)*)
-    //             where
-    //                 $([<T $index>]: Animating,)*
-    //             {
-    //                 type Output = ($([<T $index>]::Output,)*);
-
-    //                 fn animating(self) -> Self::Output {
-    //                     ($(self.$index.animating(),)*)
-    //                 }
-    //             }
-
-    //             impl<$([<T $index>],)*> Collapse for ($([<T $index>],)*)
-    //             where
-    //                 $([<T $index>]: Collapse,)*
-    //             {
-    //                 type Output = ($([<T $index>]::Output,)*);
-
-    //                 fn collapse(self) -> Self::Output {
-    //                     ($(self.$index.collapse(),)*)
-    //                 }
-    //             }
-
-    //             impl<$([<T $index>],)*> ApplyRate for ($([<T $index>],)*)
-    //             where
-    //                 $([<T $index>]: ApplyRate,)*
-    //             {
-    //                 type Output<RA> = ($([<T $index>]::Output<RA>,)*)
-    //                 where
-    //                     RA: Rate;
-
-    //                 #[allow(unused_variables)]
-    //                 fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
-    //                 where
-    //                     RA: Rate,
-    //                 {
-    //                     ($(self.$index.apply_rate(rate.clone()),)*)
-    //                 }
-    //             }
-
-    //             impl<M, $([<T $index>],)*> ApplyAct<M> for ($([<T $index>],)*)
-    //             where
-    //                 M: Mobject,
-    //                 $([<T $index>]: ApplyAct<M>,)*
-    //             {
-    //                 type Output<A> = ($([<T $index>]::Output<A>,)*)
-    //                 where
-    //                     A: Act<M>;
-
-    //                 #[allow(unused_variables)]
-    //                 fn apply_act<A>(self, act: A) -> Self::Output<A>
-    //                 where
-    //                     A: Act<M>,
-    //                 {
-    //                     ($(self.$index.apply_act(act.clone()),)*)
-    //                 }
-    //             }
-
-    //             impl<M, $([<T $index>],)*> ApplyUpdate<M> for ($([<T $index>],)*)
-    //             where
-    //                 M: Mobject,
-    //                 $([<T $index>]: ApplyUpdate<M>,)*
-    //             {
-    //                 type Output<U> = ($([<T $index>]::Output<U>,)*)
-    //                 where
-    //                     U: Update<M>;
-
-    //                 #[allow(unused_variables)]
-    //                 fn apply_update<U>(self, update: U) -> Self::Output<U>
-    //                 where
-    //                     U: Update<M>,
-    //                 {
-    //                     ($(self.$index.apply_update(update.clone()),)*)
-    //                 }
-    //             }
-
-    //             impl<M, $([<T $index>],)*> ApplyConstruct<M> for ($([<T $index>],)*)
-    //             where
-    //                 M: Mobject,
-    //                 $([<T $index>]: ApplyConstruct<M>,)*
-    //             {
-    //                 type Output<C> = ($([<T $index>]::Output<C>,)*)
-    //                 where
-    //                     C: Construct<M>;
-
-    //                 #[allow(unused_variables)]
-    //                 fn apply_construct<C>(self, construct: C) -> Self::Output<C>
-    //                 where
-    //                     C: Construct<M>,
-    //                 {
-    //                     ($(self.$index.apply_construct(construct.clone()),)*)
-    //                 }
-    //             }
-    //         }
-    //     };
-    // }
-
-    // impl_tuple!();
-    // impl_tuple!(0);
-    // impl_tuple!(0, 1);
-    // impl_tuple!(0, 1, 2);
-    // impl_tuple!(0, 1, 2, 3);
-    // impl_tuple!(0, 1, 2, 3, 4);
-    // impl_tuple!(0, 1, 2, 3, 4, 5);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
-    // impl_tuple!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    macro_rules! vec_macro {
+        (<$T:ty,>) => {
+            Vec<$T>
+        };
+        ($method:ident, $self:expr, $($variable:expr,)*) => {
+            $self.into_iter().map(|element| element.$method($($variable),*)).collect()
+        };
+    }
+    polymorphism!(vec_macro<(T),>);
 }
-
-// pub mod array_impl {
-//     use super::super::super::mobjects::mobject::Mobject;
-//     use super::super::act::Act;
-//     use super::super::construct::Construct;
-//     use super::super::rates::Rate;
-//     use super::super::update::Update;
-//     use super::traits::Animate;
-//     use super::traits::Animating;
-//     use super::traits::ApplyAct;
-//     use super::traits::ApplyConstruct;
-//     use super::traits::ApplyRate;
-//     use super::traits::ApplyUpdate;
-//     use super::traits::Collapse;
-//     use super::traits::Destroy;
-//     use super::traits::Spawn;
-//     use super::Supervisor;
-
-//     impl<T, const N: usize> Spawn for [T; N]
-//     where
-//         T: Spawn,
-//     {
-//         type Output<'s> = [T::Output<'s>; N];
-
-//         fn spawn<'s>(self, supervisor: &'s Supervisor) -> Self::Output<'s> {
-//             self.map(|element| element.spawn(supervisor))
-//         }
-//     }
-
-//     impl<T, const N: usize> Destroy for [T; N]
-//     where
-//         T: Destroy,
-//     {
-//         fn destroy(self) {
-//             self.map(|element| element.destroy());
-//         }
-//     }
-
-//     impl<T, const N: usize> Animate for [T; N]
-//     where
-//         T: Animate,
-//     {
-//         type Output = [T::Output; N];
-
-//         fn animate(self) -> Self::Output {
-//             self.map(|element| element.animate())
-//         }
-//     }
-
-//     impl<T, const N: usize> Animating for [T; N]
-//     where
-//         T: Animating,
-//     {
-//         type Output = [T::Output; N];
-
-//         fn animating(self) -> Self::Output {
-//             self.map(|element| element.animating())
-//         }
-//     }
-
-//     impl<T, const N: usize> Collapse for [T; N]
-//     where
-//         T: Collapse,
-//     {
-//         type Output = [T::Output; N];
-
-//         fn collapse(self) -> Self::Output {
-//             self.map(|element| element.collapse())
-//         }
-//     }
-
-//     impl<T, const N: usize> ApplyRate for [T; N]
-//     where
-//         T: ApplyRate,
-//     {
-//         type Output<RA> = [T::Output<RA>; N]
-//         where
-//             RA: Rate;
-
-//         fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
-//         where
-//             RA: Rate,
-//         {
-//             self.map(|element| element.apply_rate(rate.clone()))
-//         }
-//     }
-
-//     impl<M, T, const N: usize> ApplyAct<M> for [T; N]
-//     where
-//         M: Mobject,
-//         T: ApplyAct<M>,
-//     {
-//         type Output<A> = [T::Output<A>; N]
-//         where
-//             A: Act<M>;
-
-//         fn apply_act<A>(self, act: A) -> Self::Output<A>
-//         where
-//             A: Act<M>,
-//         {
-//             self.map(|element| element.apply_act(act.clone()))
-//         }
-//     }
-
-//     impl<M, T, const N: usize> ApplyUpdate<M> for [T; N]
-//     where
-//         M: Mobject,
-//         T: ApplyUpdate<M>,
-//     {
-//         type Output<U> = [T::Output<U>; N]
-//         where
-//             U: Update<M>;
-
-//         fn apply_update<U>(self, update: U) -> Self::Output<U>
-//         where
-//             U: Update<M>,
-//         {
-//             self.map(|element| element.apply_update(update.clone()))
-//         }
-//     }
-
-//     impl<M, T, const N: usize> ApplyConstruct<M> for [T; N]
-//     where
-//         M: Mobject,
-//         T: ApplyConstruct<M>,
-//     {
-//         type Output<C> = [T::Output<C>; N]
-//         where
-//             C: Construct<M>;
-
-//         fn apply_construct<C>(self, construct: C) -> Self::Output<C>
-//         where
-//             C: Construct<M>,
-//         {
-//             self.map(|element| element.apply_construct(construct.clone()))
-//         }
-//     }
-// }
