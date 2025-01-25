@@ -522,11 +522,12 @@ pub mod base_impl {
             reference_mobject: &M,
             alpha: f32,
             queue: &wgpu::Queue,
-        ) {
+        ) -> anyhow::Result<()> {
             self.1
-                .apply_realization(mobject_realization, reference_mobject, alpha, queue);
+                .apply_realization(mobject_realization, reference_mobject, alpha, queue)?;
             self.0
-                .apply_realization(mobject_realization, reference_mobject, alpha, queue);
+                .apply_realization(mobject_realization, reference_mobject, alpha, queue)?;
+            Ok(())
         }
     }
 }

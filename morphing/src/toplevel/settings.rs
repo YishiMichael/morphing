@@ -3,28 +3,28 @@ use std::path::PathBuf;
 use super::palette::BLACK;
 use super::palette::WHITE;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Settings {
     pub player: PlayerSettings,
     pub scene: SceneSettings,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PlayerSettings {
-    pub play_pause_key: egui::Key,
-    pub fast_forward_key: egui::Key,
-    pub fast_backward: egui::Key,
+    pub play_pause_key: iced::keyboard::Key,
+    pub fast_forward_key: iced::keyboard::Key,
+    pub fast_backward: iced::keyboard::Key,
     pub fast_skip_seconds: f32,
 }
 
-#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct SceneSettings {
     pub video: VideoSettings,
     pub style: StyleSettings,
     pub typst: TypstSettings,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct VideoSettings {
     pub size: (u32, u32),
     pub background_color: palette::Srgb<f32>,
@@ -32,12 +32,12 @@ pub struct VideoSettings {
     pub play_speed: f32,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct StyleSettings {
     pub color: palette::Srgb<f32>,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct TypstSettings {
     pub root: PathBuf,
     pub inputs: Vec<(String, String)>,
@@ -51,9 +51,9 @@ pub struct TypstSettings {
 impl Default for PlayerSettings {
     fn default() -> Self {
         Self {
-            play_pause_key: egui::Key::Space,
-            fast_forward_key: egui::Key::ArrowRight,
-            fast_backward: egui::Key::ArrowLeft,
+            play_pause_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Space),
+            fast_forward_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight),
+            fast_backward: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft),
             fast_skip_seconds: 5.0,
         }
     }

@@ -91,29 +91,34 @@ impl ComponentShaderTypes for TransformShaderTypes {
         }
     }
 
-    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
-        TransformBuffers {
+    fn initialize_buffers(&self, device: &wgpu::Device) -> anyhow::Result<Self::Buffers> {
+        Ok(TransformBuffers {
             transform_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.transform_uniform).unwrap();
+                buffer.write(&self.transform_uniform)?;
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
                     usage: wgpu::BufferUsages::UNIFORM,
                 })
             },
-        }
+        })
     }
 
-    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers) {
+    fn write_buffers(
+        &self,
+        queue: &wgpu::Queue,
+        buffers: &mut Self::Buffers,
+    ) -> anyhow::Result<()> {
         {
             let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
                 queue
                     .write_buffer_with(&buffers.transform_uniform, 0, self.transform_uniform.size())
                     .unwrap(),
             ));
-            buffer.write(&self.transform_uniform).unwrap();
+            buffer.write(&self.transform_uniform)?;
         }
+        Ok(())
     }
 }
 

@@ -12,6 +12,7 @@ pub trait ComponentShaderTypes {
     fn bind_group_layout(device: &wgpu::Device) -> &'static wgpu::BindGroupLayout;
     fn bind_group_from_buffers(device: &wgpu::Device, buffers: &Self::Buffers) -> wgpu::BindGroup;
     fn new_buffers(&self, device: &wgpu::Device) -> Self::Buffers;
-    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers;
-    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers);
+    fn initialize_buffers(&self, device: &wgpu::Device) -> anyhow::Result<Self::Buffers>;
+    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers)
+        -> anyhow::Result<()>;
 }

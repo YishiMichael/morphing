@@ -83,20 +83,6 @@ impl ComponentShaderTypes for CameraShaderTypes {
 
     fn new_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
         CameraBuffers {
-            camera_uniform: {
-                let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.camera_uniform).unwrap();
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: None,
-                    contents: buffer.as_ref(),
-                    usage: wgpu::BufferUsages::UNIFORM,
-                })
-            },
-        }
-    }
-
-    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
-        CameraBuffers {
             camera_uniform: device.create_buffer(&wgpu::BufferDescriptor {
                 label: None,
                 size: self.camera_uniform.size().get(),
@@ -106,15 +92,34 @@ impl ComponentShaderTypes for CameraShaderTypes {
         }
     }
 
-    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers) {
+    fn initialize_buffers(&self, device: &wgpu::Device) -> anyhow::Result<Self::Buffers> {
+        Ok(CameraBuffers {
+            camera_uniform: {
+                let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
+                buffer.write(&self.camera_uniform)?;
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: None,
+                    contents: buffer.as_ref(),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                })
+            },
+        })
+    }
+
+    fn write_buffers(
+        &self,
+        queue: &wgpu::Queue,
+        buffers: &mut Self::Buffers,
+    ) -> anyhow::Result<()> {
         {
             let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
                 queue
                     .write_buffer_with(&buffers.camera_uniform, 0, self.camera_uniform.size())
                     .unwrap(),
             ));
-            buffer.write(&self.camera_uniform).unwrap();
+            buffer.write(&self.camera_uniform)?;
         }
+        Ok(())
     }
 }
 

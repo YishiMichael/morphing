@@ -4,17 +4,16 @@ use super::super::toplevel::settings::SceneSettings;
 use super::super::toplevel::settings::VideoSettings;
 use super::super::toplevel::world::World;
 use super::alive::Supervisor;
-use super::timeline::PresentationEntries;
 use super::timeline::TimelineEntries;
 
 pub use morphing_macros::scene;
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct SceneTimelines {
-    name: &'static str,
-    video_settings: VideoSettings,
-    duration: f32,
-    timeline_entries: TimelineEntries,
+    pub(crate) name: String,
+    pub(crate) video_settings: VideoSettings,
+    pub(crate) duration: f32,
+    pub(crate) timeline_entries: TimelineEntries,
 }
 
 impl SceneTimelines {
@@ -26,35 +25,37 @@ impl SceneTimelines {
         let supervisor = Supervisor::new(&world);
         scene_fn(&supervisor);
         Self {
-            name,
+            name: String::from(name),
             video_settings: scene_settings.video,
             duration: *supervisor.get_time(),
             timeline_entries: supervisor.into_timeline_entries(),
         }
     }
-
-    fn presentation(self, device: &wgpu::Device) -> ScenePresentations {
-        let Self {
-            name,
-            video_settings,
-            duration,
-            timeline_entries,
-        } = self;
-        ScenePresentations {
-            name,
-            video_settings,
-            duration,
-            presentation_entries: timeline_entries.presentation(device),
-        }
-    }
 }
 
-pub struct ScenePresentations {
-    name: &'static str,
-    video_settings: VideoSettings,
-    duration: f32,
-    presentation_entries: PresentationEntries,
-}
+// pub(crate) struct ScenePresentations {
+//     pub(crate) name: &'static str,
+//     pub(crate) video_settings: VideoSettings,
+//     pub(crate) duration: f32,
+//     pub(crate) presentation_entries: PresentationEntries,
+// }
+
+// impl ScenePresentations {
+//     pub(crate) fn new(timelines: SceneTimelines, device: &wgpu::Device) -> Self {
+//         let SceneTimelines {
+//             name,
+//             video_settings,
+//             duration,
+//             timeline_entries,
+//         } = timelines;
+//         Self {
+//             name,
+//             video_settings,
+//             duration,
+//             presentation_entries: timeline_entries.presentation(device),
+//         }
+//     }
+// }
 
 // TODO: execute_parallel
 pub fn execute<S>(scene: S)

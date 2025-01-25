@@ -7,11 +7,11 @@ pub trait Mobject:
 {
     type Realization: MobjectRealization;
 
-    fn realize(&self, device: &wgpu::Device) -> Self::Realization;
+    fn realize(&self, device: &wgpu::Device) -> anyhow::Result<Self::Realization>;
 }
 
 pub trait MobjectRealization: 'static {
-    fn render(&self, render_pass: &mut wgpu::RenderPass);
+    fn render(&self, render_pass: &mut wgpu::RenderPass) -> anyhow::Result<()>;
 }
 
 pub trait MobjectBuilder {

@@ -4,7 +4,7 @@ use std::ops::Range;
 pub trait Timeline:
     'static + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
 {
-    fn presentation(&self, device: &wgpu::Device) -> Box<dyn Presentation>;
+    fn presentation(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>>;
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -32,16 +32,20 @@ impl TimelineEntries {
         });
     }
 
-    pub(crate) fn presentation(&self, device: &wgpu::Device) -> PresentationEntries {
-        PresentationEntries(
-            self.0
-                .iter()
-                .map(|timeline_entry| PresentationEntry {
+    pub(crate) fn presentation(
+        &self,
+        device: &wgpu::Device,
+    ) -> anyhow::Result<PresentationEntries> {
+        self.0
+            .iter()
+            .map(|timeline_entry| {
+                Ok(PresentationEntry {
                     time_interval: timeline_entry.time_interval.clone(),
-                    presentation: timeline_entry.timeline.presentation(device),
+                    presentation: timeline_entry.timeline.presentation(device)?,
                 })
-                .collect(),
-        )
+            })
+            .collect::<anyhow::Result<_>>()
+            .map(PresentationEntries)
     }
 }
 
@@ -53,7 +57,7 @@ pub trait Presentation {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         render_pass: &mut wgpu::RenderPass,
-    );
+    ) -> anyhow::Result<()>;
 }
 
 struct PresentationEntry {
@@ -70,7 +74,7 @@ impl PresentationEntries {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         render_pass: &mut wgpu::RenderPass,
-    ) {
+    ) -> anyhow::Result<()> {
         for presentation_entry in &self.0 {
             if presentation_entry.time_interval.contains(&time) {
                 presentation_entry.presentation.present(
@@ -79,9 +83,10 @@ impl PresentationEntries {
                     device,
                     queue,
                     render_pass,
-                );
+                )?;
             }
         }
+        Ok(())
     }
 }
 
@@ -102,10 +107,10 @@ pub mod steady {
     where
         M: Mobject,
     {
-        fn presentation(&self, device: &wgpu::Device) -> Box<dyn Presentation> {
-            Box::new(SteadyTimelinePresentation {
-                realization: self.mobject.realize(device),
-            })
+        fn presentation(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>> {
+            Ok(Box::new(SteadyTimelinePresentation {
+                realization: self.mobject.realize(device)?,
+            }))
         }
     }
 
@@ -124,8 +129,9 @@ pub mod steady {
             _device: &wgpu::Device,
             _queue: &wgpu::Queue,
             render_pass: &mut wgpu::RenderPass,
-        ) {
-            self.realization.render(render_pass);
+        ) -> anyhow::Result<()> {
+            self.realization.render(render_pass)?;
+            Ok(())
         }
     }
 }
@@ -147,7 +153,7 @@ pub mod dynamic {
             device: &wgpu::Device,
             queue: &wgpu::Queue,
             render_pass: &mut wgpu::RenderPass,
-        );
+        ) -> anyhow::Result<()>;
     }
 
     pub trait TimelineContentCollapse {
@@ -166,7 +172,10 @@ pub mod dynamic {
     {
         type ContentPresentation: ContentPresentation;
 
-        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation;
+        fn content_presentation(
+            &self,
+            device: &wgpu::Device,
+        ) -> anyhow::Result<Self::ContentPresentation>;
     }
 
     pub trait DynamicTimelineMetric:
@@ -206,12 +215,12 @@ pub mod dynamic {
         ME: DynamicTimelineMetric,
         R: Rate,
     {
-        fn presentation(&self, device: &wgpu::Device) -> Box<dyn Presentation> {
-            Box::new(DynamicTimelinePresentation {
-                content_presentation: self.content.content_presentation(device),
+        fn presentation(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>> {
+            Ok(Box::new(DynamicTimelinePresentation {
+                content_presentation: self.content.content_presentation(device)?,
                 metric: self.metric.clone(),
                 rate: self.rate.clone(),
-            })
+            }))
         }
     }
 
@@ -234,13 +243,14 @@ pub mod dynamic {
             device: &wgpu::Device,
             queue: &wgpu::Queue,
             render_pass: &mut wgpu::RenderPass,
-        ) {
+        ) -> anyhow::Result<()> {
             self.content_presentation.content_present(
                 self.rate.eval(self.metric.eval(time, time_interval)),
                 device,
                 queue,
                 render_pass,
-            );
+            )?;
+            Ok(())
         }
     }
 
@@ -266,10 +276,13 @@ pub mod dynamic {
     {
         type ContentPresentation = IndeterminedTimelineContentPresentation<M::Realization>;
 
-        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation {
-            IndeterminedTimelineContentPresentation {
-                realization: self.mobject.realize(device),
-            }
+        fn content_presentation(
+            &self,
+            device: &wgpu::Device,
+        ) -> anyhow::Result<Self::ContentPresentation> {
+            Ok(IndeterminedTimelineContentPresentation {
+                realization: self.mobject.realize(device)?,
+            })
         }
     }
 
@@ -287,8 +300,9 @@ pub mod dynamic {
             _device: &wgpu::Device,
             _queue: &wgpu::Queue,
             render_pass: &mut wgpu::RenderPass,
-        ) {
-            self.realization.render(render_pass);
+        ) -> anyhow::Result<()> {
+            self.realization.render(render_pass)?;
+            Ok(())
         }
     }
 }
@@ -330,12 +344,15 @@ pub mod action {
     {
         type ContentPresentation = ActionTimelineContentPresentation<M::Realization, M, MD>;
 
-        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation {
-            ActionTimelineContentPresentation {
-                realization: RefCell::new(self.mobject.realize(device)),
+        fn content_presentation(
+            &self,
+            device: &wgpu::Device,
+        ) -> anyhow::Result<Self::ContentPresentation> {
+            Ok(ActionTimelineContentPresentation {
+                realization: RefCell::new(self.mobject.realize(device)?),
                 reference_mobject: self.mobject.clone(),
                 diff: self.diff.clone(),
-            }
+            })
         }
     }
 
@@ -356,11 +373,12 @@ pub mod action {
             _device: &wgpu::Device,
             queue: &wgpu::Queue,
             render_pass: &mut wgpu::RenderPass,
-        ) {
+        ) -> anyhow::Result<()> {
             let mut realization = self.realization.borrow_mut();
             self.diff
-                .apply_realization(&mut realization, &self.reference_mobject, time, queue);
-            realization.render(render_pass);
+                .apply_realization(&mut realization, &self.reference_mobject, time, queue)?;
+            realization.render(render_pass)?;
+            Ok(())
         }
     }
 }
@@ -402,12 +420,15 @@ pub mod continuous {
     {
         type ContentPresentation = ContinuousTimelineContentPresentation<M::Realization, M, U>;
 
-        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation {
-            ContinuousTimelineContentPresentation {
-                realization: RefCell::new(self.mobject.realize(device)),
+        fn content_presentation(
+            &self,
+            device: &wgpu::Device,
+        ) -> anyhow::Result<Self::ContentPresentation> {
+            Ok(ContinuousTimelineContentPresentation {
+                realization: RefCell::new(self.mobject.realize(device)?),
                 reference_mobject: self.mobject.clone(),
                 update: self.update.clone(),
-            }
+            })
         }
     }
 
@@ -429,7 +450,7 @@ pub mod continuous {
             device: &wgpu::Device,
             queue: &wgpu::Queue,
             render_pass: &mut wgpu::RenderPass,
-        ) {
+        ) -> anyhow::Result<()> {
             let mut realization = self.realization.borrow_mut();
             self.update.update_realization(
                 &mut realization,
@@ -437,8 +458,9 @@ pub mod continuous {
                 time,
                 device,
                 queue,
-            );
-            realization.render(render_pass);
+            )?;
+            realization.render(render_pass)?;
+            Ok(())
         }
     }
 }
@@ -476,10 +498,13 @@ pub mod discrete {
     {
         type ContentPresentation = DiscreteTimelineContentPresentation;
 
-        fn content_presentation(&self, device: &wgpu::Device) -> Self::ContentPresentation {
-            DiscreteTimelineContentPresentation {
-                presentation_entries: self.timeline_entries.presentation(device),
-            }
+        fn content_presentation(
+            &self,
+            device: &wgpu::Device,
+        ) -> anyhow::Result<Self::ContentPresentation> {
+            Ok(DiscreteTimelineContentPresentation {
+                presentation_entries: self.timeline_entries.presentation(device)?,
+            })
         }
     }
 
@@ -494,9 +519,10 @@ pub mod discrete {
             device: &wgpu::Device,
             queue: &wgpu::Queue,
             render_pass: &mut wgpu::RenderPass,
-        ) {
+        ) -> anyhow::Result<()> {
             self.presentation_entries
-                .present(time, device, queue, render_pass);
+                .present(time, device, queue, render_pass)?;
+            Ok(())
         }
     }
 }

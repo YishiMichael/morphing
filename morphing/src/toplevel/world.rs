@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::ops::Deref;
 use std::path::PathBuf;
 
@@ -57,6 +59,26 @@ impl World {
     // pub(crate) fn typst_world(&self) -> &TypstWorld {
     //     &self.typst_world
     // }
+}
+
+// Modified from reflexo-typst/src/error.rs
+
+#[derive(Debug)]
+struct SourceDiagnosticsWrapper(ecow::EcoVec<typst::diag::SourceDiagnostic>);
+
+impl Display for SourceDiagnosticsWrapper {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        for (index, diagnostic) in self.0.iter().enumerate() {
+            f.write_fmt(format_args!("{index}. "))?;
+            f.write_str(&diagnostic.message)?;
+            if !diagnostic.hints.is_empty() {
+                f.write_str(", hints: ")?;
+                f.write_str(&diagnostic.hints.join(", "))?;
+            }
+            f.write_str("\n")?;
+        }
+        Ok(())
+    }
 }
 
 // Modified from typst/lib.rs, typst-cli/src/world.rs
@@ -126,7 +148,10 @@ impl TypstWorld {
         typst::syntax::Source::new(self.main_id, text)
     }
 
-    pub fn document(&self, source: &typst::syntax::Source) -> typst::model::Document {
+    pub fn document(
+        &self,
+        source: &typst::syntax::Source,
+    ) -> anyhow::Result<typst::model::Document> {
         self.source_slots
             .lock()
             .values_mut()
@@ -143,7 +168,6 @@ impl TypstWorld {
         let traced = traced.track();
         let introspector = introspector.track();
 
-        // TODO: handle unwrap
         let mut sink = typst::engine::Sink::new();
         let content = typst::eval::eval(
             world,
@@ -152,7 +176,10 @@ impl TypstWorld {
             typst::engine::Route::default().track(),
             source,
         )
-        .unwrap()
+        .map_err(|errors| {
+            sink.delay(errors);
+            anyhow::Error::msg(SourceDiagnosticsWrapper(sink.delayed()))
+        })?
         .content();
 
         let mut engine = typst::engine::Engine {
@@ -162,7 +189,17 @@ impl TypstWorld {
             sink: sink.track_mut(),
             route: typst::engine::Route::default(),
         };
-        typst::layout::layout_document(&mut engine, &content, styles).unwrap()
+        let document =
+            typst::layout::layout_document(&mut engine, &content, styles).map_err(|errors| {
+                sink.delay(errors);
+                anyhow::Error::msg(SourceDiagnosticsWrapper(sink.delayed()))
+            })?;
+
+        let delayed = sink.delayed();
+        if !delayed.is_empty() {
+            Err(anyhow::Error::msg(SourceDiagnosticsWrapper(delayed)))?
+        }
+        Ok(document)
     }
 
     fn read(&self, id: typst::syntax::FileId) -> typst::diag::FileResult<Vec<u8>> {

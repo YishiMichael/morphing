@@ -56,10 +56,11 @@ impl StrokeVertexConstructor<Vertex> for VertexConstructor {
 }
 
 impl MobjectRealization for Vec<PlanarTrianglesRealization> {
-    fn render(&self, render_pass: &mut wgpu::RenderPass) {
+    fn render(&self, render_pass: &mut wgpu::RenderPass) -> anyhow::Result<()> {
         for planar_triangles_realization in self {
-            planar_triangles_realization.render(render_pass);
+            planar_triangles_realization.render(render_pass)?;
         }
+        Ok(())
     }
 }
 
@@ -157,7 +158,7 @@ impl PlanarTrianglesRealization {
 }
 
 impl MobjectRealization for PlanarTrianglesRealization {
-    fn render(&self, render_pass: &mut wgpu::RenderPass) {
+    fn render(&self, render_pass: &mut wgpu::RenderPass) -> anyhow::Result<()> {
         render_pass.set_pipeline(self.pipeline);
         render_pass.set_bind_group(0, &self.transform_bind_group, &[]);
         render_pass.set_bind_group(1, &self.paint_bind_group, &[]);
@@ -165,13 +166,14 @@ impl MobjectRealization for PlanarTrianglesRealization {
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.draw(0..3, 0..1);
+        Ok(())
     }
 }
 
 impl Mobject for ShapeMobject {
     type Realization = Vec<PlanarTrianglesRealization>;
 
-    fn realize(&self, device: &wgpu::Device) -> Self::Realization {
+    fn realize(&self, device: &wgpu::Device) -> anyhow::Result<Self::Realization> {
         std::iter::empty()
             .chain(self.fill.iter().map(|fill| {
                 let lyon_path = self.path.to_lyon_path();
@@ -206,24 +208,24 @@ impl Mobject for ShapeMobject {
 
                 // buffers
                 let transform_shader_types = self.transform.to_shader_types();
-                let transform_buffers = transform_shader_types.initialize_buffers(device);
+                let transform_buffers = transform_shader_types.initialize_buffers(device)?;
                 let transform_bind_group =
                     TransformShaderTypes::bind_group_from_buffers(device, &transform_buffers);
 
                 let camera_shader_types = Camera::default().to_shader_types();
-                let camera_buffers = camera_shader_types.initialize_buffers(device);
+                let camera_buffers = camera_shader_types.initialize_buffers(device)?;
                 let camera_bind_group =
                     CameraShaderTypes::bind_group_from_buffers(device, &camera_buffers);
 
                 let paint_shader_types = paint.to_shader_types();
-                let paint_buffers = paint_shader_types.initialize_buffers(device);
+                let paint_buffers = paint_shader_types.initialize_buffers(device)?;
                 let paint_bind_group =
                     PaintShaderTypes::bind_group_from_buffers(device, &paint_buffers);
 
                 // TODO
                 let vertex_buffer = {
                     let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
-                    buffer.write(&vertex_buffers.vertices).unwrap();
+                    buffer.write(&vertex_buffers.vertices)?;
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: None,
                         contents: buffer.as_ref(),
@@ -232,7 +234,7 @@ impl Mobject for ShapeMobject {
                 };
                 let index_buffer = {
                     let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
-                    buffer.write(&vertex_buffers.indices).unwrap();
+                    buffer.write(&vertex_buffers.indices)?;
                     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: None,
                         contents: buffer.as_ref(),
@@ -240,14 +242,14 @@ impl Mobject for ShapeMobject {
                     })
                 }; // TODO
 
-                PlanarTrianglesRealization {
+                Ok(PlanarTrianglesRealization {
                     pipeline,
                     transform_bind_group,
                     paint_bind_group,
                     camera_bind_group,
                     vertex_buffer,
                     index_buffer,
-                }
+                })
             })
             .collect()
     }

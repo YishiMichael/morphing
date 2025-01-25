@@ -15,5 +15,5 @@ where
         alpha: f32,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ); // mobject_realization write-only
+    ) -> anyhow::Result<()>; // mobject_realization write-only
 }

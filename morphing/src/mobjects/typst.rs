@@ -53,7 +53,7 @@ pub struct TypstMobject {
 impl TypstMobject {
     fn instantiate(text: String, world: &World) -> Self {
         let source = world.typst_world.source(text.clone());
-        let document = world.typst_world.document(&source);
+        let document = world.typst_world.document(&source).unwrap();
         Self {
             text,
             tokens: TypstMobject::from_typst_document(&document, &source),
@@ -442,11 +442,12 @@ impl TypstMobject {
 impl Mobject for TypstMobject {
     type Realization = Vec<PlanarTrianglesRealization>;
 
-    fn realize(&self, device: &wgpu::Device) -> Self::Realization {
+    fn realize(&self, device: &wgpu::Device) -> anyhow::Result<Self::Realization> {
         self.tokens
             .iter()
-            .flat_map(|TypstMobjectToken { mobject, .. }| mobject.realize(device))
-            .collect()
+            .map(|TypstMobjectToken { mobject, .. }| mobject.realize(device))
+            .collect::<anyhow::Result<Vec<_>>>()
+            .map(|nested_realizations| nested_realizations.into_iter().flatten().collect())
     }
 }
 

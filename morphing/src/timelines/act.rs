@@ -27,5 +27,5 @@ where
         reference_mobject: &M,
         alpha: f32,
         queue: &wgpu::Queue,
-    ); // mobject_realization write-only
+    ) -> anyhow::Result<()>; // mobject_realization write-only
 }

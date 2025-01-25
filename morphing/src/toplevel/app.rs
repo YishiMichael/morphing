@@ -1,4 +1,12 @@
 use std::ops::Range;
+use std::path::PathBuf;
+
+use super::super::timelines::scene::SceneTimelines;
+use super::super::timelines::timeline::PresentationEntries;
+use super::super::timelines::timeline::TimelineEntries;
+
+use super::settings::Settings;
+use super::settings::VideoSettings;
 
 // use super::settings::SceneSettings;
 // use super::settings::VideoSettings;
@@ -123,16 +131,89 @@ impl Progress {
     }
 }
 
-// pub(crate) struct App {
-//     settings: Settings,
-//     modules: Vec<SceneTimelineCollectionModule>,
-//     progress: Progress,
-//     // window: Option<Arc<winit::window::Window>>,
-//     // renderer: OnceLock<Renderer>,
-//     // progress: Progress,
-//     // control_pressed: bool,
-//     // presentation_collection: Option<PresentationCollection>,
+struct State {
+    settings: Settings,
+    progress: Progress,
+    storyboards: Vec<StoryboardState>,
+    device: wgpu::Device,
+    // window: Option<Arc<winit::window::Window>>,
+    // renderer: OnceLock<Renderer>,
+    // progress: Progress,
+    // control_pressed: bool,
+    // presentation_collection: Option<PresentationCollection>,
+}
+
+struct StoryboardState {
+    path: PathBuf,
+    variant: StoryboardStateVariant,
+}
+
+enum StoryboardStateVariant {
+    Compilation,
+    Execution,
+    Success(Vec<SceneState>),
+    Error(anyhow::Error),
+}
+
+struct SceneState {
+    name: String,
+    video_settings: VideoSettings,
+    duration: f32,
+    variant: SceneStateVariant,
+}
+
+enum SceneStateVariant {
+    Presentation(TimelineEntries),
+    Success(PresentationEntries),
+}
+
+enum Message {
+    CompileRequest(PathBuf),
+    CompileComplete(PathBuf),
+    CompileError(PathBuf, anyhow::Error),
+    ExecuteRequest(PathBuf),
+    ExecuteComplete(PathBuf, SceneTimelines),
+    ExecuteError(PathBuf, anyhow::Error),
+    PresentationRequest(PathBuf, String),
+    PresentationComplete(PathBuf, String, PresentationEntries),
+    PresentationError(PathBuf, String, anyhow::Error),
+    PresentError(PathBuf, String, anyhow::Error),
+}
+
+// impl State {
+//     fn update(&mut self, message: Message) -> iced::Task<Message> {
+//         // match (self, message) {
+//         //     (Self::Presentation(timeline_entries), SceneMessage::PresentationRequest) => iced::Task::perform(async {
+//         //         timeline_entries.presentation(device)
+//         //     }, f)
+//         // }
+//         match message {
+//             Message::CompilationRequest(path) => iced::Task::perform(async {
+//                 Self::compile(path)
+//             }, ),
+//             Message::CompilationComplete(path) => {}
+//             Message::ExecutionRequest(path) => {}
+//             Message::ExecutionComplete(path, scene_timelines) => {}
+//             Message::PresentationRequest(path, name) => {}
+//             Message::PresentationComplete(path, name, presentation_entries) => {}
+//         }
+//     }
 // }
+
+// enum Message {
+//     SceneMessage(SceneMessage),
+// }
+
+// enum SceneMessage {
+//     CompilationRequest(PathBuf),
+//     CompilationComplete,
+//     ExecutionRequest(PathBuf),
+//     ExecutionComplete(SceneTimelines),
+//     PresentationRequest(PathBuf),
+//     PresentationComplete(ScenePresentations),
+// }
+
+// fn update()
 
 // impl App {
 //     pub fn new(// presentation_collection: PresentationCollection,

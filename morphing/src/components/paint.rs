@@ -259,11 +259,11 @@ impl ComponentShaderTypes for PaintShaderTypes {
         }
     }
 
-    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
-        PaintBuffers {
+    fn initialize_buffers(&self, device: &wgpu::Device) -> anyhow::Result<Self::Buffers> {
+        Ok(PaintBuffers {
             paint_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.paint_uniform).unwrap();
+                buffer.write(&self.paint_uniform)?;
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
@@ -272,7 +272,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
             },
             gradients_storage: {
                 let mut buffer = encase::DynamicStorageBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.gradients_storage).unwrap();
+                buffer.write(&self.gradients_storage)?;
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
@@ -281,7 +281,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
             },
             radial_stops_storage: {
                 let mut buffer = encase::DynamicStorageBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.radial_stops_storage).unwrap();
+                buffer.write(&self.radial_stops_storage)?;
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
@@ -290,24 +290,28 @@ impl ComponentShaderTypes for PaintShaderTypes {
             },
             angular_stops_storage: {
                 let mut buffer = encase::DynamicStorageBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.angular_stops_storage).unwrap();
+                buffer.write(&self.angular_stops_storage)?;
                 device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
                     usage: wgpu::BufferUsages::STORAGE,
                 })
             },
-        }
+        })
     }
 
-    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers) {
+    fn write_buffers(
+        &self,
+        queue: &wgpu::Queue,
+        buffers: &mut Self::Buffers,
+    ) -> anyhow::Result<()> {
         {
             let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
                 queue
                     .write_buffer_with(&buffers.paint_uniform, 0, self.paint_uniform.size())
                     .unwrap(),
             ));
-            buffer.write(&self.paint_uniform).unwrap();
+            buffer.write(&self.paint_uniform)?;
         }
         {
             let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
@@ -315,7 +319,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
                     .write_buffer_with(&buffers.gradients_storage, 0, self.gradients_storage.size())
                     .unwrap(),
             ));
-            buffer.write(&self.gradients_storage).unwrap();
+            buffer.write(&self.gradients_storage)?;
         }
         {
             let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
@@ -327,7 +331,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
                     )
                     .unwrap(),
             ));
-            buffer.write(&self.radial_stops_storage).unwrap();
+            buffer.write(&self.radial_stops_storage)?;
         }
         {
             let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
@@ -339,7 +343,8 @@ impl ComponentShaderTypes for PaintShaderTypes {
                     )
                     .unwrap(),
             ));
-            buffer.write(&self.angular_stops_storage).unwrap();
+            buffer.write(&self.angular_stops_storage)?;
         }
+        Ok(())
     }
 }
