@@ -700,15 +700,15 @@ pub mod derived_impl {
 
     macro_rules! polymorphism_tuple {
         ($($i:tt,)*) => {paste::paste!{
-            macro_rules! [<tuple_ ${count($i)} _macro>] {
-                (<$(${ignore($i)} $$[<T ${index()}>]:ty,)*>) => {
-                    ($(${ignore($i)} $$[<T ${index()}>],)*)
+            macro_rules! [<tuple_${count($i)}_macro>] {
+                (<$(${ignore($i)} $$[<T${index()}>]:ty,)*>) => {
+                    ($(${ignore($i)} $$[<T${index()}>],)*)
                 };
                 ($$method:ident, $$self:expr, $$($$variable:expr,)*) => {
                     ($(${ignore($i)} $$self.${index()}.$$method($$($$variable),*),)*)
                 };
             }
-            polymorphism!([<tuple_ ${count($i)} _macro>]<$(${ignore($i)} ([<T ${index()}>]),)*>);
+            polymorphism!([<tuple_${count($i)}_macro>]<$(${ignore($i)} ([<T${index()}>]),)*>);
         }}
     }
     polymorphism_tuple!();

@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use super::super::mobjects::mobject::Mobject;
 
 pub trait Update<M>:
-    'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize
+    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     M: Mobject,
 {

@@ -3,14 +3,14 @@ use std::fmt::Debug;
 use super::super::toplevel::world::World;
 
 pub trait Mobject:
-    'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize
+    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
     type Realization: MobjectRealization;
 
     fn realize(&self, device: &wgpu::Device) -> anyhow::Result<Self::Realization>;
 }
 
-pub trait MobjectRealization: 'static {
+pub trait MobjectRealization: 'static + Send + Sync {
     fn render(&self, render_pass: &mut wgpu::RenderPass) -> anyhow::Result<()>;
 }
 

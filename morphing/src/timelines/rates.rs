@@ -3,7 +3,9 @@ use std::ops::Range;
 
 use super::alive::traits::ApplyRate;
 
-pub trait Rate: 'static + Clone + Debug + serde::de::DeserializeOwned + serde::Serialize {
+pub trait Rate:
+    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+{
     fn eval(&self, t: f32) -> f32;
 }
 

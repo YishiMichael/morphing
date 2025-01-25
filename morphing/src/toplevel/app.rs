@@ -1,12 +1,12 @@
 use std::ops::Range;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use super::super::timelines::scene::SceneTimelines;
 use super::super::timelines::timeline::PresentationEntries;
 use super::super::timelines::timeline::TimelineEntries;
-
 use super::settings::Settings;
 use super::settings::VideoSettings;
+use scene::SceneTimelines;
 
 // use super::settings::SceneSettings;
 // use super::settings::VideoSettings;
@@ -133,7 +133,7 @@ impl Progress {
 
 struct State {
     settings: Settings,
-    progress: Progress,
+    active_scene: Option<ActiveScene>,
     storyboards: Vec<StoryboardState>,
     device: wgpu::Device,
     // window: Option<Arc<winit::window::Window>>,
@@ -143,28 +143,36 @@ struct State {
     // presentation_collection: Option<PresentationCollection>,
 }
 
-struct StoryboardState {
-    path: PathBuf,
-    variant: StoryboardStateVariant,
+struct ActiveScene {
+    progress: Progress,
+    scene: Arc<SceneState>,
 }
 
-enum StoryboardStateVariant {
+struct StoryboardState {
+    path: PathBuf,
+    status: StoryboardStatus,
+}
+
+enum StoryboardStatus {
     Compilation,
     Execution,
-    Success(Vec<SceneState>),
-    Error(anyhow::Error),
+    Success(Vec<Arc<SceneState>>),
+    CompileError(anyhow::Error),
+    ExecuteError(anyhow::Error),
 }
 
 struct SceneState {
     name: String,
     video_settings: VideoSettings,
     duration: f32,
-    variant: SceneStateVariant,
+    status: SceneStatus,
 }
 
-enum SceneStateVariant {
+enum SceneStatus {
     Presentation(TimelineEntries),
     Success(PresentationEntries),
+    PresentationError(anyhow::Error),
+    PresentError(anyhow::Error),
 }
 
 enum Message {
@@ -180,25 +188,155 @@ enum Message {
     PresentError(PathBuf, String, anyhow::Error),
 }
 
-// impl State {
-//     fn update(&mut self, message: Message) -> iced::Task<Message> {
-//         // match (self, message) {
-//         //     (Self::Presentation(timeline_entries), SceneMessage::PresentationRequest) => iced::Task::perform(async {
-//         //         timeline_entries.presentation(device)
-//         //     }, f)
-//         // }
-//         match message {
-//             Message::CompilationRequest(path) => iced::Task::perform(async {
-//                 Self::compile(path)
-//             }, ),
-//             Message::CompilationComplete(path) => {}
-//             Message::ExecutionRequest(path) => {}
-//             Message::ExecutionComplete(path, scene_timelines) => {}
-//             Message::PresentationRequest(path, name) => {}
-//             Message::PresentationComplete(path, name, presentation_entries) => {}
-//         }
-//     }
-// }
+impl State {
+    // fn update(&mut self, message: Message) -> iced::Task<Message> {
+    //     match message {
+    //         Message::CompileRequest(path) => iced::Task::perform({
+    //             let path_clone = path.clone();
+    //             async {
+    //                 Self::compile(path_clone)
+    //             }
+    //         }, move |result| match result {
+    //             Ok(()) => Message::CompileComplete(path.clone()),
+    //             Err(err) => Message::CompileError(path.clone(), err),
+    //         }),
+    //         Message::CompileComplete(path) => {
+    //             self.storyboards.iter_mut().find(|storyboard|)
+    //             for storyboard in &mut self.storyboards {
+    //                 if storyboard.path == path {
+    //                     storyboard.status = StoryboardStatus::Execution;
+    //                 }
+    //             }
+    //             iced::Task::none()
+    //         }
+    //         Message::CompileError(path, err) => {
+    //             for storyboard in &mut self.storyboards {
+    //                 if storyboard.path == path {
+    //                     storyboard.status = StoryboardStatus::CompileError(err);
+    //                 }
+    //             }
+    //             iced::Task::none()
+    //         }
+    //         Message::ExecuteRequest(path) => {todo!()}
+    //         Message::ExecuteComplete(path, scene_timelines) => {todo!()}
+    //         Message::ExecuteError(path, err) => {todo!()}
+    //         Message::PresentationRequest(path, name) => {todo!()}
+    //         Message::PresentationComplete(path, name, presentation_entries) => {todo!()}
+    //         Message::PresentationError(path, name, err) => {todo!()}
+    //         Message::PresentError(path, name, err) => {todo!()}
+    //     }
+    // }
+
+    fn compile(path: PathBuf) -> anyhow::Result<()> {
+        todo!()
+    }
+}
+
+pub mod scene {
+    use std::io::Read;
+
+    use super::super::super::timelines::alive::Supervisor;
+    use super::super::super::timelines::timeline::TimelineEntries;
+    use super::super::settings::SceneSettings;
+    use super::super::settings::VideoSettings;
+    use super::super::world::World;
+
+    pub trait Scene: Sized {
+        fn construct(self, sv: &Supervisor<'_>);
+
+        fn override_settings(&self, scene_settings: SceneSettings) -> SceneSettings {
+            scene_settings
+        }
+    }
+
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    struct SceneId(u32);
+
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    pub(crate) struct SceneTimelines {
+        scene_id: SceneId,
+        name: String,
+        video_settings: VideoSettings,
+        duration: f32,
+        timeline_entries: TimelineEntries,
+    }
+
+    impl SceneTimelines {
+        fn new<S>(scene_id: SceneId, scene_settings: SceneSettings, scene: S) -> Self
+        where
+            S: Scene,
+        {
+            let scene_settings = scene.override_settings(scene_settings);
+            let world = World::new(scene_settings.style, scene_settings.typst);
+            let supervisor = Supervisor::new(&world);
+            scene.construct(&supervisor);
+            Self {
+                scene_id,
+                name: String::from(std::any::type_name::<S>()),
+                video_settings: scene_settings.video,
+                duration: *supervisor.get_time(),
+                timeline_entries: supervisor.into_timeline_entries(),
+            }
+        }
+    }
+
+    pub trait Scenes {
+        fn run(self);
+    }
+
+    impl<S> Scenes for S
+    where
+        S: Scene,
+    {
+        fn run(self) {
+            let mut buf = String::new();
+            let _ = std::io::stdin().read_to_string(&mut buf);
+            let scene_settings = ron::de::from_str(&buf).unwrap();
+            let scene_timelines = SceneTimelines::new(SceneId(0), scene_settings, self);
+            println!("{}", ron::ser::to_string(&scene_timelines).unwrap());
+        }
+    }
+
+    macro_rules! scenes_tuple {
+        ($($i:tt,)*) => {paste::paste!{
+            impl<$(${ignore($i)} [<S${index()}>],)*> Scenes for ($(${ignore($i)} [<S${index()}>],)*)
+            where
+                $(${ignore($i)} [<S${index()}>]: 'static + Send + Scene,)*
+            {
+                #[allow(unused_variables)]
+                fn run(self) {
+                    let mut buf = String::new();
+                    let _ = std::io::stdin().read_to_string(&mut buf);
+                    let scene_settings: SceneSettings = ron::de::from_str(&buf).unwrap();
+                    $(${ignore($i)} let [<thread_${index()}>] = {
+                        let scene_settings = scene_settings.clone();
+                        std::thread::spawn(move || {
+                            let scene_timelines = SceneTimelines::new(SceneId(${index()}), scene_settings, self.${index()});
+                            println!("{}", ron::ser::to_string(&scene_timelines).unwrap());
+                        })
+                    };)*
+                    $(${ignore($i)} [<thread_${index()}>].join().unwrap();)*
+                }
+            }
+        }};
+    }
+    scenes_tuple!();
+    scenes_tuple!(_,);
+    scenes_tuple!(_, _,);
+    scenes_tuple!(_, _, _,);
+    scenes_tuple!(_, _, _, _,);
+    scenes_tuple!(_, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _,);
+    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _,);
+}
 
 // enum Message {
 //     SceneMessage(SceneMessage),
