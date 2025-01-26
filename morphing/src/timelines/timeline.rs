@@ -4,7 +4,7 @@ use std::ops::Range;
 pub trait Timeline:
     'static + Debug + Send + Sync + serde_traitobject::Deserialize + serde_traitobject::Serialize
 {
-    fn presentation(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>>;
+    fn precut(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>>;
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -32,16 +32,13 @@ impl TimelineEntries {
         });
     }
 
-    pub(crate) fn presentation(
-        &self,
-        device: &wgpu::Device,
-    ) -> anyhow::Result<PresentationEntries> {
+    pub(crate) fn precut(&self, device: &wgpu::Device) -> anyhow::Result<PresentationEntries> {
         self.0
             .iter()
             .map(|timeline_entry| {
                 Ok(PresentationEntry {
                     time_interval: timeline_entry.time_interval.clone(),
-                    presentation: timeline_entry.timeline.presentation(device)?,
+                    presentation: timeline_entry.timeline.precut(device)?,
                 })
             })
             .collect::<anyhow::Result<_>>()
@@ -107,7 +104,7 @@ pub mod steady {
     where
         M: Mobject,
     {
-        fn presentation(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>> {
+        fn precut(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>> {
             Ok(Box::new(SteadyTimelinePresentation {
                 realization: self.mobject.realize(device)?,
             }))
@@ -174,7 +171,7 @@ pub mod dynamic {
     {
         type ContentPresentation: ContentPresentation;
 
-        fn content_presentation(
+        fn content_precut(
             &self,
             device: &wgpu::Device,
         ) -> anyhow::Result<Self::ContentPresentation>;
@@ -217,9 +214,9 @@ pub mod dynamic {
         ME: DynamicTimelineMetric,
         R: Rate,
     {
-        fn presentation(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>> {
+        fn precut(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>> {
             Ok(Box::new(DynamicTimelinePresentation {
-                content_presentation: self.content.content_presentation(device)?,
+                content_presentation: self.content.content_precut(device)?,
                 metric: self.metric.clone(),
                 rate: self.rate.clone(),
             }))
@@ -278,7 +275,7 @@ pub mod dynamic {
     {
         type ContentPresentation = IndeterminedTimelineContentPresentation<M::Realization>;
 
-        fn content_presentation(
+        fn content_precut(
             &self,
             device: &wgpu::Device,
         ) -> anyhow::Result<Self::ContentPresentation> {
@@ -344,7 +341,7 @@ pub mod action {
     {
         type ContentPresentation = ActionTimelineContentPresentation<M::Realization, M, MD>;
 
-        fn content_presentation(
+        fn content_precut(
             &self,
             device: &wgpu::Device,
         ) -> anyhow::Result<Self::ContentPresentation> {
@@ -421,7 +418,7 @@ pub mod continuous {
     {
         type ContentPresentation = ContinuousTimelineContentPresentation<M::Realization, M, U>;
 
-        fn content_presentation(
+        fn content_precut(
             &self,
             device: &wgpu::Device,
         ) -> anyhow::Result<Self::ContentPresentation> {
@@ -498,12 +495,12 @@ pub mod discrete {
     {
         type ContentPresentation = DiscreteTimelineContentPresentation;
 
-        fn content_presentation(
+        fn content_precut(
             &self,
             device: &wgpu::Device,
         ) -> anyhow::Result<Self::ContentPresentation> {
             Ok(DiscreteTimelineContentPresentation {
-                presentation_entries: self.timeline_entries.presentation(device)?,
+                presentation_entries: self.timeline_entries.precut(device)?,
             })
         }
     }

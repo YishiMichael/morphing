@@ -1,282 +1,31 @@
-use std::ops::Range;
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use super::super::timelines::timeline::PresentationEntries;
-use super::super::timelines::timeline::TimelineEntries;
-use super::settings::Settings;
-use super::settings::VideoSettings;
-use scene::SceneTimelines;
-
-// use super::settings::SceneSettings;
-// use super::settings::VideoSettings;
-
-#[derive(Clone, Copy)]
-enum ProgressSpeed {
-    Forward050,
-    Forward075,
-    Forward100,
-    Forward125,
-    Forward150,
-    Forward200,
-    Backward050,
-    Backward075,
-    Backward100,
-    Backward125,
-    Backward150,
-    Backward200,
+pub(crate) fn read_from_stdin<T>() -> T
+where
+    T: serde::de::DeserializeOwned,
+{
+    let mut buf = String::new();
+    std::io::stdin().read_line(&mut buf).unwrap();
+    ron::de::from_str(&buf).unwrap()
 }
 
-impl ProgressSpeed {
-    fn value(&self) -> f32 {
-        match self {
-            Self::Forward050 => 0.50,
-            Self::Forward075 => 0.75,
-            Self::Forward100 => 1.00,
-            Self::Forward125 => 1.25,
-            Self::Forward150 => 1.50,
-            Self::Forward200 => 2.00,
-            Self::Backward050 => -0.50,
-            Self::Backward075 => -0.75,
-            Self::Backward100 => -1.00,
-            Self::Backward125 => -1.25,
-            Self::Backward150 => -1.50,
-            Self::Backward200 => -2.00,
-        }
-    }
-
-    fn display_str(&self) -> &'static str {
-        match self {
-            Self::Forward050 => "0.5x",
-            Self::Forward075 => "0.75x",
-            Self::Forward100 => "speed",
-            Self::Forward125 => "1.25x",
-            Self::Forward150 => "1.5x",
-            Self::Forward200 => "2x",
-            Self::Backward050 => "-0.5x",
-            Self::Backward075 => "-0.75",
-            Self::Backward100 => "-1x",
-            Self::Backward125 => "-1.25",
-            Self::Backward150 => "-1.5x",
-            Self::Backward200 => "-2x",
-        }
-    }
-}
-
-struct Progress {
-    time_interval: Range<f32>,
-    // anchor_time: f32,
-    // instant: Instant,
-    time: f32,
-    base_speed: f32,
-    progress_speed: ProgressSpeed,
-    paused: bool,
-}
-
-impl Progress {
-    fn new(full_time: f32, base_speed: f32) -> Self {
-        Self {
-            time_interval: 0.0..full_time,
-            time: 0.0,
-            // instant: Instant::now(),
-            base_speed,
-            progress_speed: ProgressSpeed::Forward100,
-            paused: true,
-        }
-    }
-
-    fn progress_speed(&self) -> ProgressSpeed {
-        self.progress_speed
-    }
-
-    fn paused(&self) -> bool {
-        self.paused
-    }
-
-    // fn get_time(&mut self) -> f32 {
-    //     let mut time = self.anchor_time + self.instant.elapsed().as_secs_f32() * self.speed();
-    //     if !self.time_interval.contains(&time) {
-    //         time = time.clamp(self.time_interval.start, self.time_interval.end);
-    //         self.progress_speed = 0;
-    //         self.anchor_time = time;
-    //         self.instant = Instant::now();
-    //     }
-    //     time
-    // }
-
-    fn forward_time(&mut self, app_delta_time: f32) -> f32 {
-        if !self.paused {
-            self.time += app_delta_time * self.base_speed * self.progress_speed.value();
-            if !self.time_interval.contains(&self.time) {
-                self.paused = true;
-                self.time = self
-                    .time
-                    .clamp(self.time_interval.start, self.time_interval.end);
-            }
-        }
-        self.time
-    }
-
-    fn set_time(&mut self, time: f32) -> f32 {
-        self.time = time;
-        time
-    }
-
-    fn set_progress_speed(&mut self, progress_speed: ProgressSpeed) {
-        self.progress_speed = progress_speed;
-    }
-
-    fn play_or_pause(&mut self) {
-        self.paused = !self.paused;
-    }
-}
-
-struct State {
-    settings: Settings,
-    active_scene: Option<ActiveScene>,
-    storyboards: Vec<StoryboardState>,
-    device: wgpu::Device,
-    // window: Option<Arc<winit::window::Window>>,
-    // renderer: OnceLock<Renderer>,
-    // progress: Progress,
-    // control_pressed: bool,
-    // presentation_collection: Option<PresentationCollection>,
-}
-
-struct ActiveScene {
-    progress: Progress,
-    scene: Arc<SceneState>,
-}
-
-struct StoryboardState {
-    path: PathBuf,
-    status: StoryboardStatus,
-}
-
-enum StoryboardStatus {
-    Compilation,
-    Execution,
-    Success(Vec<Arc<SceneState>>),
-    CompileError(anyhow::Error),
-    ExecuteError(anyhow::Error),
-}
-
-struct SceneState {
-    name: String,
-    video_settings: VideoSettings,
-    duration: f32,
-    status: SceneStatus,
-}
-
-enum SceneStatus {
-    Presentation(TimelineEntries),
-    Success(PresentationEntries),
-    PresentationError(anyhow::Error),
-    PresentError(anyhow::Error),
-}
-
-enum Message {
-    CompileRequest(PathBuf),
-    CompileComplete(PathBuf),
-    CompileError(PathBuf, anyhow::Error),
-    ExecuteRequest(PathBuf),
-    ExecuteComplete(PathBuf, SceneTimelines),
-    ExecuteError(PathBuf, anyhow::Error),
-    PresentationRequest(PathBuf, String),
-    PresentationComplete(PathBuf, String, PresentationEntries),
-    PresentationError(PathBuf, String, anyhow::Error),
-    PresentError(PathBuf, String, anyhow::Error),
-}
-
-impl State {
-    // fn update(&mut self, message: Message) -> iced::Task<Message> {
-    //     match message {
-    //         Message::CompileRequest(path) => iced::Task::perform({
-    //             let path_clone = path.clone();
-    //             async {
-    //                 Self::compile(path_clone)
-    //             }
-    //         }, move |result| match result {
-    //             Ok(()) => Message::CompileComplete(path.clone()),
-    //             Err(err) => Message::CompileError(path.clone(), err),
-    //         }),
-    //         Message::CompileComplete(path) => {
-    //             self.storyboards.iter_mut().find(|storyboard|)
-    //             for storyboard in &mut self.storyboards {
-    //                 if storyboard.path == path {
-    //                     storyboard.status = StoryboardStatus::Execution;
-    //                 }
-    //             }
-    //             iced::Task::none()
-    //         }
-    //         Message::CompileError(path, err) => {
-    //             for storyboard in &mut self.storyboards {
-    //                 if storyboard.path == path {
-    //                     storyboard.status = StoryboardStatus::CompileError(err);
-    //                 }
-    //             }
-    //             iced::Task::none()
-    //         }
-    //         Message::ExecuteRequest(path) => {todo!()}
-    //         Message::ExecuteComplete(path, scene_timelines) => {todo!()}
-    //         Message::ExecuteError(path, err) => {todo!()}
-    //         Message::PresentationRequest(path, name) => {todo!()}
-    //         Message::PresentationComplete(path, name, presentation_entries) => {todo!()}
-    //         Message::PresentationError(path, name, err) => {todo!()}
-    //         Message::PresentError(path, name, err) => {todo!()}
-    //     }
-    // }
-
-    fn compile(path: PathBuf) -> anyhow::Result<()> {
-        todo!()
-    }
+pub(crate) fn write_to_stdout<T>(value: T)
+where
+    T: serde::Serialize,
+{
+    println!("{}", ron::ser::to_string(&value).unwrap());
 }
 
 pub mod scene {
-    use std::io::Read;
-
     use super::super::super::timelines::alive::Supervisor;
-    use super::super::super::timelines::timeline::TimelineEntries;
     use super::super::settings::SceneSettings;
-    use super::super::settings::VideoSettings;
-    use super::super::world::World;
+    use super::read_from_stdin;
+    use super::storyboard::SceneTimelines;
+    use super::write_to_stdout;
 
-    pub trait Scene: Sized {
+    pub trait Scene {
         fn construct(self, sv: &Supervisor<'_>);
 
         fn override_settings(&self, scene_settings: SceneSettings) -> SceneSettings {
             scene_settings
-        }
-    }
-
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
-    struct SceneId(u32);
-
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
-    pub(crate) struct SceneTimelines {
-        scene_id: SceneId,
-        name: String,
-        video_settings: VideoSettings,
-        duration: f32,
-        timeline_entries: TimelineEntries,
-    }
-
-    impl SceneTimelines {
-        fn new<S>(scene_id: SceneId, scene_settings: SceneSettings, scene: S) -> Self
-        where
-            S: Scene,
-        {
-            let scene_settings = scene.override_settings(scene_settings);
-            let world = World::new(scene_settings.style, scene_settings.typst);
-            let supervisor = Supervisor::new(&world);
-            scene.construct(&supervisor);
-            Self {
-                scene_id,
-                name: String::from(std::any::type_name::<S>()),
-                video_settings: scene_settings.video,
-                duration: *supervisor.get_time(),
-                timeline_entries: supervisor.into_timeline_entries(),
-            }
         }
     }
 
@@ -289,11 +38,9 @@ pub mod scene {
         S: Scene,
     {
         fn run(self) {
-            let mut buf = String::new();
-            let _ = std::io::stdin().read_to_string(&mut buf);
-            let scene_settings = ron::de::from_str(&buf).unwrap();
-            let scene_timelines = SceneTimelines::new(SceneId(0), scene_settings, self);
-            println!("{}", ron::ser::to_string(&scene_timelines).unwrap());
+            let scene_settings = read_from_stdin();
+            let scene_timelines = SceneTimelines::new(0, scene_settings, self);
+            write_to_stdout(scene_timelines);
         }
     }
 
@@ -305,14 +52,12 @@ pub mod scene {
             {
                 #[allow(unused_variables)]
                 fn run(self) {
-                    let mut buf = String::new();
-                    let _ = std::io::stdin().read_to_string(&mut buf);
-                    let scene_settings: SceneSettings = ron::de::from_str(&buf).unwrap();
+                    let scene_settings: SceneSettings = read_from_stdin();
                     $(${ignore($i)} let [<thread_${index()}>] = {
                         let scene_settings = scene_settings.clone();
                         std::thread::spawn(move || {
-                            let scene_timelines = SceneTimelines::new(SceneId(${index()}), scene_settings, self.${index()});
-                            println!("{}", ron::ser::to_string(&scene_timelines).unwrap());
+                            let scene_timelines = SceneTimelines::new(${index()}, scene_settings, self.${index()});
+                            write_to_stdout(scene_timelines);
                         })
                     };)*
                     $(${ignore($i)} [<thread_${index()}>].join().unwrap();)*
@@ -336,6 +81,397 @@ pub mod scene {
     scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _,);
     scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _,);
     scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _,);
+}
+
+pub mod storyboard {
+    use std::future::Future;
+    use std::ops::RangeFrom;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use super::super::super::timelines::alive::Supervisor;
+    use super::super::super::timelines::timeline::PresentationEntries;
+    use super::super::super::timelines::timeline::TimelineEntries;
+    use super::super::super::toplevel::app::scene::Scene;
+    use super::super::super::toplevel::settings::SceneSettings;
+    use super::super::super::toplevel::world::World;
+    use super::super::settings::VideoSettings;
+
+    pub(crate) struct StoryboardManager {
+        storyboards: Vec<StoryboardState>,
+        storyboard_id_counter: RangeFrom<u32>,
+    }
+
+    impl StoryboardManager {
+        pub(crate) fn update(
+            &mut self,
+            message: StoryboardMessage,
+            device: Arc<wgpu::Device>,
+        ) -> iced::Task<StoryboardMessage> {
+            match message {
+                StoryboardMessage::Compile(path) => {
+                    let storyboard_id = StoryboardId(self.storyboard_id_counter.next().unwrap());
+                    self.storyboards.push(StoryboardState {
+                        id: storyboard_id,
+                        path: path.clone(),
+                        status: StoryboardStatus::Compile,
+                    });
+                    iced::Task::perform(Self::compile(path), move |result| {
+                        StoryboardMessage::Execute(storyboard_id, result)
+                    })
+                }
+                StoryboardMessage::Execute(storyboard_id, compile_result) => {
+                    if let Some(status) = self
+                        .storyboards
+                        .iter_mut()
+                        .find(|state| state.id == storyboard_id)
+                        .map(|state| &mut state.status)
+                    {
+                        match compile_result {
+                            Err(err) => {
+                                *status = StoryboardStatus::CompileError(err);
+                                iced::Task::none()
+                            }
+                            Ok(path) => {
+                                *status = StoryboardStatus::Execute;
+                                iced::Task::perform(Self::execute(path), move |result| {
+                                    StoryboardMessage::Precut(storyboard_id, result)
+                                })
+                            }
+                        }
+                    } else {
+                        iced::Task::none()
+                    }
+                }
+                StoryboardMessage::Precut(storyboard_id, execute_result) => {
+                    if let Some(status) = self
+                        .storyboards
+                        .iter_mut()
+                        .find(|state| state.id == storyboard_id)
+                        .map(|state| &mut state.status)
+                    {
+                        match execute_result {
+                            Err(err) => {
+                                *status = StoryboardStatus::ExecuteError(err);
+                                iced::Task::none()
+                            }
+                            Ok(scene_timelines) => {
+                                let mut scene_states = Vec::new();
+                                let mut timeline_entries_collection = Vec::new();
+                                for scene_timeline in scene_timelines {
+                                    scene_states.push(SceneState {
+                                        id: scene_timeline.id,
+                                        name: scene_timeline.name,
+                                        video_settings: scene_timeline.video_settings,
+                                        duration: scene_timeline.duration,
+                                        status: SceneStatus::Precut,
+                                    });
+                                    timeline_entries_collection
+                                        .push((scene_timeline.id, scene_timeline.timeline_entries));
+                                }
+                                *status = StoryboardStatus::Success(scene_states);
+                                iced::Task::batch(timeline_entries_collection.into_iter().map(
+                                    |(timeline_id, timeline_entries)| {
+                                        let device = device.clone();
+                                        iced::Task::perform(
+                                            Self::precut(timeline_entries, device),
+                                            move |result| {
+                                                StoryboardMessage::Present(
+                                                    storyboard_id,
+                                                    timeline_id,
+                                                    result,
+                                                )
+                                            },
+                                        )
+                                    },
+                                ))
+                            }
+                        }
+                    } else {
+                        iced::Task::none()
+                    }
+                }
+                StoryboardMessage::Present(storyboard_id, timeline_id, precut_result) => {
+                    if let Some(StoryboardStatus::Success(scene_states)) = self
+                        .storyboards
+                        .iter_mut()
+                        .find(|state| state.id == storyboard_id)
+                        .map(|state| &mut state.status)
+                    {
+                        if let Some(status) = scene_states
+                            .iter_mut()
+                            .find(|state| state.id == timeline_id)
+                            .map(|state| &mut state.status)
+                        {
+                            match precut_result {
+                                Err(err) => {
+                                    *status = SceneStatus::PrecutError(err);
+                                    iced::Task::none()
+                                }
+                                Ok(presentation_entries) => {
+                                    *status = SceneStatus::Success(presentation_entries);
+                                    iced::Task::none()
+                                }
+                            }
+                        } else {
+                            iced::Task::none()
+                        }
+                    } else {
+                        iced::Task::none()
+                    }
+                }
+            }
+        }
+
+        fn compile(_path: PathBuf) -> impl Future<Output = anyhow::Result<PathBuf>> {
+            async{todo!()}
+        }
+
+        fn execute(_path: PathBuf) -> impl Future<Output = anyhow::Result<Vec<SceneTimelines>>> {
+            async{todo!()}
+        }
+
+        fn precut(
+            timeline_entries: TimelineEntries,
+            device: Arc<wgpu::Device>,
+        ) -> impl Future<Output = anyhow::Result<PresentationEntries>> {
+            async{todo!()}
+            // async move {
+            //     timeline_entries.precut(&device)
+            // }
+        }
+    }
+
+    pub(crate) enum StoryboardMessage {
+        Compile(PathBuf),
+        Execute(StoryboardId, anyhow::Result<PathBuf>),
+        Precut(StoryboardId, anyhow::Result<Vec<SceneTimelines>>),
+        Present(StoryboardId, SceneId, anyhow::Result<PresentationEntries>),
+        // PresentError(StoryboardId, SceneId, anyhow::Error),
+    }
+
+    struct StoryboardState {
+        id: StoryboardId,
+        path: PathBuf,
+        status: StoryboardStatus,
+    }
+
+    #[derive(Clone, Copy, PartialEq)]
+    struct StoryboardId(u32);
+
+    enum StoryboardStatus {
+        Compile,
+        Execute,
+        Success(Vec<SceneState>),
+        CompileError(anyhow::Error),
+        ExecuteError(anyhow::Error),
+    }
+
+    struct SceneState {
+        id: SceneId,
+        name: String,
+        video_settings: VideoSettings,
+        duration: f32,
+        status: SceneStatus,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+    struct SceneId(u32);
+
+    enum SceneStatus {
+        Precut,
+        Success(PresentationEntries),
+        PrecutError(anyhow::Error),
+        PresentError(anyhow::Error),
+    }
+
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    pub(crate) struct SceneTimelines {
+        id: SceneId,
+        name: String,
+        video_settings: VideoSettings,
+        duration: f32,
+        timeline_entries: TimelineEntries,
+    }
+
+    impl SceneTimelines {
+        pub(crate) fn new<S>(id: usize, scene_settings: SceneSettings, scene: S) -> Self
+        where
+            S: Scene,
+        {
+            let scene_settings = scene.override_settings(scene_settings);
+            let world = World::new(scene_settings.style, scene_settings.typst);
+            let supervisor = Supervisor::new(&world);
+            scene.construct(&supervisor);
+            Self {
+                id: SceneId(id as u32),
+                name: String::from(std::any::type_name::<S>()),
+                video_settings: scene_settings.video,
+                duration: *supervisor.get_time(),
+                timeline_entries: supervisor.into_timeline_entries(),
+            }
+        }
+    }
+}
+
+pub mod app {
+    use std::ops::Range;
+    use std::sync::Arc;
+
+    use super::super::super::toplevel::settings::Settings;
+    use super::storyboard::StoryboardManager;
+    use super::storyboard::StoryboardMessage;
+
+    #[derive(Clone, Copy)]
+    enum ProgressSpeed {
+        Forward050,
+        Forward075,
+        Forward100,
+        Forward125,
+        Forward150,
+        Forward200,
+        Backward050,
+        Backward075,
+        Backward100,
+        Backward125,
+        Backward150,
+        Backward200,
+    }
+
+    impl ProgressSpeed {
+        fn value(&self) -> f32 {
+            match self {
+                Self::Forward050 => 0.50,
+                Self::Forward075 => 0.75,
+                Self::Forward100 => 1.00,
+                Self::Forward125 => 1.25,
+                Self::Forward150 => 1.50,
+                Self::Forward200 => 2.00,
+                Self::Backward050 => -0.50,
+                Self::Backward075 => -0.75,
+                Self::Backward100 => -1.00,
+                Self::Backward125 => -1.25,
+                Self::Backward150 => -1.50,
+                Self::Backward200 => -2.00,
+            }
+        }
+
+        fn display_str(&self) -> &'static str {
+            match self {
+                Self::Forward050 => "0.5x",
+                Self::Forward075 => "0.75x",
+                Self::Forward100 => "speed",
+                Self::Forward125 => "1.25x",
+                Self::Forward150 => "1.5x",
+                Self::Forward200 => "2x",
+                Self::Backward050 => "-0.5x",
+                Self::Backward075 => "-0.75",
+                Self::Backward100 => "-1x",
+                Self::Backward125 => "-1.25",
+                Self::Backward150 => "-1.5x",
+                Self::Backward200 => "-2x",
+            }
+        }
+    }
+
+    struct Progress {
+        time_interval: Range<f32>,
+        // anchor_time: f32,
+        // instant: Instant,
+        time: f32,
+        base_speed: f32,
+        progress_speed: ProgressSpeed,
+        paused: bool,
+    }
+
+    impl Progress {
+        fn new(full_time: f32, base_speed: f32) -> Self {
+            Self {
+                time_interval: 0.0..full_time,
+                time: 0.0,
+                // instant: Instant::now(),
+                base_speed,
+                progress_speed: ProgressSpeed::Forward100,
+                paused: true,
+            }
+        }
+
+        fn progress_speed(&self) -> ProgressSpeed {
+            self.progress_speed
+        }
+
+        fn paused(&self) -> bool {
+            self.paused
+        }
+
+        // fn get_time(&mut self) -> f32 {
+        //     let mut time = self.anchor_time + self.instant.elapsed().as_secs_f32() * self.speed();
+        //     if !self.time_interval.contains(&time) {
+        //         time = time.clamp(self.time_interval.start, self.time_interval.end);
+        //         self.progress_speed = 0;
+        //         self.anchor_time = time;
+        //         self.instant = Instant::now();
+        //     }
+        //     time
+        // }
+
+        fn forward_time(&mut self, app_delta_time: f32) -> f32 {
+            if !self.paused {
+                self.time += app_delta_time * self.base_speed * self.progress_speed.value();
+                if !self.time_interval.contains(&self.time) {
+                    self.paused = true;
+                    self.time = self
+                        .time
+                        .clamp(self.time_interval.start, self.time_interval.end);
+                }
+            }
+            self.time
+        }
+
+        fn set_time(&mut self, time: f32) -> f32 {
+            self.time = time;
+            time
+        }
+
+        fn set_progress_speed(&mut self, progress_speed: ProgressSpeed) {
+            self.progress_speed = progress_speed;
+        }
+
+        fn play_or_pause(&mut self) {
+            self.paused = !self.paused;
+        }
+    }
+
+    // struct ActiveScene {
+    //     progress: Progress,
+    //     scene: Arc<SceneState>,
+    // }
+    struct State {
+        settings: Settings,
+        // active_scene: Option<ActiveScene>,
+        device: Arc<wgpu::Device>,
+        storyboard_manager: StoryboardManager,
+        // window: Option<Arc<winit::window::Window>>,
+        // renderer: OnceLock<Renderer>,
+        // progress: Progress,
+        // control_pressed: bool,
+        // presentation_collection: Option<PresentationCollection>,
+    }
+
+    impl State {
+        fn update(&mut self, message: Message) -> iced::Task<Message> {
+            match message {
+                Message::StoryboardMessage(storyboard_message) => self
+                    .storyboard_manager
+                    .update(storyboard_message, self.device.clone())
+                    .map(Message::StoryboardMessage),
+            }
+        }
+    }
+
+    enum Message {
+        StoryboardMessage(StoryboardMessage),
+    }
 }
 
 // enum Message {
