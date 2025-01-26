@@ -1,6 +1,7 @@
 use super::super::mobjects::mobject::Mobject;
 
-pub trait Update<M>: 'static + Clone + Send + Sync
+pub trait Update<M>:
+    'static + Clone + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     M: Mobject,
 {

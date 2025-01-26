@@ -13,7 +13,8 @@ where
     fn act(self, mobject: &M) -> Self::Diff;
 }
 
-pub trait MobjectDiff<M>: 'static + Clone + Send + Sync
+pub trait MobjectDiff<M>:
+    'static + Clone + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     M: Mobject,
 {

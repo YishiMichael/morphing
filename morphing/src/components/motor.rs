@@ -1,6 +1,7 @@
 use geometric_algebra::ppga3d as pga;
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(from = "nalgebra::Matrix4x2<f32>", into = "nalgebra::Matrix4x2<f32>")]
 pub struct Motor(pub pga::Motor); // transpose?
 
 impl From<nalgebra::Matrix4x2<f32>> for Motor {

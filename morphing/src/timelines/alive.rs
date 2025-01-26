@@ -480,7 +480,7 @@ pub mod base_impl {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct IdentityRate;
 
     impl Rate for IdentityRate {
@@ -489,7 +489,7 @@ pub mod base_impl {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct ComposeRate<R0, R1>(R0, R1);
 
     impl<R0, R1> Rate for ComposeRate<R0, R1>
@@ -502,7 +502,7 @@ pub mod base_impl {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct ComposeMobjectDiff<MD0, MD1>(MD0, MD1);
 
     impl<M, MD0, MD1> MobjectDiff<M> for ComposeMobjectDiff<MD0, MD1>

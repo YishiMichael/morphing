@@ -1,15 +1,22 @@
 use std::ops::Range;
 
-pub trait Timeline: 'static + Send + Sync {
+pub trait Timeline:
+    'static + Send + Sync + serde_traitobject::Deserialize + serde_traitobject::Serialize
+{
     fn precut(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>>;
 }
 
-struct TimelineEntry {
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct TimelineEntry {
+    // TODO: remove pub
     time_interval: Range<f32>,
+    #[serde(with = "serde_traitobject")]
     timeline: Box<dyn Timeline>,
 }
 
-pub(crate) struct TimelineEntries(Vec<TimelineEntry>);
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct TimelineEntries(pub Vec<TimelineEntry>);
+//pub(crate) struct TimelineEntries(Vec<TimelineEntry>);  // TODO
 
 impl TimelineEntries {
     pub(crate) fn new() -> Self {
@@ -89,7 +96,7 @@ pub mod steady {
     use super::Presentation;
     use super::Timeline;
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct SteadyTimeline<M> {
         pub(crate) mobject: M,
     }
@@ -153,7 +160,13 @@ pub mod dynamic {
     }
 
     pub trait DynamicTimelineContent:
-        'static + Clone + Send + Sync + TimelineContentCollapse
+        'static
+        + Clone
+        + Send
+        + Sync
+        + serde::de::DeserializeOwned
+        + serde::Serialize
+        + TimelineContentCollapse
     {
         type ContentPresentation: ContentPresentation;
 
@@ -163,11 +176,13 @@ pub mod dynamic {
         ) -> anyhow::Result<Self::ContentPresentation>;
     }
 
-    pub trait DynamicTimelineMetric: 'static + Clone + Send + Sync {
+    pub trait DynamicTimelineMetric:
+        'static + Clone + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+    {
         fn eval(&self, time: f32, time_interval: Range<f32>) -> f32;
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct RelativeTimelineMetric;
 
     impl DynamicTimelineMetric for RelativeTimelineMetric {
@@ -176,7 +191,7 @@ pub mod dynamic {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct AbsoluteTimelineMetric;
 
     impl DynamicTimelineMetric for AbsoluteTimelineMetric {
@@ -185,7 +200,7 @@ pub mod dynamic {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct DynamicTimeline<CO, ME, R> {
         pub(crate) content: CO,
         pub(crate) metric: ME,
@@ -237,7 +252,7 @@ pub mod dynamic {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct IndeterminedTimelineContent<M> {
         pub(crate) mobject: M,
     }
@@ -298,7 +313,7 @@ pub mod action {
     use super::dynamic::DynamicTimelineContent;
     use super::dynamic::TimelineContentCollapse;
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct ActionTimelineContent<M, D> {
         pub(crate) mobject: M,
         pub(crate) diff: D,
@@ -375,7 +390,7 @@ pub mod continuous {
     use super::dynamic::DynamicTimelineContent;
     use super::dynamic::TimelineContentCollapse;
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct ContinuousTimelineContent<M, U> {
         pub(crate) mobject: M,
         pub(crate) update: U,
@@ -456,7 +471,7 @@ pub mod discrete {
     use super::PresentationEntries;
     use super::TimelineEntries;
 
-    #[derive(Clone)]
+    #[derive(Clone, serde::Deserialize, serde::Serialize)]
     pub struct DiscreteTimelineContent<M> {
         pub(crate) mobject: M,
         pub(crate) timeline_entries: Arc<TimelineEntries>,

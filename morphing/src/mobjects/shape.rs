@@ -22,7 +22,7 @@ use super::super::toplevel::palette::{TEAL, WHITE};
 use super::super::toplevel::world::World;
 use super::mobject::{Mobject, MobjectBuilder, MobjectRealization};
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct ShapeMobject {
     pub(crate) transform: Transform,
     pub(crate) path: Path,

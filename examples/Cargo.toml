@@ -3,9 +3,6 @@ name = "examples"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-crate-type = ["dylib"]
-
 [dependencies]
 morphing = { path = "../morphing" }
 nalgebra = "0.33.2"

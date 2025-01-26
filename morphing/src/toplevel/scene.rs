@@ -7,15 +7,14 @@ use super::world::World;
 pub use morphing_macros::scene;
 
 pub struct SceneTimelines {
-    pub(crate) id: usize,
-    pub(crate) name: &'static str,
-    pub(crate) video_settings: VideoSettings,
-    pub(crate) duration: f32,
-    pub(crate) timeline_entries: TimelineEntries,
-}
+    pub name: &'static str,
+    pub video_settings: VideoSettings,
+    pub duration: f32,
+    pub timeline_entries: TimelineEntries,
+} // TODO: remove internal pubs
 
 impl SceneTimelines {
-    pub fn new<S>(id: usize, name: &'static str, scene_settings: SceneSettings, scene_fn: S) -> Self
+    pub fn new<S>(name: &'static str, scene_settings: SceneSettings, scene_fn: S) -> Self
     where
         S: Fn(&Supervisor),
     {
@@ -23,7 +22,6 @@ impl SceneTimelines {
         let supervisor = Supervisor::new(&world);
         scene_fn(&supervisor);
         Self {
-            id,
             name,
             video_settings: scene_settings.video,
             duration: *supervisor.get_time(),

@@ -10,7 +10,7 @@ use super::component::ComponentShaderTypes;
 use super::motor::Motor;
 use super::paint::QueueWriteBufferMutWrapper;
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Transform {
     motor: Motor,
     scale: f32,

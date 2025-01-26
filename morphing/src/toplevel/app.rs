@@ -153,25 +153,25 @@ pub mod storyboard {
                                 let mut timeline_entries_collection = Vec::new();
                                 for scene_timeline in scene_timelines {
                                     scene_states.push(SceneState {
-                                        id: SceneId(scene_timeline.id as u32),
+                                        id: SceneId(0),
                                         name: scene_timeline.name.to_string(),
                                         video_settings: scene_timeline.video_settings,
                                         duration: scene_timeline.duration,
                                         status: SceneStatus::Precut,
                                     });
                                     timeline_entries_collection
-                                        .push((scene_timeline.id, scene_timeline.timeline_entries));
+                                        .push(scene_timeline.timeline_entries);
                                 }
                                 *status = StoryboardStatus::Success(scene_states);
                                 iced::Task::batch(timeline_entries_collection.into_iter().map(
-                                    |(timeline_id, timeline_entries)| {
+                                    |timeline_entries| {
                                         let device = device.clone();
                                         iced::Task::perform(
                                             Self::precut(timeline_entries, device),
                                             move |result| {
                                                 StoryboardMessage::Present(
                                                     storyboard_id,
-                                                    SceneId(timeline_id as u32),
+                                                    SceneId(0),
                                                     result,
                                                 )  // TODO
                                             },

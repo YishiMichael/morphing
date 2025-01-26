@@ -2,11 +2,13 @@ use std::ops::Range;
 
 use super::alive::traits::ApplyRate;
 
-pub trait Rate: 'static + Clone + Send + Sync {
+pub trait Rate:
+    'static + Clone + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+{
     fn eval(&self, t: f32) -> f32;
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct ClampRate(Range<f32>);
 
 impl Rate for ClampRate {
@@ -23,7 +25,7 @@ pub trait Clamp: ApplyRate {
 
 impl<T> Clamp for T where T: ApplyRate {}
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct SpeedRate(f32);
 
 impl Rate for SpeedRate {
@@ -40,7 +42,7 @@ pub trait Speed: ApplyRate {
 
 impl<T> Speed for T where T: ApplyRate {}
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct SmoothRate;
 
 impl Rate for SmoothRate {
@@ -57,7 +59,7 @@ pub trait Smooth: ApplyRate {
 
 impl<T> Smooth for T where T: ApplyRate {}
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct SmootherRate;
 
 impl Rate for SmootherRate {

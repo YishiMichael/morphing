@@ -11,7 +11,7 @@ use super::component::ComponentShaderTypes;
 use super::motor::Motor;
 use super::paint::QueueWriteBufferMutWrapper;
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Camera {
     view_motor: Motor,
     projection_matrix: nalgebra::Matrix4<f32>,

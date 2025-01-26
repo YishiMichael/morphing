@@ -1,4 +1,4 @@
-pub trait Component {
+pub trait Component: serde::de::DeserializeOwned + serde::Serialize {
     type ShaderTypes: ComponentShaderTypes;
 
     fn to_shader_types(&self) -> Self::ShaderTypes;

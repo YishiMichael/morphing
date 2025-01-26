@@ -15,11 +15,10 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
         },
         Err(error) => return TokenStream::from(darling::Error::from(error).write_errors()),
     };
-    let scene_fn = syn::parse_macro_input!(tokens as syn::ItemFn);
-    // TODO: vis
+    let mut scene_fn = syn::parse_macro_input!(tokens as syn::ItemFn);
+    let vis = std::mem::replace(&mut scene_fn.vis, syn::Visibility::Inherited);
 
     let scene_name = scene_fn.sig.ident.clone();
-    let var_id = quote::format_ident!("__id");
     let var_scene_settings = quote::format_ident!("__scene_settings");
 
     let override_settings_stmt = if let Some(override_settings_path) = args.override_settings {
@@ -30,13 +29,12 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
         quote::quote! {}
     };
     let block = quote::quote! {
-        pub fn #scene_name(
-            #var_id: usize,
+        #vis fn #scene_name(
             #var_scene_settings: ::morphing::toplevel::settings::SceneSettings,
         ) -> ::morphing::toplevel::scene::SceneTimelines {
             #scene_fn
             #override_settings_stmt
-            ::morphing::toplevel::scene::SceneTimelines::new(#var_id, stringify!(#scene_name), #var_scene_settings, #scene_name)
+            ::morphing::toplevel::scene::SceneTimelines::new(stringify!(#scene_name), #var_scene_settings, #scene_name)
         }
     };
     block.into()

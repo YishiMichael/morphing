@@ -6,13 +6,13 @@ use wgpu::util::DeviceExt;
 use super::component::Component;
 use super::component::ComponentShaderTypes;
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Paint {
     pub color: palette::Srgba<f32>,
     pub gradients: Vec<Gradient>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct Gradient {
     pub from_position: nalgebra::Vector2<f32>,
     pub to_position: nalgebra::Vector2<f32>,
