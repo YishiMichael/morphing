@@ -38,13 +38,13 @@ impl MobjectBuilder for Typst {
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 struct TypstMobjectToken {
     span: Option<Range<usize>>,
     mobject: ShapeMobject,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 pub struct TypstMobject {
     text: String,
     tokens: Vec<TypstMobjectToken>,

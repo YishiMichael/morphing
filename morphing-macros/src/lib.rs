@@ -16,24 +16,27 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
         Err(error) => return TokenStream::from(darling::Error::from(error).write_errors()),
     };
     let scene_fn = syn::parse_macro_input!(tokens as syn::ItemFn);
+    // TODO: vis
 
     let scene_name = scene_fn.sig.ident.clone();
-    let scene_settings = quote::format_ident!("__scene_settings");
+    let var_id = quote::format_ident!("__id");
+    let var_scene_settings = quote::format_ident!("__scene_settings");
 
     let override_settings_stmt = if let Some(override_settings_path) = args.override_settings {
         quote::quote! {
-            let #scene_settings = #override_settings_path(#scene_settings);
+            let #var_scene_settings = #override_settings_path(#var_scene_settings);
         }
     } else {
         quote::quote! {}
     };
     let block = quote::quote! {
         pub fn #scene_name(
-            #scene_settings: ::morphing::toplevel::settings::SceneSettings,
-        ) -> ::morphing::toplevel::app::scene::SceneTimelines {
+            #var_id: usize,
+            #var_scene_settings: ::morphing::toplevel::settings::SceneSettings,
+        ) -> ::morphing::toplevel::scene::SceneTimelines {
             #scene_fn
             #override_settings_stmt
-            ::morphing::toplevel::app::scene::SceneTimelines::new(stringify!(#scene_name), #scene_settings, #scene_name)
+            ::morphing::toplevel::scene::SceneTimelines::new(#var_id, stringify!(#scene_name), #var_scene_settings, #scene_name)
         }
     };
     block.into()

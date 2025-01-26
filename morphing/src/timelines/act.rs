@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use super::super::mobjects::mobject::Mobject;
 
 pub trait Act<M>: Clone
@@ -15,8 +13,7 @@ where
     fn act(self, mobject: &M) -> Self::Diff;
 }
 
-pub trait MobjectDiff<M>:
-    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+pub trait MobjectDiff<M>: 'static + Clone + Send + Sync
 where
     M: Mobject,
 {

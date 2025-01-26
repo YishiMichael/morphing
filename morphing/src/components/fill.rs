@@ -1,6 +1,6 @@
 use super::paint::Paint;
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 pub struct Fill {
     pub options: lyon::tessellation::FillOptions,
     pub paint: Paint,

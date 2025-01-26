@@ -1,87 +1,83 @@
-pub(crate) fn read_from_stdin<T>() -> T
-where
-    T: serde::de::DeserializeOwned,
-{
-    let mut buf = String::new();
-    std::io::stdin().read_line(&mut buf).unwrap();
-    ron::de::from_str(&buf).unwrap()
-}
+// // TODO: remove, also serde
+// pub(crate) fn read_from_stdin<T>() -> T
+// where
+//     T: serde::de::DeserializeOwned,
+// {
+//     let mut buf = String::new();
+//     std::io::stdin().read_line(&mut buf).unwrap();
+//     ron::de::from_str(&buf).unwrap()
+// }
 
-pub(crate) fn write_to_stdout<T>(value: T)
-where
-    T: serde::Serialize,
-{
-    println!("{}", ron::ser::to_string(&value).unwrap());
-}
+// pub(crate) fn write_to_stdout<T>(value: T)
+// where
+//     T: serde::Serialize,
+// {
+//     println!("{}", ron::ser::to_string(&value).unwrap());
+// }
 
-pub mod scene {
-    use super::super::super::timelines::alive::Supervisor;
-    use super::super::settings::SceneSettings;
-    use super::read_from_stdin;
-    use super::storyboard::SceneTimelines;
-    use super::write_to_stdout;
+// pub mod scene {
 
-    pub trait Scene {
-        fn construct(self, sv: &Supervisor<'_>);
+// pub trait Scene {
+//     fn construct(self, sv: &Supervisor<'_>);
 
-        fn override_settings(&self, scene_settings: SceneSettings) -> SceneSettings {
-            scene_settings
-        }
-    }
+//     fn override_settings(&self, scene_settings: SceneSettings) -> SceneSettings {
+//         scene_settings
+//     }
+// }
 
-    pub trait Scenes {
-        fn run(self);
-    }
+// pub trait Scenes {
+//     fn run(self);
+// }
 
-    impl<S> Scenes for S
-    where
-        S: Scene,
-    {
-        fn run(self) {
-            let scene_settings = read_from_stdin();
-            let scene_timelines = SceneTimelines::new(0, scene_settings, self);
-            write_to_stdout(scene_timelines);
-        }
-    }
+// impl<S> Scenes for S
+// where
+//     S: Scene,
+// {
+//     fn run(self) {
+//         let scene_settings = read_from_stdin();
+//         let scene_timelines = SceneTimelines::new(0, scene_settings, self);
+//         write_to_stdout(scene_timelines);
+//     }
+// }
 
-    macro_rules! scenes_tuple {
-        ($($i:tt,)*) => {paste::paste!{
-            impl<$(${ignore($i)} [<S${index()}>],)*> Scenes for ($(${ignore($i)} [<S${index()}>],)*)
-            where
-                $(${ignore($i)} [<S${index()}>]: 'static + Send + Scene,)*
-            {
-                #[allow(unused_variables)]
-                fn run(self) {
-                    let scene_settings: SceneSettings = read_from_stdin();
-                    $(${ignore($i)} let [<thread_${index()}>] = {
-                        let scene_settings = scene_settings.clone();
-                        std::thread::spawn(move || {
-                            let scene_timelines = SceneTimelines::new(${index()}, scene_settings, self.${index()});
-                            write_to_stdout(scene_timelines);
-                        })
-                    };)*
-                    $(${ignore($i)} [<thread_${index()}>].join().unwrap();)*
-                }
-            }
-        }};
-    }
-    scenes_tuple!();
-    scenes_tuple!(_,);
-    scenes_tuple!(_, _,);
-    scenes_tuple!(_, _, _,);
-    scenes_tuple!(_, _, _, _,);
-    scenes_tuple!(_, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _,);
-    scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _,);
-}
+// macro_rules! scenes_tuple {
+//     ($($i:tt,)*) => {paste::paste!{
+//         impl<$(${ignore($i)} [<S${index()}>],)*> Scenes for ($(${ignore($i)} [<S${index()}>],)*)
+//         where
+//             $(${ignore($i)} [<S${index()}>]: 'static + Send + Scene,)*
+//         {
+//             #[allow(unused_variables)]
+//             fn run(self) {
+//                 let scene_settings: SceneSettings = read_from_stdin();
+//                 $(${ignore($i)} let [<thread_${index()}>] = {
+//                     let scene_settings = scene_settings.clone();
+//                     std::thread::spawn(move || {
+//                         let scene_timelines = SceneTimelines::new(${index()}, scene_settings, self.${index()});
+//                         write_to_stdout(scene_timelines);
+//                     })
+//                 };)*
+//                 $(${ignore($i)} [<thread_${index()}>].join().unwrap();)*
+//             }
+//         }
+//     }};
+// }
+// scenes_tuple!();
+// scenes_tuple!(_,);
+// scenes_tuple!(_, _,);
+// scenes_tuple!(_, _, _,);
+// scenes_tuple!(_, _, _, _,);
+// scenes_tuple!(_, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _,);
+// scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _,);
+// }
 
 pub mod storyboard {
     use std::future::Future;
@@ -89,12 +85,9 @@ pub mod storyboard {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use super::super::super::timelines::alive::Supervisor;
     use super::super::super::timelines::timeline::PresentationEntries;
     use super::super::super::timelines::timeline::TimelineEntries;
-    use super::super::super::toplevel::app::scene::Scene;
-    use super::super::super::toplevel::settings::SceneSettings;
-    use super::super::super::toplevel::world::World;
+    use super::super::scene::SceneTimelines;
     use super::super::settings::VideoSettings;
 
     pub(crate) struct StoryboardManager {
@@ -160,8 +153,8 @@ pub mod storyboard {
                                 let mut timeline_entries_collection = Vec::new();
                                 for scene_timeline in scene_timelines {
                                     scene_states.push(SceneState {
-                                        id: scene_timeline.id,
-                                        name: scene_timeline.name,
+                                        id: SceneId(scene_timeline.id as u32),
+                                        name: scene_timeline.name.to_string(),
                                         video_settings: scene_timeline.video_settings,
                                         duration: scene_timeline.duration,
                                         status: SceneStatus::Precut,
@@ -178,9 +171,9 @@ pub mod storyboard {
                                             move |result| {
                                                 StoryboardMessage::Present(
                                                     storyboard_id,
-                                                    timeline_id,
+                                                    SceneId(timeline_id as u32),
                                                     result,
-                                                )
+                                                )  // TODO
                                             },
                                         )
                                     },
@@ -224,18 +217,24 @@ pub mod storyboard {
         }
 
         fn compile(_path: PathBuf) -> impl Future<Output = anyhow::Result<PathBuf>> {
-            async{todo!()}
+            async {
+                todo!()
+            }
         }
 
         fn execute(_path: PathBuf) -> impl Future<Output = anyhow::Result<Vec<SceneTimelines>>> {
-            async{todo!()}
+            async {
+                todo!()
+            }
         }
 
         fn precut(
             timeline_entries: TimelineEntries,
             device: Arc<wgpu::Device>,
         ) -> impl Future<Output = anyhow::Result<PresentationEntries>> {
-            async{todo!()}
+            async {
+                todo!()
+            }
             // async move {
             //     timeline_entries.precut(&device)
             // }
@@ -275,7 +274,7 @@ pub mod storyboard {
         status: SceneStatus,
     }
 
-    #[derive(Clone, Copy, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Copy, PartialEq)]
     struct SceneId(u32);
 
     enum SceneStatus {
@@ -283,34 +282,6 @@ pub mod storyboard {
         Success(PresentationEntries),
         PrecutError(anyhow::Error),
         PresentError(anyhow::Error),
-    }
-
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
-    pub(crate) struct SceneTimelines {
-        id: SceneId,
-        name: String,
-        video_settings: VideoSettings,
-        duration: f32,
-        timeline_entries: TimelineEntries,
-    }
-
-    impl SceneTimelines {
-        pub(crate) fn new<S>(id: usize, scene_settings: SceneSettings, scene: S) -> Self
-        where
-            S: Scene,
-        {
-            let scene_settings = scene.override_settings(scene_settings);
-            let world = World::new(scene_settings.style, scene_settings.typst);
-            let supervisor = Supervisor::new(&world);
-            scene.construct(&supervisor);
-            Self {
-                id: SceneId(id as u32),
-                name: String::from(std::any::type_name::<S>()),
-                video_settings: scene_settings.video,
-                duration: *supervisor.get_time(),
-                timeline_entries: supervisor.into_timeline_entries(),
-            }
-        }
     }
 }
 

@@ -3,13 +3,13 @@ use std::path::PathBuf;
 use super::palette::BLACK;
 use super::palette::WHITE;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct Settings {
     pub player: PlayerSettings,
     pub scene: SceneSettings,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PlayerSettings {
     pub play_pause_key: iced::keyboard::Key,
     pub fast_forward_key: iced::keyboard::Key,
@@ -17,14 +17,14 @@ pub struct PlayerSettings {
     pub fast_skip_seconds: f32,
 }
 
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Default)]
 pub struct SceneSettings {
     pub video: VideoSettings,
     pub style: StyleSettings,
     pub typst: TypstSettings,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 pub struct VideoSettings {
     pub size: (u32, u32),
     pub background_color: palette::Srgb<f32>,
@@ -32,12 +32,12 @@ pub struct VideoSettings {
     pub play_speed: f32,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 pub struct StyleSettings {
     pub color: palette::Srgb<f32>,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 pub struct TypstSettings {
     pub root: PathBuf,
     pub inputs: Vec<(String, String)>,

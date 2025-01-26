@@ -1,10 +1,6 @@
-use std::fmt::Debug;
-
 use super::super::toplevel::world::World;
 
-pub trait Mobject:
-    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
-{
+pub trait Mobject: 'static + Clone + Send + Sync {
     type Realization: MobjectRealization;
 
     fn realize(&self, device: &wgpu::Device) -> anyhow::Result<Self::Realization>;

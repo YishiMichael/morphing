@@ -1,6 +1,4 @@
-use std::fmt::Debug;
-
-pub trait Component: Debug + serde::de::DeserializeOwned + serde::Serialize {
+pub trait Component {
     type ShaderTypes: ComponentShaderTypes;
 
     fn to_shader_types(&self) -> Self::ShaderTypes;
