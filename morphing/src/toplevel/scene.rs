@@ -6,14 +6,15 @@ use super::world::World;
 
 pub use morphing_macros::scene;
 
-pub struct SceneTimelines {
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct SceneTimelineCollection {
     pub name: &'static str,
     pub video_settings: VideoSettings,
     pub duration: f32,
     pub timeline_entries: TimelineEntries,
 } // TODO: remove internal pubs
 
-impl SceneTimelines {
+impl SceneTimelineCollection {
     pub fn new<S>(name: &'static str, scene_settings: SceneSettings, scene_fn: S) -> Self
     where
         S: Fn(&Supervisor),

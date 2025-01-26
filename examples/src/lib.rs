@@ -11,3 +11,7 @@ pub fn demo_scene(sv: &Supervisor<'_>) {
     mobject.destroy();
     sv.wait(12.0);
 }
+
+pub fn it_works(a: i32, b: i32) -> i32 {
+    a + b
+}

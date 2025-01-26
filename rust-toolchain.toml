@@ -1,2 +1,6 @@
 [toolchain]
-channel = "nightly"
+# The dependency `metatype` relies on features `arbitrary_self_types`, `ptr_metadata`, `specialization`,
+# among which `arbitrary_self_types` is used to enable `self: *mut Self`.
+# However, in the latest nightly rust (1.86.0) the relevant feature has been renamed to `arbitrary_self_types_pointers`,
+# so an earlier nightly version is used here.
+channel = "nightly-2024-09-05"

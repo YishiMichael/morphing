@@ -31,10 +31,10 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
     let block = quote::quote! {
         #vis fn #scene_name(
             #var_scene_settings: ::morphing::toplevel::settings::SceneSettings,
-        ) -> ::morphing::toplevel::scene::SceneTimelines {
+        ) -> ::morphing::toplevel::scene::SceneTimelineCollection {
             #scene_fn
             #override_settings_stmt
-            ::morphing::toplevel::scene::SceneTimelines::new(stringify!(#scene_name), #var_scene_settings, #scene_name)
+            ::morphing::toplevel::scene::SceneTimelineCollection::new(stringify!(#scene_name), #var_scene_settings, #scene_name)
         }
     };
     block.into()

@@ -79,6 +79,8 @@
 // scenes_tuple!(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _,);
 // }
 
+pub use ron;
+
 pub mod storyboard {
     use std::future::Future;
     use std::ops::RangeFrom;
@@ -87,7 +89,7 @@ pub mod storyboard {
 
     use super::super::super::timelines::timeline::PresentationEntries;
     use super::super::super::timelines::timeline::TimelineEntries;
-    use super::super::scene::SceneTimelines;
+    use super::super::scene::SceneTimelineCollection;
     use super::super::settings::VideoSettings;
 
     pub(crate) struct StoryboardManager {
@@ -222,7 +224,7 @@ pub mod storyboard {
             }
         }
 
-        fn execute(_path: PathBuf) -> impl Future<Output = anyhow::Result<Vec<SceneTimelines>>> {
+        fn execute(_path: PathBuf) -> impl Future<Output = anyhow::Result<Vec<SceneTimelineCollection>>> {
             async {
                 todo!()
             }
@@ -244,7 +246,7 @@ pub mod storyboard {
     pub(crate) enum StoryboardMessage {
         Compile(PathBuf),
         Execute(StoryboardId, anyhow::Result<PathBuf>),
-        Precut(StoryboardId, anyhow::Result<Vec<SceneTimelines>>),
+        Precut(StoryboardId, anyhow::Result<Vec<SceneTimelineCollection>>),
         Present(StoryboardId, SceneId, anyhow::Result<PresentationEntries>),
         // PresentError(StoryboardId, SceneId, anyhow::Error),
     }

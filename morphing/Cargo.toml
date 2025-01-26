@@ -12,6 +12,7 @@ ecow = "0.2.3"
 encase = { version = "0.10.0", features = ["nalgebra"] }
 env_logger = "0.11.6"
 essi-ffmpeg = "0.2.0"
+evcxr = "0.18.0"
 geometric_algebra = "0.3.0"
 glam = "0.24.2"
 iced = "0.13.1"

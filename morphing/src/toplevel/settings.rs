@@ -17,14 +17,14 @@ pub struct PlayerSettings {
     pub fast_skip_seconds: f32,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct SceneSettings {
     pub video: VideoSettings,
     pub style: StyleSettings,
     pub typst: TypstSettings,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct VideoSettings {
     pub size: (u32, u32),
     pub background_color: palette::Srgb<f32>,
@@ -32,12 +32,12 @@ pub struct VideoSettings {
     pub play_speed: f32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct StyleSettings {
     pub color: palette::Srgb<f32>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct TypstSettings {
     pub root: PathBuf,
     pub inputs: Vec<(String, String)>,
