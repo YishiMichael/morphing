@@ -1,8 +1,8 @@
 pub mod storyboard {
     use std::io::BufRead;
-    use std::io::Read;
-    // use std::future::Future;
     use std::io::BufReader;
+    use std::io::Read;
+    use std::io::Write;
     use std::path::PathBuf;
     use std::process::Command;
     use std::sync::Arc;
@@ -10,17 +10,18 @@ pub mod storyboard {
     use super::super::super::timelines::timeline::PresentationEntries;
     use super::super::super::timelines::timeline::TimelineEntries;
     use super::super::scene::SceneTimelineCollection;
+    use super::super::settings::Settings;
     use super::super::settings::VideoSettings;
 
     pub(crate) struct StoryboardManager {
         storyboards: indexmap::IndexMap<PathBuf, StoryboardState>,
-        // storyboard_id_counter: RangeFrom<u32>,
     }
 
     impl StoryboardManager {
         pub(crate) fn update(
             &mut self,
             message: StoryboardMessage,
+            settings: Arc<Settings>,
             device: Arc<wgpu::Device>,
         ) -> iced::Task<StoryboardMessage> {
             match message {
@@ -46,31 +47,13 @@ pub mod storyboard {
                 StoryboardMessage::Compile(path) => {
                     if let Some(state) = self.storyboards.get_mut(&path) {
                         *&mut state.status = StoryboardStatus::OnCompile;
-                        iced::Task::perform(Self::compile(path.clone()), move |result| {
-                            StoryboardMessage::CompileResult(path.clone(), result)
-                        })
+                        iced::Task::perform(
+                            Self::compile(path.clone(), settings.clone()),
+                            move |result| StoryboardMessage::CompileResult(path.clone(), result),
+                        )
                     } else {
                         iced::Task::none()
                     }
-
-                    //         .storyboards
-                    //         .iter_mut()
-                    //         .find(|state| state.path == path)
-                    //         .map(|state| &mut state.status).unwrap();
-                    // iced::Task::perform(Self::compile(path.clone()), move |result| {
-                    //     match result {
-                    //         Err(err) => {}
-                    //     }
-                    //     *status = result.map_or_else(StoryboardStatus::CompileError, |scene_timeline_collections| StoryboardStatus::AfterCompile(
-                    //         scene_timeline_collections.into_iter().map(|scene_timeline_collection| SceneState {
-                    //             name: scene_timeline_collection.name.to_string(),
-                    //             video_settings: scene_timeline_collection.video_settings,
-                    //             duration: scene_timeline_collection.duration,
-                    //             status: SceneStatus::BeforePrecut(scene_timeline_collection.timeline_entries),
-                    //         })
-                    //     ));
-                    //     iced::Task::none()
-                    // })
                 }
                 StoryboardMessage::CompileResult(path, compile_result) => {
                     if let Some(state) = self.storyboards.get_mut(&path) {
@@ -81,29 +64,6 @@ pub mod storyboard {
                     }
                     iced::Task::none()
                 }
-                // StoryboardMessage::Execute(path, compile_result) => {
-                //     if let Some(status) = self
-                //         .storyboards
-                //         .iter_mut()
-                //         .find(|state| state.path == path)
-                //         .map(|state| &mut state.status)
-                //     {
-                //         match compile_result {
-                //             Err(err) => {
-                //                 *status = StoryboardStatus::CompileError(err);
-                //                 iced::Task::none()
-                //             }
-                //             Ok(()) => {
-                //                 *status = StoryboardStatus::Execute;
-                //                 iced::Task::perform(Self::execute(path.clone()), move |result| {
-                //                     StoryboardMessage::Precut(path, result)
-                //                 })
-                //             }
-                //         }
-                //     } else {
-                //         iced::Task::none()
-                //     }
-                // }
                 StoryboardMessage::Precut(path, name) => {
                     if let Some(state) = self.storyboards.get_mut(&path)
                         && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
@@ -146,14 +106,23 @@ pub mod storyboard {
             }
         }
 
-        async fn compile(path: PathBuf) -> anyhow::Result<indexmap::IndexMap<String, SceneState>> {
+        async fn compile(
+            path: PathBuf,
+            settings: Arc<Settings>,
+        ) -> anyhow::Result<indexmap::IndexMap<String, SceneState>> {
             let mut child = Command::new("cargo")
                 .arg("run")
                 .arg("--quiet")
                 .current_dir(path)
+                .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()?;
+            writeln!(
+                child.stdin.take().unwrap(),
+                "{}",
+                ron::ser::to_string(&settings.scene)?
+            )?;
             if !child.wait()?.success() {
                 let mut stderr = BufReader::new(child.stderr.take().unwrap());
                 let mut buf = String::new();
@@ -177,24 +146,6 @@ pub mod storyboard {
                 buf.clear();
             }
             Ok(scenes)
-
-            // let mut run
-            // scene_timeline_collections
-            //     .into_iter()
-            //     .map(|scene_timeline_collection| {
-            //         (
-            //             scene_timeline_collection.name.to_string(),
-            //             SceneState {
-            //                 video_settings: scene_timeline_collection
-            //                     .video_settings,
-            //                 duration: scene_timeline_collection.duration,
-            //                 status: SceneStatus::BeforePrecut(
-            //                     scene_timeline_collection.timeline_entries,
-            //                 ),
-            //             },
-            //         )
-            //     })
-            //     .collect()
         }
 
         async fn precut(
@@ -219,33 +170,22 @@ pub mod storyboard {
     }
 
     struct StoryboardState {
-        // id: StoryboardId,
-        // path: PathBuf,
         status: StoryboardStatus,
     }
-
-    // #[derive(Clone, Copy, PartialEq)]
-    // struct StoryboardId(u32);
 
     enum StoryboardStatus {
         BeforeCompile,
         OnCompile,
         AfterCompile(indexmap::IndexMap<String, SceneState>),
         CompileError(anyhow::Error),
-        // ExecuteError(anyhow::Error),
     }
 
-    struct SceneState {
-        // id: SceneId,
-        // name: String,
+    pub(crate) struct SceneState {
         video_settings: VideoSettings,
         duration: f32,
         status: SceneStatus,
         timeline_entries: Arc<TimelineEntries>,
     }
-
-    // #[derive(Clone, Copy, PartialEq)]
-    // struct SceneId(u32);
 
     enum SceneStatus {
         BeforePrecut,
@@ -389,7 +329,7 @@ pub mod app {
     //     scene: Arc<SceneState>,
     // }
     struct State {
-        settings: Settings,
+        settings: Arc<Settings>,
         // active_scene: Option<ActiveScene>,
         device: Arc<wgpu::Device>,
         storyboard_manager: StoryboardManager,
@@ -405,7 +345,11 @@ pub mod app {
             match message {
                 Message::StoryboardMessage(storyboard_message) => self
                     .storyboard_manager
-                    .update(storyboard_message, self.device.clone())
+                    .update(
+                        storyboard_message,
+                        self.settings.clone(),
+                        self.device.clone(),
+                    )
                     .map(Message::StoryboardMessage),
             }
         }

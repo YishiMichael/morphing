@@ -5,8 +5,6 @@ pub use morphing_macros::scene;
 
 use super::super::timelines::alive::Supervisor;
 use super::super::timelines::timeline::TimelineEntries;
-use super::io::read_from_stdin;
-use super::io::write_to_stdout;
 use super::settings::SceneSettings;
 use super::settings::VideoSettings;
 use super::world::World;
@@ -28,7 +26,9 @@ pub(crate) struct SceneTimelineCollection {
 }
 
 pub fn export_scenes() {
-    let scene_settings: SceneSettings = read_from_stdin();
+    let mut buf = String::new();
+    std::io::stdin().read_line(&mut buf).unwrap();
+    let scene_settings: SceneSettings = ron::de::from_str(&buf).unwrap();
     let mut override_settings_map = HashMap::new();
     for scene_module in inventory::iter::<SceneModule>() {
         let (video_settings, world) = override_settings_map
@@ -47,11 +47,15 @@ pub fn export_scenes() {
             });
         let supervisor = Supervisor::new(world);
         (scene_module.scene_fn)(&supervisor);
-        write_to_stdout(SceneTimelineCollection {
+        let scene_timeline_collection = SceneTimelineCollection {
             name: scene_module.name.to_string(),
             video_settings: video_settings.clone(),
             duration: *supervisor.get_time(),
             timeline_entries: supervisor.into_timeline_entries(),
-        });
+        };
+        println!(
+            "{}",
+            ron::ser::to_string(&scene_timeline_collection).unwrap()
+        );
     }
 }
