@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 pub use inventory;
-use itertools::Itertools;
 pub use morphing_macros::scene;
 
 use super::super::timelines::alive::Supervisor;
@@ -22,27 +21,16 @@ inventory::collect!(SceneModule);
 
 #[derive(serde::Deserialize, serde::Serialize)]
 pub(crate) struct SceneTimelineCollection {
-    pub(crate) name: &'static str,
+    pub(crate) name: String,
     pub(crate) video_settings: VideoSettings,
     pub(crate) duration: f32,
     pub(crate) timeline_entries: TimelineEntries,
 }
 
 pub fn export_scenes() {
-    let scene_module_inventory: Vec<&SceneModule> = inventory::iter().collect();
-    write_to_stdout(
-        scene_module_inventory
-            .iter()
-            .map(|scene_module| scene_module.name.to_string())
-            .collect_vec(),
-    );
-    let (scene_settings, selected_scene_names): (SceneSettings, Vec<String>) = read_from_stdin();
+    let scene_settings: SceneSettings = read_from_stdin();
     let mut override_settings_map = HashMap::new();
-    for selected_scene_name in selected_scene_names {
-        let scene_module = scene_module_inventory
-            .iter()
-            .find(|scene_module| scene_module.name == selected_scene_name.as_str())
-            .unwrap();
+    for scene_module in inventory::iter::<SceneModule>() {
         let (video_settings, world) = override_settings_map
             .entry(scene_module.override_settings)
             .or_insert_with(|| {
@@ -60,7 +48,7 @@ pub fn export_scenes() {
         let supervisor = Supervisor::new(world);
         (scene_module.scene_fn)(&supervisor);
         write_to_stdout(SceneTimelineCollection {
-            name: scene_module.name,
+            name: scene_module.name.to_string(),
             video_settings: video_settings.clone(),
             duration: *supervisor.get_time(),
             timeline_entries: supervisor.into_timeline_entries(),

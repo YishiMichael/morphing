@@ -7,6 +7,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.95"
 bezier-rs = { version = "0.4.0", features = ["serde"] }
+cargo_metadata = "0.19.1"
 comemo = "0.4.0"
 ecow = "0.2.3"
 encase = { version = "0.10.0", features = ["nalgebra"] }
@@ -15,6 +16,7 @@ essi-ffmpeg = "0.2.0"
 geometric_algebra = "0.3.0"
 glam = "0.24.2"
 iced = "0.13.1"
+indexmap = "2.7.1"
 inventory = "0.3.17"
 itertools = "0.13.0"
 lyon = { version = "1.0.1", features = ["serialization"] }

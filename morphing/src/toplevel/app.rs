@@ -1,7 +1,10 @@
 pub mod storyboard {
-    use std::future::Future;
-    use std::ops::RangeFrom;
+    use std::io::BufRead;
+    use std::io::Read;
+    // use std::future::Future;
+    use std::io::BufReader;
     use std::path::PathBuf;
+    use std::process::Command;
     use std::sync::Arc;
 
     use super::super::super::timelines::timeline::PresentationEntries;
@@ -10,8 +13,8 @@ pub mod storyboard {
     use super::super::settings::VideoSettings;
 
     pub(crate) struct StoryboardManager {
-        storyboards: Vec<StoryboardState>,
-        storyboard_id_counter: RangeFrom<u32>,
+        storyboards: indexmap::IndexMap<PathBuf, StoryboardState>,
+        // storyboard_id_counter: RangeFrom<u32>,
     }
 
     impl StoryboardManager {
@@ -21,184 +24,233 @@ pub mod storyboard {
             device: Arc<wgpu::Device>,
         ) -> iced::Task<StoryboardMessage> {
             match message {
-                StoryboardMessage::Compile(path) => {
-                    let storyboard_id = StoryboardId(self.storyboard_id_counter.next().unwrap());
-                    self.storyboards.push(StoryboardState {
-                        id: storyboard_id,
-                        path: path.clone(),
-                        status: StoryboardStatus::Compile,
+                StoryboardMessage::Add(path) => {
+                    let metadata = cargo_metadata::MetadataCommand::new().exec().unwrap();
+                    let path = metadata
+                        .packages
+                        .iter()
+                        .map(|package| package.manifest_path.parent().unwrap())
+                        .find(|crate_path| path.starts_with(crate_path))
+                        .unwrap()
+                        .to_path_buf()
+                        .into_std_path_buf();
+                    self.storyboards.entry(path).or_insert(StoryboardState {
+                        status: StoryboardStatus::BeforeCompile,
                     });
-                    iced::Task::perform(Self::compile(path), move |result| {
-                        StoryboardMessage::Execute(storyboard_id, result)
-                    })
+                    iced::Task::none()
                 }
-                StoryboardMessage::Execute(storyboard_id, compile_result) => {
-                    if let Some(status) = self
-                        .storyboards
-                        .iter_mut()
-                        .find(|state| state.id == storyboard_id)
-                        .map(|state| &mut state.status)
+                StoryboardMessage::Remove(path) => {
+                    self.storyboards.shift_remove(&path);
+                    iced::Task::none()
+                }
+                StoryboardMessage::Compile(path) => {
+                    if let Some(state) = self.storyboards.get_mut(&path) {
+                        *&mut state.status = StoryboardStatus::OnCompile;
+                        iced::Task::perform(Self::compile(path.clone()), move |result| {
+                            StoryboardMessage::CompileResult(path.clone(), result)
+                        })
+                    } else {
+                        iced::Task::none()
+                    }
+
+                    //         .storyboards
+                    //         .iter_mut()
+                    //         .find(|state| state.path == path)
+                    //         .map(|state| &mut state.status).unwrap();
+                    // iced::Task::perform(Self::compile(path.clone()), move |result| {
+                    //     match result {
+                    //         Err(err) => {}
+                    //     }
+                    //     *status = result.map_or_else(StoryboardStatus::CompileError, |scene_timeline_collections| StoryboardStatus::AfterCompile(
+                    //         scene_timeline_collections.into_iter().map(|scene_timeline_collection| SceneState {
+                    //             name: scene_timeline_collection.name.to_string(),
+                    //             video_settings: scene_timeline_collection.video_settings,
+                    //             duration: scene_timeline_collection.duration,
+                    //             status: SceneStatus::BeforePrecut(scene_timeline_collection.timeline_entries),
+                    //         })
+                    //     ));
+                    //     iced::Task::none()
+                    // })
+                }
+                StoryboardMessage::CompileResult(path, compile_result) => {
+                    if let Some(state) = self.storyboards.get_mut(&path) {
+                        *&mut state.status = match compile_result {
+                            Err(error) => StoryboardStatus::CompileError(error),
+                            Ok(scenes) => StoryboardStatus::AfterCompile(scenes),
+                        };
+                    }
+                    iced::Task::none()
+                }
+                // StoryboardMessage::Execute(path, compile_result) => {
+                //     if let Some(status) = self
+                //         .storyboards
+                //         .iter_mut()
+                //         .find(|state| state.path == path)
+                //         .map(|state| &mut state.status)
+                //     {
+                //         match compile_result {
+                //             Err(err) => {
+                //                 *status = StoryboardStatus::CompileError(err);
+                //                 iced::Task::none()
+                //             }
+                //             Ok(()) => {
+                //                 *status = StoryboardStatus::Execute;
+                //                 iced::Task::perform(Self::execute(path.clone()), move |result| {
+                //                     StoryboardMessage::Precut(path, result)
+                //                 })
+                //             }
+                //         }
+                //     } else {
+                //         iced::Task::none()
+                //     }
+                // }
+                StoryboardMessage::Precut(path, name) => {
+                    if let Some(state) = self.storyboards.get_mut(&path)
+                        && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
+                        && let Some(state) = scenes.get_mut(&name)
                     {
-                        match compile_result {
-                            Err(err) => {
-                                *status = StoryboardStatus::CompileError(err);
-                                iced::Task::none()
-                            }
-                            Ok(path) => {
-                                *status = StoryboardStatus::Execute;
-                                iced::Task::perform(Self::execute(path), move |result| {
-                                    StoryboardMessage::Precut(storyboard_id, result)
-                                })
-                            }
-                        }
+                        *&mut state.status = SceneStatus::OnPrecut;
+                        iced::Task::perform(
+                            Self::precut(state.timeline_entries.clone(), device.clone()),
+                            move |result| {
+                                StoryboardMessage::PrecutResult(path.clone(), name.clone(), result)
+                            },
+                        )
                     } else {
                         iced::Task::none()
                     }
                 }
-                StoryboardMessage::Precut(storyboard_id, execute_result) => {
-                    if let Some(status) = self
-                        .storyboards
-                        .iter_mut()
-                        .find(|state| state.id == storyboard_id)
-                        .map(|state| &mut state.status)
+                StoryboardMessage::PrecutResult(path, name, precut_result) => {
+                    if let Some(state) = self.storyboards.get_mut(&path)
+                        && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
+                        && let Some(state) = scenes.get_mut(&name)
                     {
-                        match execute_result {
-                            Err(err) => {
-                                *status = StoryboardStatus::ExecuteError(err);
-                                iced::Task::none()
+                        *&mut state.status = match precut_result {
+                            Err(error) => SceneStatus::PrecutError(error),
+                            Ok(presentation_entries) => {
+                                SceneStatus::AfterPrecut(presentation_entries)
                             }
-                            Ok(scene_timelines) => {
-                                let mut scene_states = Vec::new();
-                                let mut timeline_entries_collection = Vec::new();
-                                for scene_timeline in scene_timelines {
-                                    scene_states.push(SceneState {
-                                        id: SceneId(0),
-                                        name: scene_timeline.name.to_string(),
-                                        video_settings: scene_timeline.video_settings,
-                                        duration: scene_timeline.duration,
-                                        status: SceneStatus::Precut,
-                                    });
-                                    timeline_entries_collection
-                                        .push(scene_timeline.timeline_entries);
-                                }
-                                *status = StoryboardStatus::Success(scene_states);
-                                iced::Task::batch(timeline_entries_collection.into_iter().map(
-                                    |timeline_entries| {
-                                        let device = device.clone();
-                                        iced::Task::perform(
-                                            Self::precut(timeline_entries, device),
-                                            move |result| {
-                                                StoryboardMessage::Present(
-                                                    storyboard_id,
-                                                    SceneId(0),
-                                                    result,
-                                                )  // TODO
-                                            },
-                                        )
-                                    },
-                                ))
-                            }
-                        }
-                    } else {
-                        iced::Task::none()
+                        };
                     }
+                    iced::Task::none()
                 }
-                StoryboardMessage::Present(storyboard_id, timeline_id, precut_result) => {
-                    if let Some(StoryboardStatus::Success(scene_states)) = self
-                        .storyboards
-                        .iter_mut()
-                        .find(|state| state.id == storyboard_id)
-                        .map(|state| &mut state.status)
+                StoryboardMessage::PresentError(path, name, present_error) => {
+                    if let Some(state) = self.storyboards.get_mut(&path)
+                        && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
+                        && let Some(state) = scenes.get_mut(&name)
                     {
-                        if let Some(status) = scene_states
-                            .iter_mut()
-                            .find(|state| state.id == timeline_id)
-                            .map(|state| &mut state.status)
-                        {
-                            match precut_result {
-                                Err(err) => {
-                                    *status = SceneStatus::PrecutError(err);
-                                    iced::Task::none()
-                                }
-                                Ok(presentation_entries) => {
-                                    *status = SceneStatus::Success(presentation_entries);
-                                    iced::Task::none()
-                                }
-                            }
-                        } else {
-                            iced::Task::none()
-                        }
-                    } else {
-                        iced::Task::none()
+                        *&mut state.status = SceneStatus::PresentError(present_error);
                     }
+                    iced::Task::none()
                 }
             }
         }
 
-        fn compile(_path: PathBuf) -> impl Future<Output = anyhow::Result<PathBuf>> {
-            async {
-                todo!()
+        async fn compile(path: PathBuf) -> anyhow::Result<indexmap::IndexMap<String, SceneState>> {
+            let mut child = Command::new("cargo")
+                .arg("run")
+                .arg("--quiet")
+                .current_dir(path)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()?;
+            if !child.wait()?.success() {
+                let mut stderr = BufReader::new(child.stderr.take().unwrap());
+                let mut buf = String::new();
+                stderr.read_to_string(&mut buf)?;
+                Err(anyhow::Error::msg(buf))?;
             }
+            let mut stdout = BufReader::new(child.stdout.take().unwrap());
+            let mut buf = String::new();
+            let mut scenes = indexmap::IndexMap::new();
+            while stdout.read_line(&mut buf)? != 0 {
+                let scene_timeline_collection: SceneTimelineCollection = ron::de::from_str(&buf)?;
+                scenes.insert(
+                    scene_timeline_collection.name.to_string(),
+                    SceneState {
+                        video_settings: scene_timeline_collection.video_settings,
+                        duration: scene_timeline_collection.duration,
+                        timeline_entries: Arc::new(scene_timeline_collection.timeline_entries),
+                        status: SceneStatus::BeforePrecut,
+                    },
+                );
+                buf.clear();
+            }
+            Ok(scenes)
+
+            // let mut run
+            // scene_timeline_collections
+            //     .into_iter()
+            //     .map(|scene_timeline_collection| {
+            //         (
+            //             scene_timeline_collection.name.to_string(),
+            //             SceneState {
+            //                 video_settings: scene_timeline_collection
+            //                     .video_settings,
+            //                 duration: scene_timeline_collection.duration,
+            //                 status: SceneStatus::BeforePrecut(
+            //                     scene_timeline_collection.timeline_entries,
+            //                 ),
+            //             },
+            //         )
+            //     })
+            //     .collect()
         }
 
-        fn execute(_path: PathBuf) -> impl Future<Output = anyhow::Result<Vec<SceneTimelineCollection>>> {
-            async {
-                todo!()
-            }
-        }
-
-        fn precut(
-            timeline_entries: TimelineEntries,
+        async fn precut(
+            timeline_entries: Arc<TimelineEntries>,
             device: Arc<wgpu::Device>,
-        ) -> impl Future<Output = anyhow::Result<PresentationEntries>> {
-            async {
-                todo!()
-            }
-            // async move {
-            //     timeline_entries.precut(&device)
-            // }
+        ) -> anyhow::Result<PresentationEntries> {
+            timeline_entries.precut(&device)
         }
     }
 
     pub(crate) enum StoryboardMessage {
+        Add(PathBuf),
+        Remove(PathBuf),
         Compile(PathBuf),
-        Execute(StoryboardId, anyhow::Result<PathBuf>),
-        Precut(StoryboardId, anyhow::Result<Vec<SceneTimelineCollection>>),
-        Present(StoryboardId, SceneId, anyhow::Result<PresentationEntries>),
-        // PresentError(StoryboardId, SceneId, anyhow::Error),
+        CompileResult(
+            PathBuf,
+            anyhow::Result<indexmap::IndexMap<String, SceneState>>,
+        ),
+        Precut(PathBuf, String),
+        PrecutResult(PathBuf, String, anyhow::Result<PresentationEntries>),
+        PresentError(PathBuf, String, anyhow::Error),
     }
 
     struct StoryboardState {
-        id: StoryboardId,
-        path: PathBuf,
+        // id: StoryboardId,
+        // path: PathBuf,
         status: StoryboardStatus,
     }
 
-    #[derive(Clone, Copy, PartialEq)]
-    struct StoryboardId(u32);
+    // #[derive(Clone, Copy, PartialEq)]
+    // struct StoryboardId(u32);
 
     enum StoryboardStatus {
-        Compile,
-        Execute,
-        Success(Vec<SceneState>),
+        BeforeCompile,
+        OnCompile,
+        AfterCompile(indexmap::IndexMap<String, SceneState>),
         CompileError(anyhow::Error),
-        ExecuteError(anyhow::Error),
+        // ExecuteError(anyhow::Error),
     }
 
     struct SceneState {
-        id: SceneId,
-        name: String,
+        // id: SceneId,
+        // name: String,
         video_settings: VideoSettings,
         duration: f32,
         status: SceneStatus,
+        timeline_entries: Arc<TimelineEntries>,
     }
 
-    #[derive(Clone, Copy, PartialEq)]
-    struct SceneId(u32);
+    // #[derive(Clone, Copy, PartialEq)]
+    // struct SceneId(u32);
 
     enum SceneStatus {
-        Precut,
-        Success(PresentationEntries),
+        BeforePrecut,
+        OnPrecut,
+        AfterPrecut(PresentationEntries),
         PrecutError(anyhow::Error),
         PresentError(anyhow::Error),
     }
