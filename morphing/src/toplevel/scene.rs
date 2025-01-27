@@ -29,17 +29,13 @@ pub(crate) struct SceneTimelineCollection {
 }
 
 pub fn export_scenes() {
-    let scene_module_inventory = inventory::iter::<SceneModule>().collect_vec();
+    let scene_module_inventory: Vec<&SceneModule> = inventory::iter().collect();
     write_to_stdout(
         scene_module_inventory
             .iter()
             .map(|scene_module| scene_module.name.to_string())
             .collect_vec(),
     );
-    write_to_stdout((
-        SceneSettings::default(),
-        vec!["abc".to_string(), "def".to_string()],
-    )); // TODO
     let (scene_settings, selected_scene_names): (SceneSettings, Vec<String>) = read_from_stdin();
     let mut override_settings_map = HashMap::new();
     for selected_scene_name in selected_scene_names {
@@ -47,7 +43,7 @@ pub fn export_scenes() {
             .iter()
             .find(|scene_module| scene_module.name == selected_scene_name.as_str())
             .unwrap();
-        let (world, video_settings) = override_settings_map
+        let (video_settings, world) = override_settings_map
             .entry(scene_module.override_settings)
             .or_insert_with(|| {
                 let scene_settings = if let Some(override_settings) = scene_module.override_settings
@@ -56,8 +52,10 @@ pub fn export_scenes() {
                 } else {
                     scene_settings.clone()
                 };
-                let world = World::new(scene_settings.style, scene_settings.typst);
-                (world, scene_settings.video)
+                (
+                    scene_settings.video,
+                    World::new(scene_settings.style, scene_settings.typst),
+                )
             });
         let supervisor = Supervisor::new(world);
         (scene_module.scene_fn)(&supervisor);

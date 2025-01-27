@@ -23,21 +23,12 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
     } else {
         quote::quote! { None }
     };
-    // let var_scene_settings = quote::format_ident!("scene_settings");
-
-    // let override_settings_stmt = if let Some(override_settings_path) = args.override_settings {
-    //     quote::quote! {
-    //         let #var_scene_settings = #override_settings_path(#var_scene_settings);
-    //     }
-    // } else {
-    //     quote::quote! {}
-    // };
     quote::quote! {
         #scene_fn
 
         ::morphing::toplevel::scene::inventory::submit! {
             ::morphing::toplevel::scene::SceneModule {
-                name: stringify!(#scene_name),
+                name: concat!(module_path!(), "::", stringify!(#scene_name)),
                 override_settings: #override_settings,
                 scene_fn: #scene_name,
             }

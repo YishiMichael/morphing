@@ -8,72 +8,80 @@ pub trait Rate:
     fn eval(&self, t: f32) -> f32;
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct ClampRate(Range<f32>);
+macro_rules! rate {
+    ($($vis:vis fn $name:ident($t:ident: $t_ty:ty$(, $rate_var:ident: $rate_var_ty:ty)*) -> $return_ty:ty $body:block)*) => {paste::paste! {$(
+        $vis fn $name($t: $t_ty$(, $rate_var: $rate_var_ty)*) -> $return_ty $body
 
-impl Rate for ClampRate {
-    fn eval(&self, t: f32) -> f32 {
-        t.clamp(self.0.start, self.0.end)
-    }
+        #[derive(Clone, serde::Deserialize, serde::Serialize)]
+        $vis struct [<$name:camel Rate>] {
+            $($rate_var: $rate_var_ty,)*
+        }
+
+        impl Rate for [<$name:camel Rate>] {
+            fn eval(&self, $t: $t_ty) -> $return_ty {
+                $name($t$(, self.$rate_var.clone())*)
+            }
+        }
+
+        $vis trait [<$name:camel>]: ApplyRate {
+            fn $name(self$(, $rate_var: $rate_var_ty)*) -> Self::Output<[<$name:camel Rate>]> {
+                self.apply_rate([<$name:camel Rate>] {
+                    $($rate_var,)*
+                })
+            }
+        }
+
+        impl<T> [<$name:camel>] for T where T: ApplyRate {}
+    )*}};
 }
 
-pub trait Clamp: ApplyRate {
-    fn clamp(self, range: Range<f32>) -> Self::Output<ClampRate> {
-        self.apply_rate(ClampRate(range))
+rate! {
+    pub fn clamp(t: f32, range: Range<f32>) -> f32 {
+        t.clamp(range.start, range.end)
     }
-}
 
-impl<T> Clamp for T where T: ApplyRate {}
-
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct SpeedRate(f32);
-
-impl Rate for SpeedRate {
-    fn eval(&self, t: f32) -> f32 {
-        t * self.0
+    pub fn speed(t: f32, speed: f32) -> f32 {
+        t * speed
     }
-}
 
-pub trait Speed: ApplyRate {
-    fn speed(self, speed: f32) -> Self::Output<SpeedRate> {
-        self.apply_rate(SpeedRate(speed))
-    }
-}
-
-impl<T> Speed for T where T: ApplyRate {}
-
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct SmoothRate;
-
-impl Rate for SmoothRate {
-    fn eval(&self, t: f32) -> f32 {
+    pub fn smooth(t: f32) -> f32 {
         t * t * (3.0 - 2.0 * t)
     }
-}
 
-pub trait Smooth: ApplyRate {
-    fn smooth(self) -> Self::Output<SmoothRate> {
-        self.apply_rate(SmoothRate)
-    }
-}
-
-impl<T> Smooth for T where T: ApplyRate {}
-
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
-pub struct SmootherRate;
-
-impl Rate for SmootherRate {
-    fn eval(&self, t: f32) -> f32 {
+    pub fn smoother(t: f32) -> f32 {
         t * t * t * (10.0 - t * (15.0 - 6.0 * t))
     }
 }
 
-pub trait Smoother: ApplyRate {
-    fn smooth(self) -> Self::Output<SmootherRate> {
-        self.apply_rate(SmootherRate)
-    }
+macro_rules! rate_triplets {
+    ($($vis:vis $name:ident = |$t:ident| $body:expr;)*) => {paste::paste! {rate! {$(
+        $vis fn [<$name _in>]($t: f32) -> f32 {
+            $body
+        }
+
+        $vis fn [<$name _out>]($t: f32) -> f32 {
+            1.0 - [<$name _in>](1.0 - $t)
+        }
+
+        $vis fn [<$name _in_out>]($t: f32) -> f32 {
+            if $t < 0.5 {
+                0.5 * [<$name _in>](2.0 * $t)
+            } else {
+                0.5 * ([<$name _out>](2.0 * $t - 1.0) + 1.0)
+            }
+        }
+    )*}}};
 }
 
-impl<T> Smoother for T where T: ApplyRate {}
-
-// Refer to https://docs.rs/interpolation/latest/src/interpolation/ease.rs.html
+// From https://docs.rs/interpolation/latest/src/interpolation/ease.rs.html
+rate_triplets! {
+    pub quadratic = |t| t * t;
+    pub cubic = |t| t * t * t;
+    pub quartic = |t| t * t * t * t;
+    pub quintic = |t| t * t * t * t * t;
+    pub sine = |t| 1.0 - (std::f32::consts::FRAC_PI_2 * (1.0 - t)).sin();
+    pub circular = |t| 1.0 - (1.0 - t * t).sqrt();
+    pub exponential = |t| 2.0f32.powf(-10.0 * (1.0 - t));
+    pub elastic = |t| (13.0 * std::f32::consts::FRAC_PI_2 * t).sin() * 2.0f32.powf(-10.0 * (1.0 - t));
+    pub back = |t| t * t * t - t * (std::f32::consts::PI * t).sin();
+}
