@@ -1,8 +1,8 @@
 [package]
-name = "examples"
+name = "hello_morphing"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-morphing = { path = "../morphing" }
+morphing = { path = "../../morphing" }
 nalgebra = "0.33.2"

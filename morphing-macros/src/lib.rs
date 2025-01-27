@@ -15,27 +15,33 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
         },
         Err(error) => return TokenStream::from(darling::Error::from(error).write_errors()),
     };
-    let mut scene_fn = syn::parse_macro_input!(tokens as syn::ItemFn);
-    let vis = std::mem::replace(&mut scene_fn.vis, syn::Visibility::Inherited);
+    let scene_fn = syn::parse_macro_input!(tokens as syn::ItemFn);
 
     let scene_name = scene_fn.sig.ident.clone();
-    let var_scene_settings = quote::format_ident!("__scene_settings");
-
-    let override_settings_stmt = if let Some(override_settings_path) = args.override_settings {
-        quote::quote! {
-            let #var_scene_settings = #override_settings_path(#var_scene_settings);
-        }
+    let override_settings = if let Some(override_settings) = args.override_settings {
+        quote::quote! { Some(#override_settings) }
     } else {
-        quote::quote! {}
+        quote::quote! { None }
     };
-    let block = quote::quote! {
-        #vis fn #scene_name(
-            #var_scene_settings: ::morphing::toplevel::settings::SceneSettings,
-        ) -> ::morphing::toplevel::scene::SceneTimelineCollection {
-            #scene_fn
-            #override_settings_stmt
-            ::morphing::toplevel::scene::SceneTimelineCollection::new(stringify!(#scene_name), #var_scene_settings, #scene_name)
+    // let var_scene_settings = quote::format_ident!("scene_settings");
+
+    // let override_settings_stmt = if let Some(override_settings_path) = args.override_settings {
+    //     quote::quote! {
+    //         let #var_scene_settings = #override_settings_path(#var_scene_settings);
+    //     }
+    // } else {
+    //     quote::quote! {}
+    // };
+    quote::quote! {
+        #scene_fn
+
+        ::morphing::toplevel::scene::inventory::submit! {
+            ::morphing::toplevel::scene::SceneModule {
+                name: stringify!(#scene_name),
+                override_settings: #override_settings,
+                scene_fn: #scene_name,
+            }
         }
-    };
-    block.into()
+    }
+    .into()
 }

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "examples",
+    "examples/hello_morphing",
     "morphing",
     "morphing-macros",
     "winit-egui-wgpu-template",

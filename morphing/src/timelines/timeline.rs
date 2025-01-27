@@ -7,16 +7,14 @@ pub trait Timeline:
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-pub struct TimelineEntry {
-    // TODO: remove pub
+struct TimelineEntry {
     time_interval: Range<f32>,
     #[serde(with = "serde_traitobject")]
     timeline: Box<dyn Timeline>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-pub struct TimelineEntries(pub Vec<TimelineEntry>);
-//pub(crate) struct TimelineEntries(Vec<TimelineEntry>);  // TODO
+pub(crate) struct TimelineEntries(Vec<TimelineEntry>);
 
 impl TimelineEntries {
     pub(crate) fn new() -> Self {
