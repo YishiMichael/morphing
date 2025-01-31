@@ -16,7 +16,7 @@ use super::super::components::transform::Transform;
 use super::super::toplevel::world::World;
 use super::mobject::Mobject;
 use super::mobject::MobjectBuilder;
-use super::shape::PlanarTrianglesRealization;
+use super::shape::PlanarTrianglesPresentation;
 use super::shape::ShapeMobject;
 
 pub struct Typst(String);
@@ -38,13 +38,13 @@ impl MobjectBuilder for Typst {
     }
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 struct TypstMobjectToken {
     span: Option<Range<usize>>,
     mobject: ShapeMobject,
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct TypstMobject {
     text: String,
     tokens: Vec<TypstMobjectToken>,
@@ -440,14 +440,16 @@ impl TypstMobject {
 }
 
 impl Mobject for TypstMobject {
-    type Realization = Vec<PlanarTrianglesRealization>;
+    type MobjectPresentation = Vec<PlanarTrianglesPresentation>;
 
-    fn realize(&self, device: &wgpu::Device) -> anyhow::Result<Self::Realization> {
+    fn presentation(
+        &self,
+        device: &iced::widget::shader::wgpu::Device,
+    ) -> Self::MobjectPresentation {
         self.tokens
             .iter()
-            .map(|TypstMobjectToken { mobject, .. }| mobject.realize(device))
-            .collect::<anyhow::Result<Vec<_>>>()
-            .map(|nested_realizations| nested_realizations.into_iter().flatten().collect())
+            .map(|TypstMobjectToken { mobject, .. }| mobject.presentation(device))
+            .collect()
     }
 }
 

@@ -1,4 +1,3 @@
-#![feature(let_chains)]
 #![feature(macro_metavar_expr)]
 
 pub mod components;

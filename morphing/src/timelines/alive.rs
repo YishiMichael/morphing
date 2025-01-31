@@ -109,6 +109,7 @@ pub mod traits {
         where
             ME: DynamicTimelineMetric;
 
+        // TODO: Add and check if #[must_use] takes effect.
         fn animate(self) -> Self::Output<RelativeTimelineMetric> {
             self.quantize(RelativeTimelineMetric)
         }
@@ -273,7 +274,7 @@ pub mod base_impl {
         ME: DynamicTimelineMetric,
         R: Rate,
     {
-        type Output = Alive<'s, SteadyTimeline<CO::Output>>;
+        type Output = Alive<'s, SteadyTimeline<CO::CollapseOutput>>;
 
         #[must_use]
         fn collapse(self) -> Self::Output {
@@ -470,7 +471,7 @@ pub mod base_impl {
                     DynamicTimeline {
                         content: DiscreteTimelineContent {
                             mobject: output_mobject,
-                            timeline_entries: Arc::new(child_supervisor.into_timeline_entries()),
+                            timeline_entries: child_supervisor.into_timeline_entries(),
                         },
                         metric: timeline.metric,
                         rate: timeline.rate,
@@ -480,7 +481,7 @@ pub mod base_impl {
         }
     }
 
-    #[derive(Clone, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct IdentityRate;
 
     impl Rate for IdentityRate {
@@ -489,7 +490,7 @@ pub mod base_impl {
         }
     }
 
-    #[derive(Clone, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct ComposeRate<R0, R1>(R0, R1);
 
     impl<R0, R1> Rate for ComposeRate<R0, R1>
@@ -502,7 +503,7 @@ pub mod base_impl {
         }
     }
 
-    #[derive(Clone, serde::Deserialize, serde::Serialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     pub struct ComposeMobjectDiff<MD0, MD1>(MD0, MD1);
 
     impl<M, MD0, MD1> MobjectDiff<M> for ComposeMobjectDiff<MD0, MD1>
@@ -516,18 +517,17 @@ pub mod base_impl {
             self.0.apply(mobject, alpha);
         }
 
-        fn apply_realization(
+        fn apply_presentation(
             &self,
-            mobject_realization: &mut M::Realization,
+            mobject_presentation: &mut M::MobjectPresentation,
             reference_mobject: &M,
             alpha: f32,
-            queue: &wgpu::Queue,
-        ) -> anyhow::Result<()> {
+            queue: &iced::widget::shader::wgpu::Queue,
+        ) {
             self.1
-                .apply_realization(mobject_realization, reference_mobject, alpha, queue)?;
+                .apply_presentation(mobject_presentation, reference_mobject, alpha, queue);
             self.0
-                .apply_realization(mobject_realization, reference_mobject, alpha, queue)?;
-            Ok(())
+                .apply_presentation(mobject_presentation, reference_mobject, alpha, queue);
         }
     }
 }

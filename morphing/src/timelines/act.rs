@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use super::super::mobjects::mobject::Mobject;
 
 pub trait Act<M>: Clone
@@ -14,16 +16,16 @@ where
 }
 
 pub trait MobjectDiff<M>:
-    'static + Clone + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+    'static + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
 where
     M: Mobject,
 {
     fn apply(&self, mobject: &mut M, alpha: f32);
-    fn apply_realization(
+    fn apply_presentation(
         &self,
-        mobject_realization: &mut M::Realization,
+        mobject_presentation: &mut M::MobjectPresentation,
         reference_mobject: &M,
         alpha: f32,
-        queue: &wgpu::Queue,
-    ) -> anyhow::Result<()>; // mobject_realization write-only
+        queue: &iced::widget::shader::wgpu::Queue,
+    ); // mobject_presentation write-only
 }

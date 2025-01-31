@@ -7,7 +7,7 @@ pub mod storyboard {
     use std::process::Command;
     use std::sync::Arc;
 
-    use super::super::super::timelines::timeline::PresentationEntries;
+    // use super::super::super::timelines::timeline::PresentationEntries;
     use super::super::super::timelines::timeline::TimelineEntries;
     use super::super::scene::SceneTimelineCollection;
     use super::super::settings::Settings;
@@ -64,45 +64,45 @@ pub mod storyboard {
                     }
                     iced::Task::none()
                 }
-                StoryboardMessage::Precut(path, name) => {
-                    if let Some(state) = self.storyboards.get_mut(&path)
-                        && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
-                        && let Some(state) = scenes.get_mut(&name)
-                    {
-                        *&mut state.status = SceneStatus::OnPrecut;
-                        iced::Task::perform(
-                            Self::precut(state.timeline_entries.clone(), device.clone()),
-                            move |result| {
-                                StoryboardMessage::PrecutResult(path.clone(), name.clone(), result)
-                            },
-                        )
-                    } else {
-                        iced::Task::none()
-                    }
-                }
-                StoryboardMessage::PrecutResult(path, name, precut_result) => {
-                    if let Some(state) = self.storyboards.get_mut(&path)
-                        && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
-                        && let Some(state) = scenes.get_mut(&name)
-                    {
-                        *&mut state.status = match precut_result {
-                            Err(error) => SceneStatus::PrecutError(error),
-                            Ok(presentation_entries) => {
-                                SceneStatus::AfterPrecut(presentation_entries)
-                            }
-                        };
-                    }
-                    iced::Task::none()
-                }
-                StoryboardMessage::PresentError(path, name, present_error) => {
-                    if let Some(state) = self.storyboards.get_mut(&path)
-                        && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
-                        && let Some(state) = scenes.get_mut(&name)
-                    {
-                        *&mut state.status = SceneStatus::PresentError(present_error);
-                    }
-                    iced::Task::none()
-                }
+                // StoryboardMessage::Prepare(path, name) => {
+                //     if let Some(state) = self.storyboards.get_mut(&path)
+                //         && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
+                //         && let Some(state) = scenes.get_mut(&name)
+                //     {
+                //         *&mut state.status = SceneStatus::OnPrepare;
+                //         iced::Task::perform(
+                //             Self::prepare(state.timeline_entries.clone(), device.clone()),
+                //             move |result| {
+                //                 StoryboardMessage::PrepareResult(path.clone(), name.clone(), result)
+                //             },
+                //         )
+                //     } else {
+                //         iced::Task::none()
+                //     }
+                // }
+                // StoryboardMessage::PrepareResult(path, name, prepare_result) => {
+                //     if let Some(state) = self.storyboards.get_mut(&path)
+                //         && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
+                //         && let Some(state) = scenes.get_mut(&name)
+                //     {
+                //         *&mut state.status = match prepare_result {
+                //             Err(error) => SceneStatus::PrepareError(error),
+                //             Ok(presentation_entries) => {
+                //                 SceneStatus::AfterPrepare(presentation_entries)
+                //             }
+                //         };
+                //     }
+                //     iced::Task::none()
+                // }
+                // StoryboardMessage::PresentError(path, name, present_error) => {
+                //     if let Some(state) = self.storyboards.get_mut(&path)
+                //         && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
+                //         && let Some(state) = scenes.get_mut(&name)
+                //     {
+                //         *&mut state.status = SceneStatus::PresentError(present_error);
+                //     }
+                //     iced::Task::none()
+                // }
             }
         }
 
@@ -140,7 +140,7 @@ pub mod storyboard {
                         video_settings: scene_timeline_collection.video_settings,
                         duration: scene_timeline_collection.duration,
                         timeline_entries: Arc::new(scene_timeline_collection.timeline_entries),
-                        status: SceneStatus::BeforePrecut,
+                        // status: SceneStatus::BeforePrepare,
                     },
                 );
                 buf.clear();
@@ -148,12 +148,12 @@ pub mod storyboard {
             Ok(scenes)
         }
 
-        async fn precut(
-            timeline_entries: Arc<TimelineEntries>,
-            device: Arc<wgpu::Device>,
-        ) -> anyhow::Result<PresentationEntries> {
-            timeline_entries.precut(&device)
-        }
+        // fn prepare(
+        //     timeline_entries: Arc<TimelineEntries>,
+        //     device: Arc<wgpu::Device>,
+        // ) -> anyhow::Result<PresentationEntries> {
+        //     timeline_entries.prepare(&device)
+        // }
     }
 
     pub(crate) enum StoryboardMessage {
@@ -164,9 +164,9 @@ pub mod storyboard {
             PathBuf,
             anyhow::Result<indexmap::IndexMap<String, SceneState>>,
         ),
-        Precut(PathBuf, String),
-        PrecutResult(PathBuf, String, anyhow::Result<PresentationEntries>),
-        PresentError(PathBuf, String, anyhow::Error),
+        // Prepare(PathBuf, String),
+        // PrepareResult(PathBuf, String, anyhow::Result<PresentationEntries>),
+        // PresentError(PathBuf, String, anyhow::Error),
     }
 
     struct StoryboardState {
@@ -183,17 +183,17 @@ pub mod storyboard {
     pub(crate) struct SceneState {
         video_settings: VideoSettings,
         duration: f32,
-        status: SceneStatus,
+        // status: SceneStatus,
         timeline_entries: Arc<TimelineEntries>,
     }
 
-    enum SceneStatus {
-        BeforePrecut,
-        OnPrecut,
-        AfterPrecut(PresentationEntries),
-        PrecutError(anyhow::Error),
-        PresentError(anyhow::Error),
-    }
+    // enum SceneStatus {
+    //     BeforePrepare,
+    //     OnPrepare,
+    //     AfterPrepare(PresentationEntries),
+    //     PrepareError(anyhow::Error),
+    //     PresentError(anyhow::Error),
+    // }
 }
 
 pub mod app {
@@ -328,20 +328,21 @@ pub mod app {
     //     progress: Progress,
     //     scene: Arc<SceneState>,
     // }
-    struct State {
+    pub struct State {
         settings: Arc<Settings>,
         // active_scene: Option<ActiveScene>,
         device: Arc<wgpu::Device>,
         storyboard_manager: StoryboardManager,
-        // window: Option<Arc<winit::window::Window>>,
-        // renderer: OnceLock<Renderer>,
-        // progress: Progress,
-        // control_pressed: bool,
-        // presentation_collection: Option<PresentationCollection>,
+    }
+
+    impl Default for State {
+        fn default() -> Self {
+            todo!()
+        }
     }
 
     impl State {
-        fn update(&mut self, message: Message) -> iced::Task<Message> {
+        pub fn update(&mut self, message: Message) -> iced::Task<Message> {
             match message {
                 Message::StoryboardMessage(storyboard_message) => self
                     .storyboard_manager
@@ -353,9 +354,13 @@ pub mod app {
                     .map(Message::StoryboardMessage),
             }
         }
+
+        pub fn view(&self) -> iced::Element<Message> {
+            todo!()
+        }
     }
 
-    enum Message {
+    pub enum Message {
         StoryboardMessage(StoryboardMessage),
     }
 }

@@ -5,7 +5,7 @@ use super::stroke::DashPattern;
 // #[derive(Clone)]
 // pub struct Path(pub lyon::path::Path);
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Path(Vec<bezier_rs::Subpath<ManipulatorGroupId>>);
 
 impl Path {

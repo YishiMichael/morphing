@@ -1,17 +1,19 @@
+use std::fmt::Debug;
+
 use super::super::mobjects::mobject::Mobject;
 
 pub trait Update<M>:
-    'static + Clone + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
 where
     M: Mobject,
 {
     fn update(&self, mobject: &mut M, alpha: f32);
-    fn update_realization(
+    fn update_presentation(
         &self,
-        mobject_realization: &mut M::Realization,
+        mobject_presentation: &mut M::MobjectPresentation,
         reference_mobject: &M,
         alpha: f32,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> anyhow::Result<()>; // mobject_realization write-only
+        device: &iced::widget::shader::wgpu::Device,
+        queue: &iced::widget::shader::wgpu::Queue,
+    ); // mobject_presentation write-only
 }

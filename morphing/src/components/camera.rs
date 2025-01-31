@@ -4,14 +4,14 @@ use encase::ShaderType;
 use geometric_algebra::ppga3d as pga;
 use geometric_algebra::GeometricProduct;
 use geometric_algebra::One;
-use wgpu::util::DeviceExt;
+use iced::widget::shader::wgpu::util::DeviceExt;
 
 use super::component::Component;
 use super::component::ComponentShaderTypes;
 use super::motor::Motor;
 use super::paint::QueueWriteBufferMutWrapper;
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Camera {
     view_motor: Motor,
     projection_matrix: nalgebra::Matrix4<f32>,
@@ -22,7 +22,7 @@ pub struct CameraShaderTypes {
 }
 
 pub struct CameraBuffers {
-    camera_uniform: wgpu::Buffer,
+    camera_uniform: iced::widget::shader::wgpu::Buffer,
 }
 
 #[derive(ShaderType)]
@@ -44,82 +44,90 @@ impl Component for Camera {
     }
 }
 
-static CAMERA_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+static CAMERA_BIND_GROUP_LAYOUT: OnceLock<iced::widget::shader::wgpu::BindGroupLayout> =
+    OnceLock::new();
 
 impl ComponentShaderTypes for CameraShaderTypes {
     type Buffers = CameraBuffers;
 
-    fn bind_group_layout(device: &wgpu::Device) -> &'static wgpu::BindGroupLayout {
+    fn bind_group_layout(
+        device: &iced::widget::shader::wgpu::Device,
+    ) -> &'static iced::widget::shader::wgpu::BindGroupLayout {
         CAMERA_BIND_GROUP_LAYOUT.get_or_init(|| {
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: None,
-                entries: &[
-                    // pub(VERTEX) @binding(0) var<uniform> u_camera: CameraUniform;
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(CameraUniform::min_size()),
+            device.create_bind_group_layout(
+                &iced::widget::shader::wgpu::BindGroupLayoutDescriptor {
+                    label: None,
+                    entries: &[
+                        // pub(VERTEX) @binding(0) var<uniform> u_camera: CameraUniform;
+                        iced::widget::shader::wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: iced::widget::shader::wgpu::ShaderStages::VERTEX,
+                            ty: iced::widget::shader::wgpu::BindingType::Buffer {
+                                ty: iced::widget::shader::wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: Some(CameraUniform::min_size()),
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                ],
-            })
+                    ],
+                },
+            )
         })
     }
 
-    fn bind_group_from_buffers(device: &wgpu::Device, buffers: &Self::Buffers) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
+    fn bind_group_from_buffers(
+        device: &iced::widget::shader::wgpu::Device,
+        buffers: &Self::Buffers,
+    ) -> iced::widget::shader::wgpu::BindGroup {
+        device.create_bind_group(&iced::widget::shader::wgpu::BindGroupDescriptor {
             label: None,
             layout: CameraShaderTypes::bind_group_layout(device),
-            entries: &[wgpu::BindGroupEntry {
+            entries: &[iced::widget::shader::wgpu::BindGroupEntry {
                 binding: 0,
                 resource: buffers.camera_uniform.as_entire_binding(),
             }],
         })
     }
 
-    fn new_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
+    fn new_buffers(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Buffers {
         CameraBuffers {
-            camera_uniform: device.create_buffer(&wgpu::BufferDescriptor {
+            camera_uniform: device.create_buffer(&iced::widget::shader::wgpu::BufferDescriptor {
                 label: None,
                 size: self.camera_uniform.size().get(),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                usage: iced::widget::shader::wgpu::BufferUsages::UNIFORM
+                    | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
         }
     }
 
-    fn initialize_buffers(&self, device: &wgpu::Device) -> anyhow::Result<Self::Buffers> {
-        Ok(CameraBuffers {
+    fn initialize_buffers(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Buffers {
+        CameraBuffers {
             camera_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.camera_uniform)?;
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                buffer.write(&self.camera_uniform).unwrap();
+                device.create_buffer_init(&iced::widget::shader::wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
-                    usage: wgpu::BufferUsages::UNIFORM,
+                    usage: iced::widget::shader::wgpu::BufferUsages::UNIFORM,
                 })
             },
-        })
+        }
     }
 
     fn write_buffers(
         &self,
-        queue: &wgpu::Queue,
+        queue: &iced::widget::shader::wgpu::Queue,
         buffers: &mut Self::Buffers,
-    ) -> anyhow::Result<()> {
+    ) {
         {
             let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
                 queue
                     .write_buffer_with(&buffers.camera_uniform, 0, self.camera_uniform.size())
                     .unwrap(),
             ));
-            buffer.write(&self.camera_uniform)?;
+            buffer.write(&self.camera_uniform).unwrap();
         }
-        Ok(())
     }
 }
 

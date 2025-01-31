@@ -1,18 +1,18 @@
 use std::sync::OnceLock;
 
 use encase::ShaderType;
-use wgpu::util::DeviceExt;
+use iced::widget::shader::wgpu::util::DeviceExt;
 
 use super::component::Component;
 use super::component::ComponentShaderTypes;
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Paint {
     pub color: palette::Srgba<f32>,
     pub gradients: Vec<Gradient>,
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Gradient {
     pub from_position: nalgebra::Vector2<f32>,
     pub to_position: nalgebra::Vector2<f32>,
@@ -23,10 +23,10 @@ pub struct Gradient {
 }
 
 pub struct PaintBuffers {
-    paint_uniform: wgpu::Buffer,
-    gradients_storage: wgpu::Buffer,
-    radial_stops_storage: wgpu::Buffer,
-    angular_stops_storage: wgpu::Buffer,
+    paint_uniform: iced::widget::shader::wgpu::Buffer,
+    gradients_storage: iced::widget::shader::wgpu::Buffer,
+    radial_stops_storage: iced::widget::shader::wgpu::Buffer,
+    angular_stops_storage: iced::widget::shader::wgpu::Buffer,
 }
 
 pub struct PaintShaderTypes {
@@ -57,7 +57,7 @@ struct GradientStopStorage {
     color: nalgebra::Vector4<f32>,
 }
 
-pub struct QueueWriteBufferMutWrapper<'a>(pub wgpu::QueueWriteBufferView<'a>); // TODO: move to another place
+pub struct QueueWriteBufferMutWrapper<'a>(pub iced::widget::shader::wgpu::QueueWriteBufferView<'a>); // TODO: move to another place
 
 impl encase::internal::BufferMut for QueueWriteBufferMutWrapper<'_> {
     fn capacity(&self) -> usize {
@@ -146,83 +146,97 @@ impl Component for Paint {
     }
 }
 
-static PAINT_BIND_GROUP_LAYOUT: OnceLock<wgpu::BindGroupLayout> = OnceLock::new();
+static PAINT_BIND_GROUP_LAYOUT: OnceLock<iced::widget::shader::wgpu::BindGroupLayout> =
+    OnceLock::new();
 
 impl ComponentShaderTypes for PaintShaderTypes {
     type Buffers = PaintBuffers;
 
-    fn bind_group_layout(device: &wgpu::Device) -> &'static wgpu::BindGroupLayout {
+    fn bind_group_layout(
+        device: &iced::widget::shader::wgpu::Device,
+    ) -> &'static iced::widget::shader::wgpu::BindGroupLayout {
         PAINT_BIND_GROUP_LAYOUT.get_or_init(|| {
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: None,
-                entries: &[
-                    // pub(FRAGMENT) @binding(0) var<uniform> u_paint: PaintUniform;
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(PaintUniform::min_size()),
+            device.create_bind_group_layout(
+                &iced::widget::shader::wgpu::BindGroupLayoutDescriptor {
+                    label: None,
+                    entries: &[
+                        // pub(FRAGMENT) @binding(0) var<uniform> u_paint: PaintUniform;
+                        iced::widget::shader::wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: iced::widget::shader::wgpu::ShaderStages::FRAGMENT,
+                            ty: iced::widget::shader::wgpu::BindingType::Buffer {
+                                ty: iced::widget::shader::wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: Some(PaintUniform::min_size()),
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    // pub(FRAGMENT) @binding(1) var<storage> s_gradients: array<GradientStorage>;
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(GradientStorage::min_size()),
+                        // pub(FRAGMENT) @binding(1) var<storage> s_gradients: array<GradientStorage>;
+                        iced::widget::shader::wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: iced::widget::shader::wgpu::ShaderStages::FRAGMENT,
+                            ty: iced::widget::shader::wgpu::BindingType::Buffer {
+                                ty: iced::widget::shader::wgpu::BufferBindingType::Storage {
+                                    read_only: true,
+                                },
+                                has_dynamic_offset: false,
+                                min_binding_size: Some(GradientStorage::min_size()),
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    // pub(FRAGMENT) @binding(2) var<storage> s_radial_stops: array<GradientStopStorage>;
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(GradientStopStorage::min_size()),
+                        // pub(FRAGMENT) @binding(2) var<storage> s_radial_stops: array<GradientStopStorage>;
+                        iced::widget::shader::wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: iced::widget::shader::wgpu::ShaderStages::FRAGMENT,
+                            ty: iced::widget::shader::wgpu::BindingType::Buffer {
+                                ty: iced::widget::shader::wgpu::BufferBindingType::Storage {
+                                    read_only: true,
+                                },
+                                has_dynamic_offset: false,
+                                min_binding_size: Some(GradientStopStorage::min_size()),
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    // pub(FRAGMENT) @binding(3) var<storage> s_angular_stops: array<GradientStopStorage>;
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: Some(GradientStopStorage::min_size()),
+                        // pub(FRAGMENT) @binding(3) var<storage> s_angular_stops: array<GradientStopStorage>;
+                        iced::widget::shader::wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: iced::widget::shader::wgpu::ShaderStages::FRAGMENT,
+                            ty: iced::widget::shader::wgpu::BindingType::Buffer {
+                                ty: iced::widget::shader::wgpu::BufferBindingType::Storage {
+                                    read_only: true,
+                                },
+                                has_dynamic_offset: false,
+                                min_binding_size: Some(GradientStopStorage::min_size()),
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                ],
-            })
+                    ],
+                },
+            )
         })
     }
 
-    fn bind_group_from_buffers(device: &wgpu::Device, buffers: &Self::Buffers) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
+    fn bind_group_from_buffers(
+        device: &iced::widget::shader::wgpu::Device,
+        buffers: &Self::Buffers,
+    ) -> iced::widget::shader::wgpu::BindGroup {
+        device.create_bind_group(&iced::widget::shader::wgpu::BindGroupDescriptor {
             label: None,
             layout: PaintShaderTypes::bind_group_layout(device),
             entries: &[
-                wgpu::BindGroupEntry {
+                iced::widget::shader::wgpu::BindGroupEntry {
                     binding: 0,
                     resource: buffers.paint_uniform.as_entire_binding(),
                 },
-                wgpu::BindGroupEntry {
+                iced::widget::shader::wgpu::BindGroupEntry {
                     binding: 1,
                     resource: buffers.gradients_storage.as_entire_binding(),
                 },
-                wgpu::BindGroupEntry {
+                iced::widget::shader::wgpu::BindGroupEntry {
                     binding: 2,
                     resource: buffers.radial_stops_storage.as_entire_binding(),
                 },
-                wgpu::BindGroupEntry {
+                iced::widget::shader::wgpu::BindGroupEntry {
                     binding: 3,
                     resource: buffers.angular_stops_storage.as_entire_binding(),
                 },
@@ -230,88 +244,98 @@ impl ComponentShaderTypes for PaintShaderTypes {
         })
     }
 
-    fn new_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
+    fn new_buffers(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Buffers {
         PaintBuffers {
-            paint_uniform: device.create_buffer(&wgpu::BufferDescriptor {
+            paint_uniform: device.create_buffer(&iced::widget::shader::wgpu::BufferDescriptor {
                 label: None,
                 size: self.paint_uniform.size().get(),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                usage: iced::widget::shader::wgpu::BufferUsages::UNIFORM
+                    | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
-            gradients_storage: device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.gradients_storage.size().get(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            radial_stops_storage: device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.radial_stops_storage.size().get(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
-            angular_stops_storage: device.create_buffer(&wgpu::BufferDescriptor {
-                label: None,
-                size: self.angular_stops_storage.size().get(),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
+            gradients_storage: device.create_buffer(
+                &iced::widget::shader::wgpu::BufferDescriptor {
+                    label: None,
+                    size: self.gradients_storage.size().get(),
+                    usage: iced::widget::shader::wgpu::BufferUsages::STORAGE
+                        | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            ),
+            radial_stops_storage: device.create_buffer(
+                &iced::widget::shader::wgpu::BufferDescriptor {
+                    label: None,
+                    size: self.radial_stops_storage.size().get(),
+                    usage: iced::widget::shader::wgpu::BufferUsages::STORAGE
+                        | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            ),
+            angular_stops_storage: device.create_buffer(
+                &iced::widget::shader::wgpu::BufferDescriptor {
+                    label: None,
+                    size: self.angular_stops_storage.size().get(),
+                    usage: iced::widget::shader::wgpu::BufferUsages::STORAGE
+                        | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                },
+            ),
         }
     }
 
-    fn initialize_buffers(&self, device: &wgpu::Device) -> anyhow::Result<Self::Buffers> {
-        Ok(PaintBuffers {
+    fn initialize_buffers(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Buffers {
+        PaintBuffers {
             paint_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.paint_uniform)?;
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                buffer.write(&self.paint_uniform).unwrap();
+                device.create_buffer_init(&iced::widget::shader::wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
-                    usage: wgpu::BufferUsages::UNIFORM,
+                    usage: iced::widget::shader::wgpu::BufferUsages::UNIFORM,
                 })
             },
             gradients_storage: {
                 let mut buffer = encase::DynamicStorageBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.gradients_storage)?;
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                buffer.write(&self.gradients_storage).unwrap();
+                device.create_buffer_init(&iced::widget::shader::wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
-                    usage: wgpu::BufferUsages::STORAGE,
+                    usage: iced::widget::shader::wgpu::BufferUsages::STORAGE,
                 })
             },
             radial_stops_storage: {
                 let mut buffer = encase::DynamicStorageBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.radial_stops_storage)?;
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                buffer.write(&self.radial_stops_storage).unwrap();
+                device.create_buffer_init(&iced::widget::shader::wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
-                    usage: wgpu::BufferUsages::STORAGE,
+                    usage: iced::widget::shader::wgpu::BufferUsages::STORAGE,
                 })
             },
             angular_stops_storage: {
                 let mut buffer = encase::DynamicStorageBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.angular_stops_storage)?;
-                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                buffer.write(&self.angular_stops_storage).unwrap();
+                device.create_buffer_init(&iced::widget::shader::wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
-                    usage: wgpu::BufferUsages::STORAGE,
+                    usage: iced::widget::shader::wgpu::BufferUsages::STORAGE,
                 })
             },
-        })
+        }
     }
 
     fn write_buffers(
         &self,
-        queue: &wgpu::Queue,
+        queue: &iced::widget::shader::wgpu::Queue,
         buffers: &mut Self::Buffers,
-    ) -> anyhow::Result<()> {
+    ) {
         {
             let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
                 queue
                     .write_buffer_with(&buffers.paint_uniform, 0, self.paint_uniform.size())
                     .unwrap(),
             ));
-            buffer.write(&self.paint_uniform)?;
+            buffer.write(&self.paint_uniform).unwrap();
         }
         {
             let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
@@ -319,7 +343,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
                     .write_buffer_with(&buffers.gradients_storage, 0, self.gradients_storage.size())
                     .unwrap(),
             ));
-            buffer.write(&self.gradients_storage)?;
+            buffer.write(&self.gradients_storage).unwrap();
         }
         {
             let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
@@ -331,7 +355,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
                     )
                     .unwrap(),
             ));
-            buffer.write(&self.radial_stops_storage)?;
+            buffer.write(&self.radial_stops_storage).unwrap();
         }
         {
             let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
@@ -343,8 +367,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
                     )
                     .unwrap(),
             ));
-            buffer.write(&self.angular_stops_storage)?;
+            buffer.write(&self.angular_stops_storage).unwrap();
         }
-        Ok(())
     }
 }

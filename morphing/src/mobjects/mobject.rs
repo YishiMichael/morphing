@@ -1,15 +1,20 @@
+use std::fmt::Debug;
+
 use super::super::toplevel::world::World;
 
 pub trait Mobject:
-    'static + Clone + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
 {
-    type Realization: MobjectRealization;
+    type MobjectPresentation: MobjectPresentation;
 
-    fn realize(&self, device: &wgpu::Device) -> anyhow::Result<Self::Realization>;
+    fn presentation(
+        &self,
+        device: &iced::widget::shader::wgpu::Device,
+    ) -> Self::MobjectPresentation;
 }
 
-pub trait MobjectRealization: 'static + Send + Sync {
-    fn render(&self, render_pass: &mut wgpu::RenderPass) -> anyhow::Result<()>;
+pub trait MobjectPresentation: 'static + Send + Sync {
+    fn render<'mp>(&'mp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'mp>);
 }
 
 pub trait MobjectBuilder {
