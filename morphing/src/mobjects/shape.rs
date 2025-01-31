@@ -56,7 +56,7 @@ impl StrokeVertexConstructor<Vertex> for VertexConstructor {
 }
 
 impl MobjectPresentation for Vec<PlanarTrianglesPresentation> {
-    fn render<'mp>(&'mp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'mp>) {
+    fn render<'rp>(&'rp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'rp>) {
         for planar_triangles_presentation in self {
             planar_triangles_presentation.render(render_pass);
         }
@@ -160,7 +160,7 @@ impl PlanarTrianglesPresentation {
 }
 
 impl MobjectPresentation for PlanarTrianglesPresentation {
-    fn render<'mp>(&'mp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'mp>) {
+    fn render<'rp>(&'rp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'rp>) {
         render_pass.set_pipeline(self.pipeline);
         render_pass.set_bind_group(0, &self.transform_bind_group, &[]);
         render_pass.set_bind_group(1, &self.paint_bind_group, &[]);

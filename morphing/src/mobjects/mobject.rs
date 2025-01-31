@@ -14,7 +14,12 @@ pub trait Mobject:
 }
 
 pub trait MobjectPresentation: 'static + Send + Sync {
-    fn render<'mp>(&'mp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'mp>);
+    fn render(
+        &self,
+        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
+        target: &iced::widget::shader::wgpu::TextureView,
+        clip_bounds: &iced::Rectangle<u32>,
+    );
 }
 
 pub trait MobjectBuilder {

@@ -471,7 +471,7 @@ pub mod base_impl {
                     DynamicTimeline {
                         content: DiscreteTimelineContent {
                             mobject: output_mobject,
-                            timeline_entries: child_supervisor.into_timeline_entries(),
+                            timeline_entries: Arc::new(child_supervisor.into_timeline_entries()),
                         },
                         metric: timeline.metric,
                         rate: timeline.rate,
@@ -503,7 +503,7 @@ pub mod base_impl {
         }
     }
 
-    #[derive(Debug, serde::Deserialize, serde::Serialize)]
+    #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct ComposeMobjectDiff<MD0, MD1>(MD0, MD1);
 
     impl<M, MD0, MD1> MobjectDiff<M> for ComposeMobjectDiff<MD0, MD1>

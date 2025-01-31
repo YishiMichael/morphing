@@ -16,7 +16,7 @@ where
 }
 
 pub trait MobjectDiff<M>:
-    'static + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
 where
     M: Mobject,
 {
