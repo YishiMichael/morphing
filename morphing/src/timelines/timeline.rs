@@ -1,5 +1,9 @@
+use std::cell::RefCell;
 use std::fmt::Debug;
 use std::ops::Range;
+use std::sync::Arc;
+
+use crate::toplevel::world::World;
 
 // pub trait Presentation: 'static + Send + Sync {
 //     fn present(
@@ -127,29 +131,29 @@ struct TimelineEntry {
     timeline: Box<dyn DynTimeline>,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub(crate) struct TimelineEntries(Vec<TimelineEntry>);
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub(crate) struct TimelineEntries(Arc<Vec<TimelineEntry>>);
 
 impl TimelineEntries {
-    pub(crate) fn new() -> Self {
-        Self(Vec::new())
-    }
+    // pub(crate) fn new(entries: Vec<TimelineEntry>) -> Self {
+    //     Self(Arc::new(entries))
+    // }
 
-    pub(crate) fn push<T>(&mut self, time_interval: Range<f32>, timeline: T)
-    where
-        T: 'static + Timeline,
-    {
-        // Hash `Box<T>` instead of `T`.
-        // Presentation maps inside `storage` are identified only by `T::Presentation` type, without `T`.
-        let timeline =
-            serde_traitobject::Box::new(timeline) as serde_traitobject::Box<dyn DynTimeline>;
-        let hash = seahash::hash(&ron::ser::to_string(&timeline).unwrap().into_bytes());
-        self.0.push(TimelineEntry {
-            hash,
-            time_interval,
-            timeline: timeline.into_box(),
-        });
-    }
+    // pub(crate) fn push<T>(&mut self, time_interval: Range<f32>, timeline: T)
+    // where
+    //     T: 'static + Timeline,
+    // {
+    //     // Hash `Box<T>` instead of `T`.
+    //     // Presentation maps inside `storage` are identified only by `T::Presentation` type, without `T`.
+    //     let timeline =
+    //         serde_traitobject::Box::new(timeline) as serde_traitobject::Box<dyn DynTimeline>;
+    //     let hash = seahash::hash(&ron::ser::to_string(&timeline).unwrap().into_bytes());
+    //     self.0.push(TimelineEntry {
+    //         hash,
+    //         time_interval,
+    //         timeline: timeline.into_box(),
+    //     });
+    // }
 
     fn prepare(
         &self,
@@ -161,7 +165,7 @@ impl TimelineEntries {
         bounds: &iced::Rectangle,
         viewport: &iced::widget::shader::Viewport,
     ) {
-        for timeline_entry in &self.0 {
+        for timeline_entry in &*self.0 {
             if timeline_entry.time_interval.contains(&time) {
                 timeline_entry.timeline.dyn_prepare(
                     timeline_entry.hash,
@@ -186,7 +190,7 @@ impl TimelineEntries {
         target: &iced::widget::shader::wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
-        for timeline_entry in &self.0 {
+        for timeline_entry in &*self.0 {
             if timeline_entry.time_interval.contains(&time) {
                 timeline_entry.timeline.dyn_render(
                     timeline_entry.hash,
@@ -197,6 +201,59 @@ impl TimelineEntries {
                 );
             }
         }
+    }
+}
+
+pub struct Supervisor<'w> {
+    world: &'w World,
+    time: RefCell<Arc<f32>>,
+    timeline_entries: RefCell<Vec<TimelineEntry>>,
+}
+
+impl<'w> Supervisor<'w> {
+    pub(crate) fn new(world: &'w World) -> Self {
+        Self {
+            world,
+            time: RefCell::new(Arc::new(0.0)),
+            timeline_entries: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn world(&self) -> &World {
+        &self.world
+    }
+
+    pub(crate) fn time(&self) -> Arc<f32> {
+        self.time.borrow().clone()
+    }
+
+    pub(crate) fn push<T>(&self, time_interval: Range<f32>, timeline: T)
+    where
+        T: 'static + Timeline,
+    {
+        // Hash `Box<T>` instead of `T`.
+        // Presentation maps inside `storage` are identified only by `T::Presentation` type, without `T`.
+        let timeline =
+            serde_traitobject::Box::new(timeline) as serde_traitobject::Box<dyn DynTimeline>;
+        let hash = seahash::hash(&ron::ser::to_string(&timeline).unwrap().into_bytes());
+        self.timeline_entries.borrow_mut().push(TimelineEntry {
+            hash,
+            time_interval,
+            timeline: timeline.into_box(),
+        });
+    }
+
+    pub(crate) fn into_timeline_entries(self) -> TimelineEntries {
+        TimelineEntries(Arc::new(self.timeline_entries.into_inner()))
+    }
+
+    pub fn wait(&self, delta_time: f32) {
+        assert!(
+            delta_time.is_sign_positive(),
+            "`Supervisor::wait` expects a non-negative argument `delta_time`, got {delta_time}",
+        );
+        let mut time = self.time.borrow_mut();
+        *time = Arc::new(**time + delta_time);
     }
 }
 
@@ -305,29 +362,6 @@ pub mod steady {
             target: &iced::widget::shader::wgpu::TextureView,
             clip_bounds: &iced::Rectangle<u32>,
         ) {
-            // let mut render_pass =
-            //     encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
-            //         label: None,
-            //         color_attachments: &[Some(
-            //             iced::widget::shader::wgpu::RenderPassColorAttachment {
-            //                 view: target,
-            //                 resolve_target: None,
-            //                 ops: iced::widget::shader::wgpu::Operations {
-            //                     load: iced::widget::shader::wgpu::LoadOp::Load,
-            //                     store: iced::widget::shader::wgpu::StoreOp::Store,
-            //                 },
-            //             },
-            //         )],
-            //         depth_stencil_attachment: None,
-            //         timestamp_writes: None,
-            //         occlusion_query_set: None,
-            //     });
-            // render_pass.set_scissor_rect(
-            //     clip_bounds.x,
-            //     clip_bounds.y,
-            //     clip_bounds.width,
-            //     clip_bounds.height,
-            // );
             presentation.render(encoder, target, clip_bounds);
         }
     }
@@ -790,8 +824,6 @@ pub mod continuous {
 }
 
 pub mod discrete {
-    use std::sync::Arc;
-
     use super::super::super::mobjects::mobject::Mobject;
     // use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
@@ -802,7 +834,7 @@ pub mod discrete {
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct DiscreteTimelineContent<M> {
         pub(crate) mobject: M,
-        pub(crate) timeline_entries: Arc<TimelineEntries>,
+        pub(crate) timeline_entries: TimelineEntries,
     }
 
     impl<M> DynamicTimelineContent for DiscreteTimelineContent<M>

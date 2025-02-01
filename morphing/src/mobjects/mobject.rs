@@ -14,12 +14,39 @@ pub trait Mobject:
 }
 
 pub trait MobjectPresentation: 'static + Send + Sync {
+    fn draw<'rp>(&'rp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'rp>);
+
     fn render(
         &self,
         encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
         target: &iced::widget::shader::wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
-    );
+    ) {
+        let mut render_pass =
+            encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(
+                    iced::widget::shader::wgpu::RenderPassColorAttachment {
+                        view: target,
+                        resolve_target: None,
+                        ops: iced::widget::shader::wgpu::Operations {
+                            load: iced::widget::shader::wgpu::LoadOp::Load,
+                            store: iced::widget::shader::wgpu::StoreOp::Store,
+                        },
+                    },
+                )],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        render_pass.set_scissor_rect(
+            clip_bounds.x,
+            clip_bounds.y,
+            clip_bounds.width,
+            clip_bounds.height,
+        );
+        self.draw(&mut render_pass);
+    }
 }
 
 pub trait MobjectBuilder {

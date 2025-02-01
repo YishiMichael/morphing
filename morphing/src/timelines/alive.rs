@@ -1,43 +1,8 @@
-use std::cell::RefCell;
 use std::ops::Range;
 use std::sync::Arc;
 
-use super::super::toplevel::world::World;
+use super::timeline::Supervisor;
 use super::timeline::Timeline;
-use super::timeline::TimelineEntries;
-
-pub struct Supervisor<'w> {
-    world: &'w World,
-    time: RefCell<Arc<f32>>,
-    timeline_entries: RefCell<TimelineEntries>,
-}
-
-impl<'w> Supervisor<'w> {
-    pub(crate) fn new(world: &'w World) -> Self {
-        Self {
-            world,
-            time: RefCell::new(Arc::new(0.0)),
-            timeline_entries: RefCell::new(TimelineEntries::new()),
-        }
-    }
-
-    pub(crate) fn get_time(&self) -> Arc<f32> {
-        self.time.borrow().clone()
-    }
-
-    pub(crate) fn into_timeline_entries(self) -> TimelineEntries {
-        self.timeline_entries.into_inner()
-    }
-
-    pub fn wait(&self, delta_time: f32) {
-        assert!(
-            delta_time.is_sign_positive(),
-            "`Supervisor::wait` expects a non-negative argument `delta_time`, got {delta_time}",
-        );
-        let mut time = self.time.borrow_mut();
-        *time = Arc::new(**time + delta_time);
-    }
-}
 
 pub struct Alive<'s, T> {
     supervisor: &'s Supervisor<'s>,
@@ -49,7 +14,7 @@ impl<'w, T> Alive<'w, T> {
     fn new(supervisor: &'w Supervisor, timeline: T) -> Self {
         Self {
             supervisor,
-            spawn_time: supervisor.get_time(),
+            spawn_time: supervisor.time(),
             timeline,
         }
     }
@@ -64,16 +29,13 @@ impl<'w, T> Alive<'w, T> {
             spawn_time,
             timeline,
         } = self;
-        let arc_time_interval = spawn_time..supervisor.get_time();
+        let arc_time_interval = spawn_time..supervisor.time();
         let time_interval = *arc_time_interval.start..*arc_time_interval.end;
         if Arc::ptr_eq(&arc_time_interval.start, &arc_time_interval.end) {
             f(supervisor, time_interval, timeline)
         } else {
             let output = f(supervisor, time_interval.clone(), timeline.clone());
-            supervisor
-                .timeline_entries
-                .borrow_mut()
-                .push(time_interval, timeline);
+            supervisor.push(time_interval, timeline);
             output
         }
     }
@@ -87,8 +49,8 @@ pub mod traits {
     use super::super::timeline::dynamic::AbsoluteTimelineMetric;
     use super::super::timeline::dynamic::DynamicTimelineMetric;
     use super::super::timeline::dynamic::RelativeTimelineMetric;
+    use super::super::timeline::Supervisor;
     use super::super::update::Update;
-    use super::Supervisor;
 
     pub trait Spawn {
         type Output<'s>;
@@ -186,8 +148,6 @@ pub mod traits {
 }
 
 pub mod base_impl {
-    use std::sync::Arc;
-
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::mobjects::mobject::MobjectBuilder;
     use super::super::act::Act;
@@ -202,6 +162,7 @@ pub mod base_impl {
     use super::super::timeline::dynamic::DynamicTimelineMetric;
     use super::super::timeline::dynamic::IndeterminedTimelineContent;
     use super::super::timeline::steady::SteadyTimeline;
+    use super::super::timeline::Supervisor;
     use super::super::update::Update;
     use super::traits::ApplyAct;
     use super::traits::ApplyConstruct;
@@ -212,7 +173,6 @@ pub mod base_impl {
     use super::traits::Quantize;
     use super::traits::Spawn;
     use super::Alive;
-    use super::Supervisor;
 
     impl<MB> Spawn for MB
     where
@@ -225,7 +185,7 @@ pub mod base_impl {
             Alive::new(
                 supervisor,
                 SteadyTimeline {
-                    mobject: self.instantiate(supervisor.world),
+                    mobject: self.instantiate(supervisor.world()),
                 },
             )
         }
@@ -453,7 +413,7 @@ pub mod base_impl {
             C: Construct<M>,
         {
             self.archive(|supervisor, _, timeline| {
-                let child_supervisor = Supervisor::new(supervisor.world);
+                let child_supervisor = Supervisor::new(supervisor.world());
                 let input_mobject = timeline.content.mobject;
                 let output_mobject = construct
                     .construct(
@@ -471,7 +431,7 @@ pub mod base_impl {
                     DynamicTimeline {
                         content: DiscreteTimelineContent {
                             mobject: output_mobject,
-                            timeline_entries: Arc::new(child_supervisor.into_timeline_entries()),
+                            timeline_entries: child_supervisor.into_timeline_entries(),
                         },
                         metric: timeline.metric,
                         rate: timeline.rate,
@@ -538,6 +498,7 @@ pub mod derived_impl {
     use super::super::construct::Construct;
     use super::super::rates::Rate;
     use super::super::timeline::dynamic::DynamicTimelineMetric;
+    use super::super::timeline::Supervisor;
     use super::super::update::Update;
     use super::traits::ApplyAct;
     use super::traits::ApplyConstruct;
@@ -547,7 +508,6 @@ pub mod derived_impl {
     use super::traits::Destroy;
     use super::traits::Quantize;
     use super::traits::Spawn;
-    use super::Supervisor;
 
     macro_rules! polymorphism {
         (

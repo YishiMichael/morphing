@@ -448,7 +448,7 @@ impl Mobject for TypstMobject {
     ) -> Self::MobjectPresentation {
         self.tokens
             .iter()
-            .map(|TypstMobjectToken { mobject, .. }| mobject.presentation(device))
+            .flat_map(|TypstMobjectToken { mobject, .. }| mobject.presentation(device))
             .collect()
     }
 }

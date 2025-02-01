@@ -13,6 +13,7 @@ pub mod storyboard {
     use super::super::settings::Settings;
     use super::super::settings::VideoSettings;
 
+    #[derive(Default)]
     pub(crate) struct StoryboardManager {
         storyboards: indexmap::IndexMap<PathBuf, StoryboardState>,
     }
@@ -22,7 +23,6 @@ pub mod storyboard {
             &mut self,
             message: StoryboardMessage,
             settings: Arc<Settings>,
-            device: Arc<wgpu::Device>,
         ) -> iced::Task<StoryboardMessage> {
             match message {
                 StoryboardMessage::Add(path) => {
@@ -109,7 +109,7 @@ pub mod storyboard {
         async fn compile(
             path: PathBuf,
             settings: Arc<Settings>,
-        ) -> anyhow::Result<indexmap::IndexMap<String, SceneState>> {
+        ) -> anyhow::Result<indexmap::IndexMap<String, Arc<SceneState>>> {
             let mut child = Command::new("cargo")
                 .arg("run")
                 .arg("--quiet")
@@ -136,12 +136,12 @@ pub mod storyboard {
                 let scene_timeline_collection: SceneTimelineCollection = ron::de::from_str(&buf)?;
                 scenes.insert(
                     scene_timeline_collection.name.to_string(),
-                    SceneState {
+                    Arc::new(SceneState {
                         video_settings: scene_timeline_collection.video_settings,
                         duration: scene_timeline_collection.duration,
-                        timeline_entries: Arc::new(scene_timeline_collection.timeline_entries),
+                        timeline_entries: scene_timeline_collection.timeline_entries,
                         // status: SceneStatus::BeforePrepare,
-                    },
+                    }),
                 );
                 buf.clear();
             }
@@ -156,13 +156,14 @@ pub mod storyboard {
         // }
     }
 
-    pub(crate) enum StoryboardMessage {
+    #[derive(Debug)]
+    pub enum StoryboardMessage {
         Add(PathBuf),
         Remove(PathBuf),
         Compile(PathBuf),
         CompileResult(
             PathBuf,
-            anyhow::Result<indexmap::IndexMap<String, SceneState>>,
+            anyhow::Result<indexmap::IndexMap<String, Arc<SceneState>>>,
         ),
         // Prepare(PathBuf, String),
         // PrepareResult(PathBuf, String, anyhow::Result<PresentationEntries>),
@@ -176,15 +177,16 @@ pub mod storyboard {
     enum StoryboardStatus {
         BeforeCompile,
         OnCompile,
-        AfterCompile(indexmap::IndexMap<String, SceneState>),
+        AfterCompile(indexmap::IndexMap<String, Arc<SceneState>>),
         CompileError(anyhow::Error),
     }
 
-    pub(crate) struct SceneState {
+    #[derive(Debug)]
+    pub struct SceneState {
         video_settings: VideoSettings,
         duration: f32,
         // status: SceneStatus,
-        timeline_entries: Arc<TimelineEntries>,
+        timeline_entries: TimelineEntries,
     }
 
     // enum SceneStatus {
@@ -201,6 +203,7 @@ pub mod app {
     use std::sync::Arc;
 
     use super::super::super::toplevel::settings::Settings;
+    use super::storyboard::SceneState;
     use super::storyboard::StoryboardManager;
     use super::storyboard::StoryboardMessage;
 
@@ -324,21 +327,16 @@ pub mod app {
         }
     }
 
-    // struct ActiveScene {
-    //     progress: Progress,
-    //     scene: Arc<SceneState>,
-    // }
-    pub struct State {
-        settings: Arc<Settings>,
-        // active_scene: Option<ActiveScene>,
-        device: Arc<wgpu::Device>,
-        storyboard_manager: StoryboardManager,
+    struct ActiveScene {
+        progress: Progress,
+        scene: Arc<SceneState>,
     }
 
-    impl Default for State {
-        fn default() -> Self {
-            todo!()
-        }
+    #[derive(Default)]
+    pub struct State {
+        settings: Arc<Settings>,
+        storyboard_manager: StoryboardManager,
+        active_scene: Option<ActiveScene>,
     }
 
     impl State {
@@ -349,17 +347,45 @@ pub mod app {
                     .update(
                         storyboard_message,
                         self.settings.clone(),
-                        self.device.clone(),
                     )
                     .map(Message::StoryboardMessage),
             }
         }
 
         pub fn view(&self) -> iced::Element<Message> {
-            todo!()
+            iced::widget::Shader::new(self).into()
         }
     }
 
+    // impl iced::widget::shader::Program<Message> for State {
+    //     type State = ();
+    //     type Primitive = Primitive;
+
+    //     fn update(
+    //         &self,
+    //         _state: &mut Self::State,
+    //         _event: iced::widget::shader::Event,
+    //         _bounds: iced::Rectangle,
+    //         _cursor: mouse::Cursor,
+    //         _shell: &mut Shell<'_, Message>,
+    //     ) -> (event::Status, Option<Message>) {
+    //         if self.active_scene.is_some_and(|active_scene| !active_scene.progress.paused()) {
+    //             shell.request_redraw(RedrawRequest::NextFrame);
+    //         }
+    //         (Status::Ignored, None)
+    //     }
+
+    //     fn draw(
+    //         &self,
+    //         state: &Self::State,
+    //         cursor: mouse::Cursor,
+    //         bounds: iced::Rectangle,
+    //     ) -> Self::Primitive {
+    //         todo!()
+    //     }
+    // }
+
+    #[derive(Debug)]
     pub enum Message {
         StoryboardMessage(StoryboardMessage),
     }

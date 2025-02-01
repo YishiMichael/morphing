@@ -3,7 +3,7 @@ use std::collections::HashMap;
 pub use inventory;
 pub use morphing_macros::scene;
 
-use super::super::timelines::alive::Supervisor;
+use super::super::timelines::timeline::Supervisor;
 use super::super::timelines::timeline::TimelineEntries;
 use super::settings::SceneSettings;
 use super::settings::VideoSettings;
@@ -50,7 +50,7 @@ pub fn export_scenes() {
         let scene_timeline_collection = SceneTimelineCollection {
             name: scene_module.name.to_string(),
             video_settings: video_settings.clone(),
-            duration: *supervisor.get_time(),
+            duration: *supervisor.time(),
             timeline_entries: supervisor.into_timeline_entries(),
         };
         println!(
