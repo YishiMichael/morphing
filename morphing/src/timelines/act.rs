@@ -8,10 +8,6 @@ where
 {
     type Diff: MobjectDiff<M>;
 
-    // fn diff(self, mobject: &M) -> Self::Diff;
-    // fn apply_diff(mobject: &M, diff: Self::Diff) -> M;
-    // fn scale_diff(alpha: f32, diff: &Self::Diff) -> Self::Diff;
-
     fn act(self, mobject: &M) -> Self::Diff;
 }
 

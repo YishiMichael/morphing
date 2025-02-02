@@ -1,0 +1,18 @@
+[package]
+name = "morphing-gui"
+version = "0.1.0"
+authors = ["YishiMichael"]
+edition = "2021"
+
+[[bin]]
+name = "morphing-gui"
+
+[dependencies]
+anyhow = "1.0.95"
+cargo_metadata = "0.19.1"
+essi-ffmpeg = "0.2.0"
+iced = { version = "0.13.1", features = ["advanced"] }
+indexmap = "2.7.1"
+morphing = { path = "../morphing" }
+rfd = "0.15.2"
+ron = "0.8.1"

@@ -7,24 +7,43 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
-use super::super::timelines::timeline::TimelineEntries;
-use super::scene::SceneTimelineCollection;
-use super::settings::Settings;
-use super::settings::VideoSettings;
+use morphing::timelines::timeline::TimelineEntries;
+use morphing::toplevel::scene::SceneData;
+use morphing::toplevel::settings::SceneSettings;
 
-#[derive(Default)]
-struct StoryboardManager {
-    storyboards: indexmap::IndexMap<PathBuf, StoryboardState>,
+#[derive(Clone, Debug)]
+struct PlayerSettings {
+    play_pause_key: iced::keyboard::Key,
+    fast_forward_key: iced::keyboard::Key,
+    fast_backward: iced::keyboard::Key,
+    fast_skip_seconds: f32,
 }
 
-impl StoryboardManager {
+impl Default for PlayerSettings {
+    fn default() -> Self {
+        Self {
+            play_pause_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Space),
+            fast_forward_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight),
+            fast_backward: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft),
+            fast_skip_seconds: 5.0,
+        }
+    }
+}
+
+#[derive(Default)]
+struct ProjectManager {
+    projects: indexmap::IndexMap<PathBuf, ProjectData>,
+    active: Option<PathBuf>,
+}
+
+impl ProjectManager {
     fn update(
         &mut self,
-        message: StoryboardMessage,
-        settings: Arc<Settings>,
-    ) -> iced::Task<StoryboardMessage> {
+        message: ProjectMessage,
+        scene_settings: Arc<SceneSettings>,
+    ) -> iced::Task<ProjectMessage> {
         match message {
-            StoryboardMessage::Add(path) => {
+            ProjectMessage::Add(path) => {
                 let metadata = cargo_metadata::MetadataCommand::new().exec().unwrap();
                 let path = metadata
                     .packages
@@ -34,31 +53,31 @@ impl StoryboardManager {
                     .unwrap()
                     .to_path_buf()
                     .into_std_path_buf();
-                self.storyboards.entry(path).or_insert(StoryboardState {
-                    status: StoryboardStatus::BeforeCompile,
+                self.projects.entry(path).or_insert(ProjectData {
+                    status: ProjectStatus::BeforeCompile,
                 });
                 iced::Task::none()
             }
-            StoryboardMessage::Remove(path) => {
-                self.storyboards.shift_remove(&path);
+            ProjectMessage::Remove(path) => {
+                self.projects.shift_remove(&path);
                 iced::Task::none()
             }
-            StoryboardMessage::Compile(path) => {
-                if let Some(state) = self.storyboards.get_mut(&path) {
-                    *&mut state.status = StoryboardStatus::OnCompile;
+            ProjectMessage::Compile(path) => {
+                if let Some(state) = self.projects.get_mut(&path) {
+                    *&mut state.status = ProjectStatus::OnCompile;
                     iced::Task::perform(
-                        Self::compile(path.clone(), settings.clone()),
-                        move |result| StoryboardMessage::CompileResult(path.clone(), result),
+                        Self::compile(path.clone(), scene_settings.clone()),
+                        move |result| ProjectMessage::CompileResult(path.clone(), result),
                     )
                 } else {
                     iced::Task::none()
                 }
             }
-            StoryboardMessage::CompileResult(path, compile_result) => {
-                if let Some(state) = self.storyboards.get_mut(&path) {
+            ProjectMessage::CompileResult(path, compile_result) => {
+                if let Some(state) = self.projects.get_mut(&path) {
                     *&mut state.status = match compile_result {
-                        Err(error) => StoryboardStatus::CompileError(error),
-                        Ok(scenes) => StoryboardStatus::AfterCompile(scenes),
+                        Err(error) => ProjectStatus::CompileError(error),
+                        Ok(scenes) => ProjectStatus::AfterCompile {scenes, active: None},
                     };
                 }
                 iced::Task::none()
@@ -68,8 +87,8 @@ impl StoryboardManager {
 
     async fn compile(
         path: PathBuf,
-        settings: Arc<Settings>,
-    ) -> anyhow::Result<indexmap::IndexMap<String, Result<Arc<SceneState>, String>>> {
+        scene_settings: Arc<SceneSettings>,
+    ) -> anyhow::Result<indexmap::IndexMap<String, SceneData>> {
         let mut child = Command::new("cargo")
             .arg("run")
             .arg("--quiet")
@@ -81,7 +100,7 @@ impl StoryboardManager {
         writeln!(
             child.stdin.take().unwrap(),
             "{}",
-            ron::ser::to_string(&settings.scene)?
+            ron::ser::to_string(&*scene_settings)?
         )?;
         if !child.wait()?.success() {
             let mut stderr = BufReader::new(child.stderr.take().unwrap());
@@ -93,20 +112,8 @@ impl StoryboardManager {
         let mut buf = String::new();
         let mut scenes = indexmap::IndexMap::new();
         while stdout.read_line(&mut buf)? != 0 {
-            let (name, scene_timeline_collection): (
-                String,
-                Result<SceneTimelineCollection, String>,
-            ) = ron::de::from_str(&buf)?;
-            scenes.insert(
-                name,
-                scene_timeline_collection.map(|scene_timeline_collection| {
-                    Arc::new(SceneState {
-                        video_settings: scene_timeline_collection.video_settings,
-                        duration: scene_timeline_collection.duration,
-                        timeline_entries: scene_timeline_collection.timeline_entries,
-                    })
-                }),
-            );
+            let (name, scene_data): (String, SceneData) = ron::de::from_str(&buf)?;
+            scenes.insert(name, scene_data);
             buf.clear();
         }
         Ok(scenes)
@@ -121,37 +128,42 @@ impl StoryboardManager {
 }
 
 #[derive(Debug)]
-pub enum StoryboardMessage {
+pub enum ProjectMessage {
     Add(PathBuf),
     Remove(PathBuf),
     Compile(PathBuf),
     CompileResult(
         PathBuf,
-        anyhow::Result<indexmap::IndexMap<String, Result<Arc<SceneState>, String>>>,
+        anyhow::Result<indexmap::IndexMap<String, SceneData>>,
     ),
     // Prepare(PathBuf, String),
     // PrepareResult(PathBuf, String, anyhow::Result<PresentationEntries>),
     // PresentError(PathBuf, String, anyhow::Error),
 }
 
-struct StoryboardState {
-    status: StoryboardStatus,
+struct ProjectData {
+    status: ProjectStatus,
 }
 
-enum StoryboardStatus {
+enum ProjectStatus {
     BeforeCompile,
     OnCompile,
-    AfterCompile(indexmap::IndexMap<String, Result<Arc<SceneState>, String>>),
+    AfterCompile {
+        scenes: indexmap::IndexMap<String, SceneData>,
+        active: Option<String>
+    },
     CompileError(anyhow::Error),
 }
 
-#[derive(Debug)]
-pub struct SceneState {
-    video_settings: VideoSettings,
-    duration: f32,
-    // status: SceneStatus,
-    timeline_entries: TimelineEntries,
-}
+// #[derive(Debug)]
+// pub struct SceneState {
+
+//     timeline_collection: Option<SceneTimelineCollection>,
+//     // video_settings: VideoSettings,
+//     // duration: f32,
+//     // status: SceneStatus,
+//     // timeline_entries: TimelineEntries,
+// }
 
 // enum SceneStatus {
 //     BeforePrepare,
@@ -218,18 +230,18 @@ struct Progress {
     // anchor_time: f32,
     // instant: Instant,
     time: f32,
-    base_speed: f32,
+    // base_speed: f32,
     progress_speed: ProgressSpeed,
     paused: bool,
 }
 
 impl Progress {
-    fn new(full_time: f32, base_speed: f32) -> Self {
+    fn new(full_time: f32) -> Self {
         Self {
             time_interval: 0.0..full_time,
             time: 0.0,
             // instant: Instant::now(),
-            base_speed,
+            // base_speed,
             progress_speed: ProgressSpeed::Forward100,
             paused: true,
         }
@@ -256,7 +268,7 @@ impl Progress {
 
     fn forward_time(&mut self, app_delta_time: f32) -> f32 {
         if !self.paused {
-            self.time += app_delta_time * self.base_speed * self.progress_speed.value();
+            self.time += app_delta_time * self.progress_speed.value();
             if !self.time_interval.contains(&self.time) {
                 self.paused = true;
                 self.time = self
@@ -281,14 +293,14 @@ impl Progress {
     }
 }
 
-impl Default for Progress {
-    fn default() -> Self {
-        Self::new(0.0, 1.0)
-    }
-}
+// impl Default for Progress {
+//     fn default() -> Self {
+//         Self::new(0.0, 1.0)
+//     }
+// }
 
 #[derive(Debug)]
-pub struct Primitive(Option<(TimelineEntries, f32)>);
+pub(crate) struct Primitive(Option<(TimelineEntries, f32)>);
 
 impl iced::widget::shader::Primitive for Primitive {
     fn prepare(
@@ -346,24 +358,25 @@ impl iced::widget::shader::Primitive for Primitive {
 }
 
 #[derive(Default)]
-pub struct State {
-    settings: Arc<Settings>,
-    storyboard_manager: StoryboardManager,
-    progress: Progress,
-    active_scene: Option<Arc<SceneState>>,
+pub(crate) struct State {
+    scene_settings: Arc<SceneSettings>,
+    player_settings: PlayerSettings,
+    project_manager: ProjectManager,
+    // progress: Progress,
+    // active_scene: Option<SceneData>,
 }
 
 impl State {
-    pub fn update(&mut self, message: Message) -> iced::Task<Message> {
+    pub(crate) fn update(&mut self, message: Message) -> iced::Task<Message> {
         match message {
-            Message::StoryboardMessage(storyboard_message) => self
-                .storyboard_manager
-                .update(storyboard_message, self.settings.clone())
-                .map(Message::StoryboardMessage),
+            Message::ProjectMessage(project_message) => self
+                .project_manager
+                .update(project_message, self.scene_settings.clone())
+                .map(Message::ProjectMessage),
         }
     }
 
-    pub fn view(&self) -> iced::Element<Message> {
+    pub(crate) fn view(&self) -> iced::Element<Message> {
         iced::widget::Shader::new(self).into()
     }
 }
@@ -380,7 +393,7 @@ impl iced::widget::shader::Program<Message> for State {
         _cursor: iced::mouse::Cursor,
         shell: &mut iced::advanced::Shell<'_, Message>,
     ) -> (iced::event::Status, Option<Message>) {
-        if self.active_scene.is_some() && !self.progress.paused() {
+        if self.project_manager.active.is_some() && !self.progress.paused() {
             shell.request_redraw(iced::window::RedrawRequest::NextFrame);
         }
         (iced::event::Status::Ignored, None)
@@ -401,8 +414,8 @@ impl iced::widget::shader::Program<Message> for State {
 }
 
 #[derive(Debug)]
-pub enum Message {
-    StoryboardMessage(StoryboardMessage),
+pub(crate) enum Message {
+    ProjectMessage(ProjectMessage),
 }
 
 // enum Message {

@@ -134,10 +134,10 @@ struct TimelineEntry {
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub(crate) struct TimelineEntries(Arc<Vec<TimelineEntry>>);
+pub struct TimelineEntries(Arc<Vec<TimelineEntry>>);
 
 impl TimelineEntries {
-    pub(crate) fn prepare(
+    pub fn prepare(
         &self,
         time: f32,
         device: &iced::widget::shader::wgpu::Device,
@@ -164,7 +164,7 @@ impl TimelineEntries {
         }
     }
 
-    pub(crate) fn render(
+    pub fn render(
         &self,
         time: f32,
         encoder: &mut iced::widget::shader::wgpu::CommandEncoder,

@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::fmt::Display;
-use std::fmt::Formatter;
 use std::ops::Deref;
 use std::path::PathBuf;
 
@@ -9,13 +7,7 @@ use comemo::Track;
 use super::settings::StyleSettings;
 use super::settings::TypstSettings;
 
-// use super::scene::BakedWorldline;
-// use super::scene::Worldline;
-
-// pub static WORLD: LazyLock<World> = LazyLock::new(|| World::new());
-
 pub struct World {
-    // cache_path: LazyLock<PathBuf>,
     pub style_settings: StyleSettings,
     pub typst_world: TypstWorld,
 }
@@ -23,62 +15,25 @@ pub struct World {
 impl World {
     pub(crate) fn new(style_settings: StyleSettings, typst_settings: TypstSettings) -> Self {
         Self {
-            // cache_path: LazyLock::new(|| Self::init_cache_path().unwrap()),
             style_settings,
             typst_world: TypstWorld::new(typst_settings),
         }
     }
-
-    // fn init_cache_path() -> std::io::Result<PathBuf> {
-    //     let temp_dir_path = std::env::temp_dir().join(format!(
-    //         "{}-{}-CACHE",
-    //         env!("CARGO_PKG_NAME"),
-    //         env!("CARGO_PKG_VERSION")
-    //     ));
-    //     let cache_path = temp_dir_path.join("cache.ron");
-    //     if !std::fs::exists(&cache_path)? {
-    //         if !std::fs::exists(&temp_dir_path)? {
-    //             std::fs::create_dir(&temp_dir_path)?;
-    //         }
-    //     };
-    //     Ok(cache_path)
-    // }
-
-    // pub fn read_cache(&self) -> HashMap<Worldline, BakedWorldline> {
-    //     std::fs::read(&*self.cache_path)
-    //         .map(|buf| ron::de::from_reader(&*buf).unwrap_or_default())
-    //         .unwrap_or_default()
-    // }
-
-    // pub fn write_cache(&self, cache: HashMap<Worldline, BakedWorldline>) {
-    //     let mut buf = Vec::new();
-    //     ron::ser::to_writer(&mut buf, &cache).unwrap();
-    //     std::fs::write(&*self.cache_path, buf).unwrap();
-    // }
-
-    // pub(crate) fn typst_world(&self) -> &TypstWorld {
-    //     &self.typst_world
-    // }
 }
 
 // Modified from reflexo-typst/src/error.rs
 
-#[derive(Debug)]
-struct SourceDiagnosticsWrapper(ecow::EcoVec<typst::diag::SourceDiagnostic>);
-
-impl Display for SourceDiagnosticsWrapper {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        for (index, diagnostic) in self.0.iter().enumerate() {
-            f.write_fmt(format_args!("{index}. "))?;
-            f.write_str(&diagnostic.message)?;
-            if !diagnostic.hints.is_empty() {
-                f.write_str(", hints: ")?;
-                f.write_str(&diagnostic.hints.join(", "))?;
-            }
-            f.write_str("\n")?;
+fn eprint_diagnostics<I>(iter: I) -> !
+where
+    I: IntoIterator<Item = typst::diag::SourceDiagnostic>,
+{
+    for (index, diagnostic) in iter.into_iter().enumerate() {
+        eprintln!("{index}. {diagnostic:?}");
+        if !diagnostic.hints.is_empty() {
+            eprintln!("  - Hints: {}", diagnostic.hints.join(", "));
         }
-        Ok(())
     }
+    panic!("Typst error. See diagnostics above.");
 }
 
 // Modified from typst/lib.rs, typst-cli/src/world.rs
@@ -124,10 +79,6 @@ impl TypstWorld {
         );
         Self {
             root: settings.root,
-            // root: config
-            // .root
-            // .canonicalize()
-            // .map_err(|_| typst::diag::FileError::NotFound(config.root))?,
             library: typst::utils::LazyHash::new(
                 typst::Library::builder().with_inputs(inputs).build(),
             ),
@@ -140,18 +91,11 @@ impl TypstWorld {
         }
     }
 
-    // pub(crate) fn main_id(&self) -> typst::syntax::FileId {
-    //     self.main_id
-    // }
-
     pub fn source(&self, text: String) -> typst::syntax::Source {
         typst::syntax::Source::new(self.main_id, text)
     }
 
-    pub fn document(
-        &self,
-        source: &typst::syntax::Source,
-    ) -> anyhow::Result<typst::model::Document> {
+    pub fn document(&self, source: &typst::syntax::Source) -> typst::model::Document {
         self.source_slots
             .lock()
             .values_mut()
@@ -176,10 +120,10 @@ impl TypstWorld {
             typst::engine::Route::default().track(),
             source,
         )
-        .map_err(|errors| {
+        .unwrap_or_else(|errors| {
             sink.delay(errors);
-            anyhow::Error::msg(SourceDiagnosticsWrapper(sink.delayed()))
-        })?
+            eprint_diagnostics(sink.delayed());
+        })
         .content();
 
         let mut engine = typst::engine::Engine {
@@ -189,17 +133,17 @@ impl TypstWorld {
             sink: sink.track_mut(),
             route: typst::engine::Route::default(),
         };
-        let document =
-            typst::layout::layout_document(&mut engine, &content, styles).map_err(|errors| {
+        let document = typst::layout::layout_document(&mut engine, &content, styles)
+            .unwrap_or_else(|errors| {
                 sink.delay(errors);
-                anyhow::Error::msg(SourceDiagnosticsWrapper(sink.delayed()))
-            })?;
+                eprint_diagnostics(sink.delayed());
+            });
 
         let delayed = sink.delayed();
         if !delayed.is_empty() {
-            Err(anyhow::Error::msg(SourceDiagnosticsWrapper(delayed)))?
+            eprint_diagnostics(delayed);
         }
-        Ok(document)
+        document
     }
 
     fn read(&self, id: typst::syntax::FileId) -> typst::diag::FileResult<Vec<u8>> {

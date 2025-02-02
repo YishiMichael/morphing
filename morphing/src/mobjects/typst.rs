@@ -53,7 +53,7 @@ pub struct TypstMobject {
 impl TypstMobject {
     fn instantiate(text: String, world: &World) -> Self {
         let source = world.typst_world.source(text.clone());
-        let document = world.typst_world.document(&source).unwrap();
+        let document = world.typst_world.document(&source);
         Self {
             text,
             tokens: TypstMobject::from_typst_document(&document, &source),

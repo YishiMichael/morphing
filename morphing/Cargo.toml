@@ -4,23 +4,14 @@ version = "0.1.0"
 authors = ["YishiMichael"]
 edition = "2021"
 
-[[bin]]
-name = "morphing"
-
 [dependencies]
-anyhow = "1.0.95"
 bezier-rs = { version = "0.4.0", features = ["serde"] }
-cargo_metadata = "0.19.1"
 comemo = "0.4.0"
 dashmap = "6.1.0"
-ecow = "0.2.3"
 encase = { version = "0.10.0", features = ["nalgebra"] }
-env_logger = "0.11.6"
-essi-ffmpeg = "0.2.0"
 geometric_algebra = "0.3.0"
 glam = "0.24.2"
-iced = { version = "0.13.1", features = ["advanced"] }
-indexmap = "2.7.1"
+iced = "0.13.1"
 inventory = "0.3.17"
 itertools = "0.13.0"
 lyon = { version = "1.0.1", features = ["serialization"] }
@@ -29,12 +20,11 @@ nalgebra = { version = "0.33.2", features = ["serde-serialize"] }
 palette = { version = "0.7.6", features = ["serializing"] }
 parking_lot = "0.12.3"
 paste = "1.0.15"
-pollster = "0.4.0" # to be removed
-rfd = "0.15.2"
 ron = "0.8.1"
 seahash = "4.1.0"
 serde = "1.0.217"
 serde_traitobject = "0.2.8"
+shh = "1.0.1"
 ttf-parser = "0.24.1"
 typst = "0.12.0"
 typst-kit = { version = "0.12.0", features = ["embed-fonts"] }
