@@ -19,10 +19,10 @@ impl<'w, T> Alive<'w, T> {
         }
     }
 
-    fn archive<F, O>(self, f: F) -> O
+    fn archive<F, FO>(self, f: F) -> FO
     where
         T: Clone + Timeline,
-        F: FnOnce(&'w Supervisor, Range<f32>, T) -> O,
+        F: FnOnce(&'w Supervisor, Range<f32>, T) -> FO,
     {
         let Alive {
             supervisor,
@@ -412,31 +412,60 @@ pub mod base_impl {
         where
             C: Construct<M>,
         {
-            self.archive(|supervisor, _, timeline| {
-                let child_supervisor = Supervisor::new(supervisor.world());
-                let input_mobject = timeline.content.mobject;
-                let output_mobject = construct
-                    .construct(
+            self.archive(|supervisor, _, dynamic_timeline| {
+                Supervisor::visit(
+                    supervisor.world(),
+                    |supervisor| {
+                        construct
+                            .construct(
+                                Alive::new(
+                                    supervisor,
+                                    SteadyTimeline {
+                                        mobject: dynamic_timeline.content.mobject,
+                                    },
+                                ),
+                                supervisor,
+                            )
+                            .archive(|_, _, steady_timeline| steady_timeline)
+                    },
+                    |_, timeline_entries, steady_timeline| {
                         Alive::new(
-                            &child_supervisor,
-                            SteadyTimeline {
-                                mobject: input_mobject,
+                            supervisor,
+                            DynamicTimeline {
+                                content: DiscreteTimelineContent {
+                                    mobject: steady_timeline.mobject,
+                                    timeline_entries,
+                                },
+                                metric: dynamic_timeline.metric,
+                                rate: dynamic_timeline.rate,
                             },
-                        ),
-                        &child_supervisor,
-                    )
-                    .archive(|_, _, steady_timeline| steady_timeline.mobject);
-                Alive::new(
-                    supervisor,
-                    DynamicTimeline {
-                        content: DiscreteTimelineContent {
-                            mobject: output_mobject,
-                            timeline_entries: child_supervisor.into_timeline_entries(),
-                        },
-                        metric: timeline.metric,
-                        rate: timeline.rate,
+                        )
                     },
                 )
+                // let child_supervisor = Supervisor::new(supervisor.world());
+                // let input_mobject = timeline.content.mobject;
+                // let output_mobject = construct
+                //     .construct(
+                //         Alive::new(
+                //             &child_supervisor,
+                //             SteadyTimeline {
+                //                 mobject: input_mobject,
+                //             },
+                //         ),
+                //         &child_supervisor,
+                //     )
+                //     .archive(|_, _, steady_timeline| steady_timeline.mobject);
+                // Alive::new(
+                //     supervisor,
+                //     DynamicTimeline {
+                //         content: DiscreteTimelineContent {
+                //             mobject: output_mobject,
+                //             timeline_entries: child_supervisor.into_timeline_entries(),
+                //         },
+                //         metric: timeline.metric,
+                //         rate: timeline.rate,
+                //     },
+                // )
             })
         }
     }

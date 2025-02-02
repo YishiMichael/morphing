@@ -19,7 +19,7 @@ env_logger = "0.11.6"
 essi-ffmpeg = "0.2.0"
 geometric_algebra = "0.3.0"
 glam = "0.24.2"
-iced = "0.13.1"
+iced = { version = "0.13.1", features = ["advanced"] }
 indexmap = "2.7.1"
 inventory = "0.3.17"
 itertools = "0.13.0"

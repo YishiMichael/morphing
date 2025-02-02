@@ -1,6 +1,6 @@
 use morphing::mobjects::shape::Rect;
 use morphing::timelines::alive::traits::Destroy;
-use morphing::timelines::alive::Supervisor;
+use morphing::timelines::timeline::Supervisor;
 use morphing::toplevel::scene::export_scenes;
 use morphing::toplevel::scene::scene;
 use morphing::toplevel::settings::SceneSettings;

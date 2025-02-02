@@ -3,18 +3,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::toplevel::world::World;
-
-// pub trait Presentation: 'static + Send + Sync {
-//     fn present(
-//         &mut self,
-//         time: f32,
-//         time_interval: Range<f32>,
-//         device: &iced::widget::shader::wgpu::Device,
-//         queue: &iced::widget::shader::wgpu::Queue,
-//         render_pass: &mut iced::widget::shader::wgpu::RenderPass,
-//     ) -> anyhow::Result<()>;
-// }
+use super::super::toplevel::world::World;
 
 pub trait Timeline:
     'static + Send + Sync + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
@@ -35,6 +24,8 @@ pub trait Timeline:
     );
     fn render(
         &self,
+        time_interval: Range<f32>,
+        time: f32,
         encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
         presentation: &Self::Presentation,
         target: &iced::widget::shader::wgpu::TextureView,
@@ -60,6 +51,8 @@ trait DynTimeline:
     fn dyn_render(
         &self,
         hash: u64,
+        time_interval: Range<f32>,
+        time: f32,
         encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
         storage: &iced::widget::shader::Storage,
         target: &iced::widget::shader::wgpu::TextureView,
@@ -110,6 +103,8 @@ where
     fn dyn_render(
         &self,
         hash: u64,
+        time_interval: Range<f32>,
+        time: f32,
         encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
         storage: &iced::widget::shader::Storage,
         target: &iced::widget::shader::wgpu::TextureView,
@@ -119,7 +114,14 @@ where
             .get::<dashmap::DashMap<u64, T::Presentation>>()
             .unwrap();
         let presentation = presentation_map.get(&hash).unwrap();
-        self.render(encoder, &presentation, target, clip_bounds);
+        self.render(
+            time_interval,
+            time,
+            encoder,
+            &presentation,
+            target,
+            clip_bounds,
+        );
     }
 }
 
@@ -135,27 +137,7 @@ struct TimelineEntry {
 pub(crate) struct TimelineEntries(Arc<Vec<TimelineEntry>>);
 
 impl TimelineEntries {
-    // pub(crate) fn new(entries: Vec<TimelineEntry>) -> Self {
-    //     Self(Arc::new(entries))
-    // }
-
-    // pub(crate) fn push<T>(&mut self, time_interval: Range<f32>, timeline: T)
-    // where
-    //     T: 'static + Timeline,
-    // {
-    //     // Hash `Box<T>` instead of `T`.
-    //     // Presentation maps inside `storage` are identified only by `T::Presentation` type, without `T`.
-    //     let timeline =
-    //         serde_traitobject::Box::new(timeline) as serde_traitobject::Box<dyn DynTimeline>;
-    //     let hash = seahash::hash(&ron::ser::to_string(&timeline).unwrap().into_bytes());
-    //     self.0.push(TimelineEntry {
-    //         hash,
-    //         time_interval,
-    //         timeline: timeline.into_box(),
-    //     });
-    // }
-
-    fn prepare(
+    pub(crate) fn prepare(
         &self,
         time: f32,
         device: &iced::widget::shader::wgpu::Device,
@@ -182,7 +164,7 @@ impl TimelineEntries {
         }
     }
 
-    fn render(
+    pub(crate) fn render(
         &self,
         time: f32,
         encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
@@ -194,6 +176,8 @@ impl TimelineEntries {
             if timeline_entry.time_interval.contains(&time) {
                 timeline_entry.timeline.dyn_render(
                     timeline_entry.hash,
+                    timeline_entry.time_interval.clone(),
+                    time,
                     encoder,
                     storage,
                     target,
@@ -211,12 +195,22 @@ pub struct Supervisor<'w> {
 }
 
 impl<'w> Supervisor<'w> {
-    pub(crate) fn new(world: &'w World) -> Self {
-        Self {
+    pub(crate) fn visit<V, VO, F, FO>(world: &'w World, visitor: V, f: F) -> FO
+    where
+        V: for<'s> FnOnce(&'s Self) -> VO,
+        F: FnOnce(f32, TimelineEntries, VO) -> FO,
+    {
+        let supervisor = Self {
             world,
             time: RefCell::new(Arc::new(0.0)),
             timeline_entries: RefCell::new(Vec::new()),
-        }
+        };
+        let visitor_output = visitor(&supervisor);
+        f(
+            *supervisor.time(),
+            TimelineEntries(Arc::new(supervisor.timeline_entries.into_inner())),
+            visitor_output,
+        )
     }
 
     pub(crate) fn world(&self) -> &World {
@@ -243,10 +237,6 @@ impl<'w> Supervisor<'w> {
         });
     }
 
-    pub(crate) fn into_timeline_entries(self) -> TimelineEntries {
-        TimelineEntries(Arc::new(self.timeline_entries.into_inner()))
-    }
-
     pub fn wait(&self, delta_time: f32) {
         assert!(
             delta_time.is_sign_positive(),
@@ -256,69 +246,6 @@ impl<'w> Supervisor<'w> {
         *time = Arc::new(**time + delta_time);
     }
 }
-
-// TODO
-#[derive(Debug)]
-struct TimelineEntriesStamp {
-    timeline_entries: TimelineEntries,
-    time: f32,
-}
-
-impl iced::widget::shader::Primitive for TimelineEntriesStamp {
-    fn prepare(
-        &self,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
-        storage: &mut iced::widget::shader::Storage,
-        bounds: &iced::Rectangle,
-        viewport: &iced::widget::shader::Viewport,
-    ) {
-        self.timeline_entries
-            .prepare(self.time, device, queue, format, storage, bounds, viewport);
-    }
-
-    fn render(
-        &self,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        storage: &iced::widget::shader::Storage,
-        target: &iced::widget::shader::wgpu::TextureView,
-        clip_bounds: &iced::Rectangle<u32>,
-    ) {
-        self.timeline_entries
-            .render(self.time, encoder, storage, target, clip_bounds);
-    }
-}
-
-// struct PresentationEntry {
-//     time_interval: Range<f32>,
-//     presentation: Box<dyn Presentation>,
-// }
-
-// pub(crate) struct PresentationEntries(Vec<PresentationEntry>);
-
-// impl PresentationEntries {
-//     pub(crate) fn present(
-//         &mut self,
-//         time: f32,
-//         device: &wgpu::Device,
-//         queue: &wgpu::Queue,
-//         render_pass: &mut wgpu::RenderPass,
-//     ) -> anyhow::Result<()> {
-//         for presentation_entry in &mut self.0 {
-//             if presentation_entry.time_interval.contains(&time) {
-//                 presentation_entry.presentation.present(
-//                     time,
-//                     presentation_entry.time_interval.clone(),
-//                     device,
-//                     queue,
-//                     render_pass,
-//                 )?;
-//             }
-//         }
-//         Ok(())
-//     }
-// }
 
 pub mod steady {
     use std::ops::Range;
@@ -357,6 +284,8 @@ pub mod steady {
 
         fn render(
             &self,
+            _time_interval: Range<f32>,
+            _time: f32,
             encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
             presentation: &Self::Presentation,
             target: &iced::widget::shader::wgpu::TextureView,
@@ -374,18 +303,7 @@ pub mod dynamic {
     use super::super::super::mobjects::mobject::Mobject;
     use super::super::super::mobjects::mobject::MobjectPresentation;
     use super::super::rates::Rate;
-    // use super::Presentation;
     use super::Timeline;
-
-    // pub trait ContentPresentation: 'static + Send + Sync {
-    //     fn content_present(
-    //         &mut self,
-    //         time: f32,
-    //         device: &iced::widget::shader::wgpu::Device,
-    //         queue: &iced::widget::shader::wgpu::Queue,
-    //         render_pass: &mut iced::widget::shader::wgpu::RenderPass,
-    //     ) -> anyhow::Result<()>;
-    // }
 
     pub trait DynamicTimelineContent:
         'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
@@ -409,6 +327,7 @@ pub mod dynamic {
         );
         fn content_render(
             &self,
+            time: f32,
             encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
             presentation: &Self::ContentPresentation,
             target: &iced::widget::shader::wgpu::TextureView,
@@ -454,14 +373,6 @@ pub mod dynamic {
         ME: DynamicTimelineMetric,
         R: Rate,
     {
-        //fn prepare(&self, device: &wgpu::Device) -> anyhow::Result<Box<dyn Presentation>> {
-        //    Ok(Box::new(DynamicTimelinePresentation {
-        //        content_presentation: self.content.content_prepare(device)?,
-        //        metric: self.metric.clone(),
-        //        rate: self.rate.clone(),
-        //    }))
-        //}
-
         type Presentation = CO::ContentPresentation;
 
         fn presentation(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Presentation {
@@ -492,62 +403,22 @@ pub mod dynamic {
 
         fn render(
             &self,
+            time_interval: Range<f32>,
+            time: f32,
             encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
             presentation: &Self::Presentation,
             target: &iced::widget::shader::wgpu::TextureView,
             clip_bounds: &iced::Rectangle<u32>,
         ) {
-            // let mut render_pass =
-            //     encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
-            //         label: None,
-            //         color_attachments: &[Some(
-            //             iced::widget::shader::wgpu::RenderPassColorAttachment {
-            //                 view: target,
-            //                 resolve_target: None,
-            //                 ops: iced::widget::shader::wgpu::Operations {
-            //                     load: iced::widget::shader::wgpu::LoadOp::Load,
-            //                     store: iced::widget::shader::wgpu::StoreOp::Store,
-            //                 },
-            //             },
-            //         )],
-            //         depth_stencil_attachment: None,
-            //         timestamp_writes: None,
-            //         occlusion_query_set: None,
-            //     });
-            // render_pass.set_scissor_rect(
-            //     clip_bounds.x,
-            //     clip_bounds.y,
-            //     clip_bounds.width,
-            //     clip_bounds.height,
-            // );
-            self.content
-                .content_render(encoder, presentation, target, clip_bounds);
+            self.content.content_render(
+                self.rate.eval(self.metric.eval(time, time_interval)),
+                encoder,
+                presentation,
+                target,
+                clip_bounds,
+            );
         }
     }
-
-    // impl<CP, ME, R> Presentation for DynamicTimelinePresentation<CP, ME, R>
-    // where
-    //     CP: ContentPresentation,
-    //     ME: DynamicTimelineMetric,
-    //     R: Rate,
-    // {
-    //     fn present(
-    //         &mut self,
-    //         time: f32,
-    //         time_interval: Range<f32>,
-    //         device: &wgpu::Device,
-    //         queue: &wgpu::Queue,
-    //         render_pass: &mut wgpu::RenderPass,
-    //     ) -> anyhow::Result<()> {
-    //         self.content_presentation.content_present(
-    //             self.rate.eval(self.metric.eval(time, time_interval)),
-    //             device,
-    //             queue,
-    //             render_pass,
-    //         )?;
-    //         Ok(())
-    //     }
-    // }
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct IndeterminedTimelineContent<M> {
@@ -582,6 +453,7 @@ pub mod dynamic {
 
         fn content_render(
             &self,
+            _time: f32,
             encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
             presentation: &Self::ContentPresentation,
             target: &iced::widget::shader::wgpu::TextureView,
@@ -594,35 +466,12 @@ pub mod dynamic {
             self.mobject
         }
     }
-
-    // pub struct IndeterminedTimelineContentPresentation<MR> {
-    //     realization: MR,
-    // }
-
-    // impl<MR> ContentPresentation for IndeterminedTimelineContentPresentation<MR>
-    // where
-    //     MR: MobjectRealization,
-    // {
-    //     fn content_present(
-    //         &mut self,
-    //         _time: f32,
-    //         _device: &wgpu::Device,
-    //         _queue: &wgpu::Queue,
-    //         render_pass: &mut wgpu::RenderPass,
-    //     ) -> anyhow::Result<()> {
-    //         self.realization.render(render_pass)?;
-    //         Ok(())
-    //     }
-    // }
 }
 
 pub mod action {
-    use crate::mobjects::mobject::MobjectPresentation;
-
     use super::super::super::mobjects::mobject::Mobject;
-    // use super::super::super::mobjects::mobject::MobjectRealization;
+    use super::super::super::mobjects::mobject::MobjectPresentation;
     use super::super::act::MobjectDiff;
-    // use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -662,6 +511,7 @@ pub mod action {
 
         fn content_render(
             &self,
+            _time: f32,
             encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
             presentation: &Self::ContentPresentation,
             target: &iced::widget::shader::wgpu::TextureView,
@@ -675,58 +525,14 @@ pub mod action {
             self.diff.apply(&mut mobject, time);
             mobject
         }
-
-        // fn content_prepare(
-        //     &self,
-        //     device: &wgpu::Device,
-        // ) -> anyhow::Result<Self::ContentPresentation> {
-        //     Ok(ActionTimelineContentPresentation {
-        //         realization: self.mobject.realize(device)?,
-        //         reference_mobject: self.mobject.clone(),
-        //         diff: self.diff.clone(),
-        //     })
-        // }
     }
-
-    // pub struct ActionTimelineContentPresentation<MR, M, MD> {
-    //     realization: MR,
-    //     reference_mobject: M,
-    //     diff: MD,
-    // }
-
-    // impl<M, MD> ContentPresentation for ActionTimelineContentPresentation<M::MobjectPresentation, M, MD>
-    // where
-    //     M: Mobject,
-    //     MD: MobjectDiff<M>,
-    // {
-    //     fn content_present(
-    //         &mut self,
-    //         time: f32,
-    //         _device: &wgpu::Device,
-    //         queue: &wgpu::Queue,
-    //         render_pass: &mut wgpu::RenderPass,
-    //     ) -> anyhow::Result<()> {
-    //         self.diff.apply_presentation(
-    //             &mut self.realization,
-    //             &self.reference_mobject,
-    //             time,
-    //             queue,
-    //         )?;
-    //         self.realization.render(render_pass)?;
-    //         Ok(())
-    //     }
-    // }
 }
 
 pub mod continuous {
-    use crate::mobjects::mobject::MobjectPresentation;
-
     use super::super::super::mobjects::mobject::Mobject;
-    // use super::super::super::mobjects::mobject::MobjectRealization;
+    use super::super::super::mobjects::mobject::MobjectPresentation;
     use super::super::update::Update;
-    // use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
-    // use super::dynamic::TimelineContentCollapse;
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
     pub struct ContinuousTimelineContent<M, U> {
@@ -765,6 +571,7 @@ pub mod continuous {
 
         fn content_render(
             &self,
+            _time: f32,
             encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
             presentation: &Self::ContentPresentation,
             target: &iced::widget::shader::wgpu::TextureView,
@@ -773,62 +580,17 @@ pub mod continuous {
             presentation.render(encoder, target, clip_bounds);
         }
 
-        // fn content_prepare(
-        //     &self,
-        //     device: &wgpu::Device,
-        // ) -> anyhow::Result<Self::ContentPresentation> {
-        //     Ok(ContinuousTimelineContentPresentation {
-        //         realization: self.mobject.realize(device)?,
-        //         reference_mobject: self.mobject.clone(),
-        //         update: self.update.clone(),
-        //     })
-        // }
-
         fn content_collapse(self, time: f32) -> Self::CollapseOutput {
             let mut mobject = self.mobject;
             self.update.update(&mut mobject, time);
             mobject
         }
     }
-
-    // pub struct ContinuousTimelineContentPresentation<MR, M, U> {
-    //     realization: MR,
-    //     reference_mobject: M,
-    //     update: U,
-    // }
-
-    // impl<MR, M, U> ContentPresentation for ContinuousTimelineContentPresentation<MR, M, U>
-    // where
-    //     MR: MobjectRealization,
-    //     M: Mobject<Realization = MR>,
-    //     U: Update<M>,
-    // {
-    //     fn content_present(
-    //         &mut self,
-    //         time: f32,
-    //         device: &wgpu::Device,
-    //         queue: &wgpu::Queue,
-    //         render_pass: &mut wgpu::RenderPass,
-    //     ) -> anyhow::Result<()> {
-    //         self.update.update_presentation(
-    //             &mut self.realization,
-    //             &self.reference_mobject,
-    //             time,
-    //             device,
-    //             queue,
-    //         )?;
-    //         self.realization.render(render_pass)?;
-    //         Ok(())
-    //     }
-    // }
 }
 
 pub mod discrete {
     use super::super::super::mobjects::mobject::Mobject;
-    // use super::dynamic::ContentPresentation;
     use super::dynamic::DynamicTimelineContent;
-    // use super::dynamic::TimelineContentCollapse;
-    // use super::PresentationEntries;
     use super::TimelineEntries;
 
     #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -841,14 +603,14 @@ pub mod discrete {
     where
         M: Mobject,
     {
-        type ContentPresentation = (iced::widget::shader::Storage, f32); // ???
+        type ContentPresentation = iced::widget::shader::Storage;
         type CollapseOutput = M;
 
         fn content_presentation(
             &self,
             _device: &iced::widget::shader::wgpu::Device,
         ) -> Self::ContentPresentation {
-            (iced::widget::shader::Storage::default(), 0.0)
+            iced::widget::shader::Storage::default()
         }
 
         fn content_prepare(
@@ -866,58 +628,26 @@ pub mod discrete {
                 device,
                 queue,
                 format,
-                &mut presentation.0,
+                presentation,
                 bounds,
                 viewport,
             );
-            *&mut presentation.1 = time;
         }
 
         fn content_render(
             &self,
+            time: f32,
             encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
             presentation: &Self::ContentPresentation,
             target: &iced::widget::shader::wgpu::TextureView,
             clip_bounds: &iced::Rectangle<u32>,
         ) {
-            self.timeline_entries.render(
-                presentation.1,
-                encoder,
-                &presentation.0,
-                target,
-                clip_bounds,
-            );
+            self.timeline_entries
+                .render(time, encoder, presentation, target, clip_bounds);
         }
-
-        // fn content_prepare(
-        //     &self,
-        //     device: &wgpu::Device,
-        // ) -> anyhow::Result<Self::ContentPresentation> {
-        //     Ok(DiscreteTimelineContentPresentation {
-        //         presentation_entries: self.timeline_entries.prepare(device)?,
-        //     })
-        // }
 
         fn content_collapse(self, _time: f32) -> Self::CollapseOutput {
             self.mobject
         }
     }
-
-    // pub struct DiscreteTimelineContentPresentation {
-    //     presentation_entries: PresentationEntries,
-    // }
-
-    // impl ContentPresentation for DiscreteTimelineContentPresentation {
-    //     fn content_present(
-    //         &mut self,
-    //         time: f32,
-    //         device: &wgpu::Device,
-    //         queue: &wgpu::Queue,
-    //         render_pass: &mut wgpu::RenderPass,
-    //     ) -> anyhow::Result<()> {
-    //         self.presentation_entries
-    //             .present(time, device, queue, render_pass)?;
-    //         Ok(())
-    //     }
-    // }
 }

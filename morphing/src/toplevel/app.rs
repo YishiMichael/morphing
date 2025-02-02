@@ -1,394 +1,408 @@
-pub mod storyboard {
-    use std::io::BufRead;
-    use std::io::BufReader;
-    use std::io::Read;
-    use std::io::Write;
-    use std::path::PathBuf;
-    use std::process::Command;
-    use std::sync::Arc;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Read;
+use std::io::Write;
+use std::ops::Range;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::Arc;
 
-    // use super::super::super::timelines::timeline::PresentationEntries;
-    use super::super::super::timelines::timeline::TimelineEntries;
-    use super::super::scene::SceneTimelineCollection;
-    use super::super::settings::Settings;
-    use super::super::settings::VideoSettings;
+use super::super::timelines::timeline::TimelineEntries;
+use super::scene::SceneTimelineCollection;
+use super::settings::Settings;
+use super::settings::VideoSettings;
 
-    #[derive(Default)]
-    pub(crate) struct StoryboardManager {
-        storyboards: indexmap::IndexMap<PathBuf, StoryboardState>,
-    }
+#[derive(Default)]
+struct StoryboardManager {
+    storyboards: indexmap::IndexMap<PathBuf, StoryboardState>,
+}
 
-    impl StoryboardManager {
-        pub(crate) fn update(
-            &mut self,
-            message: StoryboardMessage,
-            settings: Arc<Settings>,
-        ) -> iced::Task<StoryboardMessage> {
-            match message {
-                StoryboardMessage::Add(path) => {
-                    let metadata = cargo_metadata::MetadataCommand::new().exec().unwrap();
-                    let path = metadata
-                        .packages
-                        .iter()
-                        .map(|package| package.manifest_path.parent().unwrap())
-                        .find(|crate_path| path.starts_with(crate_path))
-                        .unwrap()
-                        .to_path_buf()
-                        .into_std_path_buf();
-                    self.storyboards.entry(path).or_insert(StoryboardState {
-                        status: StoryboardStatus::BeforeCompile,
-                    });
+impl StoryboardManager {
+    fn update(
+        &mut self,
+        message: StoryboardMessage,
+        settings: Arc<Settings>,
+    ) -> iced::Task<StoryboardMessage> {
+        match message {
+            StoryboardMessage::Add(path) => {
+                let metadata = cargo_metadata::MetadataCommand::new().exec().unwrap();
+                let path = metadata
+                    .packages
+                    .iter()
+                    .map(|package| package.manifest_path.parent().unwrap())
+                    .find(|crate_path| path.starts_with(crate_path))
+                    .unwrap()
+                    .to_path_buf()
+                    .into_std_path_buf();
+                self.storyboards.entry(path).or_insert(StoryboardState {
+                    status: StoryboardStatus::BeforeCompile,
+                });
+                iced::Task::none()
+            }
+            StoryboardMessage::Remove(path) => {
+                self.storyboards.shift_remove(&path);
+                iced::Task::none()
+            }
+            StoryboardMessage::Compile(path) => {
+                if let Some(state) = self.storyboards.get_mut(&path) {
+                    *&mut state.status = StoryboardStatus::OnCompile;
+                    iced::Task::perform(
+                        Self::compile(path.clone(), settings.clone()),
+                        move |result| StoryboardMessage::CompileResult(path.clone(), result),
+                    )
+                } else {
                     iced::Task::none()
                 }
-                StoryboardMessage::Remove(path) => {
-                    self.storyboards.shift_remove(&path);
-                    iced::Task::none()
+            }
+            StoryboardMessage::CompileResult(path, compile_result) => {
+                if let Some(state) = self.storyboards.get_mut(&path) {
+                    *&mut state.status = match compile_result {
+                        Err(error) => StoryboardStatus::CompileError(error),
+                        Ok(scenes) => StoryboardStatus::AfterCompile(scenes),
+                    };
                 }
-                StoryboardMessage::Compile(path) => {
-                    if let Some(state) = self.storyboards.get_mut(&path) {
-                        *&mut state.status = StoryboardStatus::OnCompile;
-                        iced::Task::perform(
-                            Self::compile(path.clone(), settings.clone()),
-                            move |result| StoryboardMessage::CompileResult(path.clone(), result),
-                        )
-                    } else {
-                        iced::Task::none()
-                    }
-                }
-                StoryboardMessage::CompileResult(path, compile_result) => {
-                    if let Some(state) = self.storyboards.get_mut(&path) {
-                        *&mut state.status = match compile_result {
-                            Err(error) => StoryboardStatus::CompileError(error),
-                            Ok(scenes) => StoryboardStatus::AfterCompile(scenes),
-                        };
-                    }
-                    iced::Task::none()
-                }
-                // StoryboardMessage::Prepare(path, name) => {
-                //     if let Some(state) = self.storyboards.get_mut(&path)
-                //         && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
-                //         && let Some(state) = scenes.get_mut(&name)
-                //     {
-                //         *&mut state.status = SceneStatus::OnPrepare;
-                //         iced::Task::perform(
-                //             Self::prepare(state.timeline_entries.clone(), device.clone()),
-                //             move |result| {
-                //                 StoryboardMessage::PrepareResult(path.clone(), name.clone(), result)
-                //             },
-                //         )
-                //     } else {
-                //         iced::Task::none()
-                //     }
-                // }
-                // StoryboardMessage::PrepareResult(path, name, prepare_result) => {
-                //     if let Some(state) = self.storyboards.get_mut(&path)
-                //         && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
-                //         && let Some(state) = scenes.get_mut(&name)
-                //     {
-                //         *&mut state.status = match prepare_result {
-                //             Err(error) => SceneStatus::PrepareError(error),
-                //             Ok(presentation_entries) => {
-                //                 SceneStatus::AfterPrepare(presentation_entries)
-                //             }
-                //         };
-                //     }
-                //     iced::Task::none()
-                // }
-                // StoryboardMessage::PresentError(path, name, present_error) => {
-                //     if let Some(state) = self.storyboards.get_mut(&path)
-                //         && let StoryboardStatus::AfterCompile(scenes) = &mut state.status
-                //         && let Some(state) = scenes.get_mut(&name)
-                //     {
-                //         *&mut state.status = SceneStatus::PresentError(present_error);
-                //     }
-                //     iced::Task::none()
-                // }
+                iced::Task::none()
             }
         }
+    }
 
-        async fn compile(
-            path: PathBuf,
-            settings: Arc<Settings>,
-        ) -> anyhow::Result<indexmap::IndexMap<String, Arc<SceneState>>> {
-            let mut child = Command::new("cargo")
-                .arg("run")
-                .arg("--quiet")
-                .current_dir(path)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()?;
-            writeln!(
-                child.stdin.take().unwrap(),
-                "{}",
-                ron::ser::to_string(&settings.scene)?
-            )?;
-            if !child.wait()?.success() {
-                let mut stderr = BufReader::new(child.stderr.take().unwrap());
-                let mut buf = String::new();
-                stderr.read_to_string(&mut buf)?;
-                Err(anyhow::Error::msg(buf))?;
-            }
-            let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    async fn compile(
+        path: PathBuf,
+        settings: Arc<Settings>,
+    ) -> anyhow::Result<indexmap::IndexMap<String, Result<Arc<SceneState>, String>>> {
+        let mut child = Command::new("cargo")
+            .arg("run")
+            .arg("--quiet")
+            .current_dir(path)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
+        writeln!(
+            child.stdin.take().unwrap(),
+            "{}",
+            ron::ser::to_string(&settings.scene)?
+        )?;
+        if !child.wait()?.success() {
+            let mut stderr = BufReader::new(child.stderr.take().unwrap());
             let mut buf = String::new();
-            let mut scenes = indexmap::IndexMap::new();
-            while stdout.read_line(&mut buf)? != 0 {
-                let scene_timeline_collection: SceneTimelineCollection = ron::de::from_str(&buf)?;
-                scenes.insert(
-                    scene_timeline_collection.name.to_string(),
+            stderr.read_to_string(&mut buf)?;
+            Err(anyhow::Error::msg(buf))?;
+        }
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut buf = String::new();
+        let mut scenes = indexmap::IndexMap::new();
+        while stdout.read_line(&mut buf)? != 0 {
+            let (name, scene_timeline_collection): (
+                String,
+                Result<SceneTimelineCollection, String>,
+            ) = ron::de::from_str(&buf)?;
+            scenes.insert(
+                name,
+                scene_timeline_collection.map(|scene_timeline_collection| {
                     Arc::new(SceneState {
                         video_settings: scene_timeline_collection.video_settings,
                         duration: scene_timeline_collection.duration,
                         timeline_entries: scene_timeline_collection.timeline_entries,
-                        // status: SceneStatus::BeforePrepare,
-                    }),
-                );
-                buf.clear();
-            }
-            Ok(scenes)
+                    })
+                }),
+            );
+            buf.clear();
         }
-
-        // fn prepare(
-        //     timeline_entries: Arc<TimelineEntries>,
-        //     device: Arc<wgpu::Device>,
-        // ) -> anyhow::Result<PresentationEntries> {
-        //     timeline_entries.prepare(&device)
-        // }
+        Ok(scenes)
     }
 
-    #[derive(Debug)]
-    pub enum StoryboardMessage {
-        Add(PathBuf),
-        Remove(PathBuf),
-        Compile(PathBuf),
-        CompileResult(
-            PathBuf,
-            anyhow::Result<indexmap::IndexMap<String, Arc<SceneState>>>,
-        ),
-        // Prepare(PathBuf, String),
-        // PrepareResult(PathBuf, String, anyhow::Result<PresentationEntries>),
-        // PresentError(PathBuf, String, anyhow::Error),
-    }
-
-    struct StoryboardState {
-        status: StoryboardStatus,
-    }
-
-    enum StoryboardStatus {
-        BeforeCompile,
-        OnCompile,
-        AfterCompile(indexmap::IndexMap<String, Arc<SceneState>>),
-        CompileError(anyhow::Error),
-    }
-
-    #[derive(Debug)]
-    pub struct SceneState {
-        video_settings: VideoSettings,
-        duration: f32,
-        // status: SceneStatus,
-        timeline_entries: TimelineEntries,
-    }
-
-    // enum SceneStatus {
-    //     BeforePrepare,
-    //     OnPrepare,
-    //     AfterPrepare(PresentationEntries),
-    //     PrepareError(anyhow::Error),
-    //     PresentError(anyhow::Error),
+    // fn prepare(
+    //     timeline_entries: Arc<TimelineEntries>,
+    //     device: Arc<wgpu::Device>,
+    // ) -> anyhow::Result<PresentationEntries> {
+    //     timeline_entries.prepare(&device)
     // }
 }
 
-pub mod app {
-    use std::ops::Range;
-    use std::sync::Arc;
+#[derive(Debug)]
+pub enum StoryboardMessage {
+    Add(PathBuf),
+    Remove(PathBuf),
+    Compile(PathBuf),
+    CompileResult(
+        PathBuf,
+        anyhow::Result<indexmap::IndexMap<String, Result<Arc<SceneState>, String>>>,
+    ),
+    // Prepare(PathBuf, String),
+    // PrepareResult(PathBuf, String, anyhow::Result<PresentationEntries>),
+    // PresentError(PathBuf, String, anyhow::Error),
+}
 
-    use super::super::super::toplevel::settings::Settings;
-    use super::storyboard::SceneState;
-    use super::storyboard::StoryboardManager;
-    use super::storyboard::StoryboardMessage;
+struct StoryboardState {
+    status: StoryboardStatus,
+}
 
-    #[derive(Clone, Copy)]
-    enum ProgressSpeed {
-        Forward050,
-        Forward075,
-        Forward100,
-        Forward125,
-        Forward150,
-        Forward200,
-        Backward050,
-        Backward075,
-        Backward100,
-        Backward125,
-        Backward150,
-        Backward200,
-    }
+enum StoryboardStatus {
+    BeforeCompile,
+    OnCompile,
+    AfterCompile(indexmap::IndexMap<String, Result<Arc<SceneState>, String>>),
+    CompileError(anyhow::Error),
+}
 
-    impl ProgressSpeed {
-        fn value(&self) -> f32 {
-            match self {
-                Self::Forward050 => 0.50,
-                Self::Forward075 => 0.75,
-                Self::Forward100 => 1.00,
-                Self::Forward125 => 1.25,
-                Self::Forward150 => 1.50,
-                Self::Forward200 => 2.00,
-                Self::Backward050 => -0.50,
-                Self::Backward075 => -0.75,
-                Self::Backward100 => -1.00,
-                Self::Backward125 => -1.25,
-                Self::Backward150 => -1.50,
-                Self::Backward200 => -2.00,
-            }
-        }
+#[derive(Debug)]
+pub struct SceneState {
+    video_settings: VideoSettings,
+    duration: f32,
+    // status: SceneStatus,
+    timeline_entries: TimelineEntries,
+}
 
-        fn display_str(&self) -> &'static str {
-            match self {
-                Self::Forward050 => "0.5x",
-                Self::Forward075 => "0.75x",
-                Self::Forward100 => "speed",
-                Self::Forward125 => "1.25x",
-                Self::Forward150 => "1.5x",
-                Self::Forward200 => "2x",
-                Self::Backward050 => "-0.5x",
-                Self::Backward075 => "-0.75",
-                Self::Backward100 => "-1x",
-                Self::Backward125 => "-1.25",
-                Self::Backward150 => "-1.5x",
-                Self::Backward200 => "-2x",
-            }
-        }
-    }
+// enum SceneStatus {
+//     BeforePrepare,
+//     OnPrepare,
+//     AfterPrepare(PresentationEntries),
+//     PrepareError(anyhow::Error),
+//     PresentError(anyhow::Error),
+// }
 
-    struct Progress {
-        time_interval: Range<f32>,
-        // anchor_time: f32,
-        // instant: Instant,
-        time: f32,
-        base_speed: f32,
-        progress_speed: ProgressSpeed,
-        paused: bool,
-    }
+#[derive(Clone, Copy)]
+enum ProgressSpeed {
+    Forward050,
+    Forward075,
+    Forward100,
+    Forward125,
+    Forward150,
+    Forward200,
+    Backward050,
+    Backward075,
+    Backward100,
+    Backward125,
+    Backward150,
+    Backward200,
+}
 
-    impl Progress {
-        fn new(full_time: f32, base_speed: f32) -> Self {
-            Self {
-                time_interval: 0.0..full_time,
-                time: 0.0,
-                // instant: Instant::now(),
-                base_speed,
-                progress_speed: ProgressSpeed::Forward100,
-                paused: true,
-            }
-        }
-
-        fn progress_speed(&self) -> ProgressSpeed {
-            self.progress_speed
-        }
-
-        fn paused(&self) -> bool {
-            self.paused
-        }
-
-        // fn get_time(&mut self) -> f32 {
-        //     let mut time = self.anchor_time + self.instant.elapsed().as_secs_f32() * self.speed();
-        //     if !self.time_interval.contains(&time) {
-        //         time = time.clamp(self.time_interval.start, self.time_interval.end);
-        //         self.progress_speed = 0;
-        //         self.anchor_time = time;
-        //         self.instant = Instant::now();
-        //     }
-        //     time
-        // }
-
-        fn forward_time(&mut self, app_delta_time: f32) -> f32 {
-            if !self.paused {
-                self.time += app_delta_time * self.base_speed * self.progress_speed.value();
-                if !self.time_interval.contains(&self.time) {
-                    self.paused = true;
-                    self.time = self
-                        .time
-                        .clamp(self.time_interval.start, self.time_interval.end);
-                }
-            }
-            self.time
-        }
-
-        fn set_time(&mut self, time: f32) -> f32 {
-            self.time = time;
-            time
-        }
-
-        fn set_progress_speed(&mut self, progress_speed: ProgressSpeed) {
-            self.progress_speed = progress_speed;
-        }
-
-        fn play_or_pause(&mut self) {
-            self.paused = !self.paused;
+impl ProgressSpeed {
+    fn value(&self) -> f32 {
+        match self {
+            Self::Forward050 => 0.50,
+            Self::Forward075 => 0.75,
+            Self::Forward100 => 1.00,
+            Self::Forward125 => 1.25,
+            Self::Forward150 => 1.50,
+            Self::Forward200 => 2.00,
+            Self::Backward050 => -0.50,
+            Self::Backward075 => -0.75,
+            Self::Backward100 => -1.00,
+            Self::Backward125 => -1.25,
+            Self::Backward150 => -1.50,
+            Self::Backward200 => -2.00,
         }
     }
 
-    struct ActiveScene {
-        progress: Progress,
-        scene: Arc<SceneState>,
-    }
-
-    #[derive(Default)]
-    pub struct State {
-        settings: Arc<Settings>,
-        storyboard_manager: StoryboardManager,
-        active_scene: Option<ActiveScene>,
-    }
-
-    impl State {
-        pub fn update(&mut self, message: Message) -> iced::Task<Message> {
-            match message {
-                Message::StoryboardMessage(storyboard_message) => self
-                    .storyboard_manager
-                    .update(
-                        storyboard_message,
-                        self.settings.clone(),
-                    )
-                    .map(Message::StoryboardMessage),
-            }
-        }
-
-        pub fn view(&self) -> iced::Element<Message> {
-            iced::widget::Shader::new(self).into()
+    fn display_str(&self) -> &'static str {
+        match self {
+            Self::Forward050 => "0.5x",
+            Self::Forward075 => "0.75x",
+            Self::Forward100 => "speed",
+            Self::Forward125 => "1.25x",
+            Self::Forward150 => "1.5x",
+            Self::Forward200 => "2x",
+            Self::Backward050 => "-0.5x",
+            Self::Backward075 => "-0.75",
+            Self::Backward100 => "-1x",
+            Self::Backward125 => "-1.25",
+            Self::Backward150 => "-1.5x",
+            Self::Backward200 => "-2x",
         }
     }
+}
 
-    // impl iced::widget::shader::Program<Message> for State {
-    //     type State = ();
-    //     type Primitive = Primitive;
+struct Progress {
+    time_interval: Range<f32>,
+    // anchor_time: f32,
+    // instant: Instant,
+    time: f32,
+    base_speed: f32,
+    progress_speed: ProgressSpeed,
+    paused: bool,
+}
 
-    //     fn update(
-    //         &self,
-    //         _state: &mut Self::State,
-    //         _event: iced::widget::shader::Event,
-    //         _bounds: iced::Rectangle,
-    //         _cursor: mouse::Cursor,
-    //         _shell: &mut Shell<'_, Message>,
-    //     ) -> (event::Status, Option<Message>) {
-    //         if self.active_scene.is_some_and(|active_scene| !active_scene.progress.paused()) {
-    //             shell.request_redraw(RedrawRequest::NextFrame);
-    //         }
-    //         (Status::Ignored, None)
+impl Progress {
+    fn new(full_time: f32, base_speed: f32) -> Self {
+        Self {
+            time_interval: 0.0..full_time,
+            time: 0.0,
+            // instant: Instant::now(),
+            base_speed,
+            progress_speed: ProgressSpeed::Forward100,
+            paused: true,
+        }
+    }
+
+    fn progress_speed(&self) -> ProgressSpeed {
+        self.progress_speed
+    }
+
+    fn paused(&self) -> bool {
+        self.paused
+    }
+
+    // fn get_time(&mut self) -> f32 {
+    //     let mut time = self.anchor_time + self.instant.elapsed().as_secs_f32() * self.speed();
+    //     if !self.time_interval.contains(&time) {
+    //         time = time.clamp(self.time_interval.start, self.time_interval.end);
+    //         self.progress_speed = 0;
+    //         self.anchor_time = time;
+    //         self.instant = Instant::now();
     //     }
-
-    //     fn draw(
-    //         &self,
-    //         state: &Self::State,
-    //         cursor: mouse::Cursor,
-    //         bounds: iced::Rectangle,
-    //     ) -> Self::Primitive {
-    //         todo!()
-    //     }
+    //     time
     // }
 
-    #[derive(Debug)]
-    pub enum Message {
-        StoryboardMessage(StoryboardMessage),
+    fn forward_time(&mut self, app_delta_time: f32) -> f32 {
+        if !self.paused {
+            self.time += app_delta_time * self.base_speed * self.progress_speed.value();
+            if !self.time_interval.contains(&self.time) {
+                self.paused = true;
+                self.time = self
+                    .time
+                    .clamp(self.time_interval.start, self.time_interval.end);
+            }
+        }
+        self.time
     }
+
+    fn set_time(&mut self, time: f32) -> f32 {
+        self.time = time;
+        time
+    }
+
+    fn set_progress_speed(&mut self, progress_speed: ProgressSpeed) {
+        self.progress_speed = progress_speed;
+    }
+
+    fn play_or_pause(&mut self) {
+        self.paused = !self.paused;
+    }
+}
+
+impl Default for Progress {
+    fn default() -> Self {
+        Self::new(0.0, 1.0)
+    }
+}
+
+#[derive(Debug)]
+pub struct Primitive(Option<(TimelineEntries, f32)>);
+
+impl iced::widget::shader::Primitive for Primitive {
+    fn prepare(
+        &self,
+        device: &iced::widget::shader::wgpu::Device,
+        queue: &iced::widget::shader::wgpu::Queue,
+        format: iced::widget::shader::wgpu::TextureFormat,
+        storage: &mut iced::widget::shader::Storage,
+        bounds: &iced::Rectangle,
+        viewport: &iced::widget::shader::Viewport,
+    ) {
+        if let Some((timeline_entries, time)) = &self.0 {
+            timeline_entries.prepare(*time, device, queue, format, storage, bounds, viewport);
+        }
+    }
+
+    fn render(
+        &self,
+        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
+        storage: &iced::widget::shader::Storage,
+        target: &iced::widget::shader::wgpu::TextureView,
+        clip_bounds: &iced::Rectangle<u32>,
+    ) {
+        {
+            let mut render_pass =
+                encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[Some(
+                        iced::widget::shader::wgpu::RenderPassColorAttachment {
+                            view: target,
+                            resolve_target: None,
+                            ops: iced::widget::shader::wgpu::Operations {
+                                load: iced::widget::shader::wgpu::LoadOp::Clear(
+                                    iced::widget::shader::wgpu::Color::TRANSPARENT,
+                                ),
+                                store: iced::widget::shader::wgpu::StoreOp::Store,
+                            },
+                        },
+                    )],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            render_pass.set_scissor_rect(
+                clip_bounds.x,
+                clip_bounds.y,
+                clip_bounds.width,
+                clip_bounds.height,
+            );
+        }
+        if let Some((timeline_entries, time)) = &self.0 {
+            timeline_entries.render(*time, encoder, storage, target, clip_bounds);
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct State {
+    settings: Arc<Settings>,
+    storyboard_manager: StoryboardManager,
+    progress: Progress,
+    active_scene: Option<Arc<SceneState>>,
+}
+
+impl State {
+    pub fn update(&mut self, message: Message) -> iced::Task<Message> {
+        match message {
+            Message::StoryboardMessage(storyboard_message) => self
+                .storyboard_manager
+                .update(storyboard_message, self.settings.clone())
+                .map(Message::StoryboardMessage),
+        }
+    }
+
+    pub fn view(&self) -> iced::Element<Message> {
+        iced::widget::Shader::new(self).into()
+    }
+}
+
+impl iced::widget::shader::Program<Message> for State {
+    type State = ();
+    type Primitive = Primitive;
+
+    fn update(
+        &self,
+        _state: &mut Self::State,
+        _event: iced::widget::shader::Event,
+        _bounds: iced::Rectangle,
+        _cursor: iced::mouse::Cursor,
+        shell: &mut iced::advanced::Shell<'_, Message>,
+    ) -> (iced::event::Status, Option<Message>) {
+        if self.active_scene.is_some() && !self.progress.paused() {
+            shell.request_redraw(iced::window::RedrawRequest::NextFrame);
+        }
+        (iced::event::Status::Ignored, None)
+    }
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        _cursor: iced::mouse::Cursor,
+        _bounds: iced::Rectangle,
+    ) -> Self::Primitive {
+        Primitive(
+            self.active_scene
+                .as_ref()
+                .map(|active_scene| (active_scene.timeline_entries.clone(), self.progress.time)),
+        )
+    }
+}
+
+#[derive(Debug)]
+pub enum Message {
+    StoryboardMessage(StoryboardMessage),
 }
 
 // enum Message {
