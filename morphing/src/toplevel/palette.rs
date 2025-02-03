@@ -1,13 +1,13 @@
 macro_rules! c {
     ($value:tt as $name:ident) => {
-        pub const $name: ::palette::Srgb<u8> = ::palette::Srgb::new(
-            ($value as u32 >> 16 & 0xFF) as u8,
-            ($value as u32 >> 8 & 0xFF) as u8,
-            ($value as u32 & 0xFF) as u8,
+        pub const $name: ::palette::Srgb<f32> = ::palette::Srgb::new(
+            ($value as u32 >> 16 & 0xFF) as f32 / 0xFF as f32,
+            ($value as u32 >> 8 & 0xFF) as f32 / 0xFF as f32,
+            ($value as u32 & 0xFF) as f32 / 0xFF as f32,
         );
     };
     (use $alias:ident as $name:ident) => {
-        pub const $name: ::palette::Srgb<u8> = $alias;
+        pub const $name: ::palette::Srgb<f32> = $alias;
     };
 }
 

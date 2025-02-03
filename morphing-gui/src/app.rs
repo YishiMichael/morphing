@@ -1,94 +1,149 @@
+
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Write;
 use std::ops::Range;
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
 use morphing::timelines::timeline::TimelineEntries;
 use morphing::toplevel::scene::SceneData;
+use morphing::toplevel::scene::SceneResult;
 use morphing::toplevel::settings::SceneSettings;
+use morphing::toplevel::settings::VideoSettings;
+
+const PROGRESS_SPEED_LEVEL_RANGE: RangeInclusive<i32> = -5..=5;
+const PLAY_PAUSE_KEY: iced::keyboard::Key = iced::keyboard::Key::Named(iced::keyboard::key::Named::Space);
+const FAST_FORWARD_KEY: iced::keyboard::Key = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight);
+const FAST_BACKWARD_KEY: iced::keyboard::Key = iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft);
+const FAST_SKIP_SECONDS: f32 = 5.0;
+
+// #[derive(Clone, Debug)]
+// struct PlayerSettings {
+//     play_pause_key: iced::keyboard::Key,
+//     fast_forward_key: iced::keyboard::Key,
+//     fast_backward: iced::keyboard::Key,
+//     fast_skip_seconds: f32,
+// }
+
+// impl Default for PlayerSettings {
+//     fn default() -> Self {
+//         Self {
+//             play_pause_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Space),
+//             fast_forward_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight),
+//             fast_backward: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft),
+//             fast_skip_seconds: 5.0,
+//         }
+//     }
+// }
+
+#[derive(Debug, Default)]
+pub(crate) struct AppState {
+    projects: indexmap::IndexMap<PathBuf, ProjectState>,
+    active_path: Option<PathBuf>,
+    scene_settings: Arc<SceneSettings>,
+    // player_settings: PlayerSettings,
+    // progress: Progress,
+    // active_scene: Option<SceneData>,
+}
+
+#[derive(Debug)]
+struct ProjectState {
+    project_status: ProjectStatus,
+    logger: Logger,
+}
+
+#[derive(Debug)]
+enum ProjectStatus {
+    BeforeCompile,
+    OnCompile,
+    AfterCompile {
+        scenes: indexmap::IndexMap<String, SceneState>,
+        active_name: Option<String>,
+    },
+    CompileError(anyhow::Error),
+}
+
+#[derive(Debug)]
+struct SceneState {
+    scene_status: SceneStatus,
+    logger: Logger,
+}
 
 #[derive(Clone, Debug)]
-struct PlayerSettings {
-    play_pause_key: iced::keyboard::Key,
-    fast_forward_key: iced::keyboard::Key,
-    fast_backward: iced::keyboard::Key,
-    fast_skip_seconds: f32,
+enum SceneStatus {
+    Success {
+        progress: Progress,
+        timeline_entries: TimelineEntries,
+        video_settings: VideoSettings,
+    },
+    Error,
+    Skipped,
 }
 
-impl Default for PlayerSettings {
-    fn default() -> Self {
-        Self {
-            play_pause_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Space),
-            fast_forward_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight),
-            fast_backward: iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft),
-            fast_skip_seconds: 5.0,
-        }
+#[derive(Clone, Debug)]
+struct Progress {
+    time_interval: Range<f32>,
+    // anchor_time: f32,
+    // instant: Instant,
+    time: f32,
+    // base_speed: f32,
+    progress_speed_level: i32,
+    progress_direction: ProgressDirection,
+    paused: bool,
+}
+
+#[derive(Clone, Debug)]
+enum ProgressDirection {
+    Forward,
+    Backward,
+}
+
+#[derive(Debug, Default)]
+struct Logger(Vec<(LoggingCategory, String)>);
+
+#[derive(Debug)]
+enum LoggingCategory {
+    Stdin,
+    Stdout,
+    Stderr,
+}
+
+#[derive(Debug)]
+pub enum AppMessage {
+    AddProject(PathBuf),
+    RemoveProject(PathBuf),
+    CompileProject(PathBuf),
+    CompileProjectResult(PathBuf, anyhow::Result<Vec<SceneData>>),
+    // Prepare(PathBuf, String),
+    // PrepareResult(PathBuf, String, anyhow::Result<PresentationEntries>),
+    // PresentError(PathBuf, String, anyhow::Error),
+}
+
+impl AppState {
+    fn active_project_state(&self) -> Option<&ProjectState> {
+        self.active_path.as_ref().map(|active_path| self.projects.get(active_path)).flatten()
     }
-}
 
-#[derive(Default)]
-struct ProjectManager {
-    projects: indexmap::IndexMap<PathBuf, ProjectData>,
-    active: Option<PathBuf>,
-}
+    fn active_project_state_mut(&mut self) -> Option<&mut ProjectState> {
+        self.active_path.as_mut().map(|active_path| self.projects.get_mut(active_path)).flatten()
+    }
 
-impl ProjectManager {
-    fn update(
-        &mut self,
-        message: ProjectMessage,
-        scene_settings: Arc<SceneSettings>,
-    ) -> iced::Task<ProjectMessage> {
-        match message {
-            ProjectMessage::Add(path) => {
-                let metadata = cargo_metadata::MetadataCommand::new().exec().unwrap();
-                let path = metadata
-                    .packages
-                    .iter()
-                    .map(|package| package.manifest_path.parent().unwrap())
-                    .find(|crate_path| path.starts_with(crate_path))
-                    .unwrap()
-                    .to_path_buf()
-                    .into_std_path_buf();
-                self.projects.entry(path).or_insert(ProjectData {
-                    status: ProjectStatus::BeforeCompile,
-                });
-                iced::Task::none()
-            }
-            ProjectMessage::Remove(path) => {
-                self.projects.shift_remove(&path);
-                iced::Task::none()
-            }
-            ProjectMessage::Compile(path) => {
-                if let Some(state) = self.projects.get_mut(&path) {
-                    *&mut state.status = ProjectStatus::OnCompile;
-                    iced::Task::perform(
-                        Self::compile(path.clone(), scene_settings.clone()),
-                        move |result| ProjectMessage::CompileResult(path.clone(), result),
-                    )
-                } else {
-                    iced::Task::none()
-                }
-            }
-            ProjectMessage::CompileResult(path, compile_result) => {
-                if let Some(state) = self.projects.get_mut(&path) {
-                    *&mut state.status = match compile_result {
-                        Err(error) => ProjectStatus::CompileError(error),
-                        Ok(scenes) => ProjectStatus::AfterCompile {scenes, active: None},
-                    };
-                }
-                iced::Task::none()
-            }
-        }
+    fn active_scene_state(&self) -> Option<&SceneState> {
+        self.active_project_state().map(|project_state| project_state.active_scene_state()).flatten()
+    }
+
+    fn active_scene_state_mut(&mut self) -> Option<&mut SceneState> {
+        self.active_project_state_mut().map(|project_state| project_state.active_scene_state_mut()).flatten()
     }
 
     async fn compile(
         path: PathBuf,
         scene_settings: Arc<SceneSettings>,
-    ) -> anyhow::Result<indexmap::IndexMap<String, SceneData>> {
+    ) -> anyhow::Result<Vec<SceneData>> {
         let mut child = Command::new("cargo")
             .arg("run")
             .arg("--quiet")
@@ -108,15 +163,106 @@ impl ProjectManager {
             stderr.read_to_string(&mut buf)?;
             Err(anyhow::Error::msg(buf))?;
         }
-        let mut stdout = BufReader::new(child.stdout.take().unwrap());
-        let mut buf = String::new();
-        let mut scenes = indexmap::IndexMap::new();
-        while stdout.read_line(&mut buf)? != 0 {
-            let (name, scene_data): (String, SceneData) = ron::de::from_str(&buf)?;
-            scenes.insert(name, scene_data);
-            buf.clear();
+        let mut scenes = Vec::new();
+        for line in BufReader::new(child.stdout.take().unwrap()).lines() {
+            let scene_data: SceneData = ron::de::from_str(&line?)?;
+            scenes.push(scene_data);
         }
         Ok(scenes)
+        // let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        // let mut buf = String::new();
+        // let mut scenes = Vec::new();
+
+        // while stdout.read_line(&mut buf)? != 0 {
+        //     let (name, scene_data): (String, SceneData) = ron::de::from_str(&buf)?;
+        //     scenes.insert(name, scene_data);
+        //     buf.clear();
+        // }
+        // Ok(scenes)
+    }
+
+    pub(crate) fn update(&mut self, message: AppMessage) -> iced::Task<AppMessage> {
+        match message {
+            AppMessage::AddProject(path) => {
+                let metadata = cargo_metadata::MetadataCommand::new().exec().unwrap();
+                let path = metadata
+                    .packages
+                    .iter()
+                    .map(|package| package.manifest_path.parent().unwrap())
+                    .find(|crate_path| path.starts_with(crate_path))
+                    .unwrap()
+                    .to_path_buf()
+                    .into_std_path_buf();
+                self.projects.entry(path).or_insert(ProjectState {
+                    project_status: ProjectStatus::BeforeCompile,
+                    logger: Logger::default(),
+                });
+                iced::Task::none()
+            }
+            AppMessage::RemoveProject(path) => {
+                self.projects.shift_remove(&path);
+                iced::Task::none()
+            }
+            AppMessage::CompileProject(path) => {
+                if let Some(project_state) = self.projects.get_mut(&path) {
+                    *&mut project_state.project_status = ProjectStatus::OnCompile;
+                    iced::Task::perform(
+                        Self::compile(path.clone(), self.scene_settings.clone()),
+                        move |result| AppMessage::CompileProjectResult(path.clone(), result),
+                    )
+                } else {
+                    iced::Task::none()
+                }
+            }
+            AppMessage::CompileProjectResult(path, compile_result) => {
+                if let Some(project_state) = self.projects.get_mut(&path) {
+                    *&mut project_state.project_status = match compile_result {
+                        Err(error) => ProjectStatus::CompileError(error),
+                        Ok(scenes) => ProjectStatus::AfterCompile {
+                            scenes: scenes
+                                .into_iter()
+                                .map(|scene_data| {
+                                    (
+                                        scene_data.name,
+                                        SceneState {
+                                            scene_status: match scene_data.result {
+                                                SceneResult::Success {
+                                                    time,
+                                                    timeline_entries,
+                                                    video_settings,
+                                                } => SceneStatus::Success {
+                                                    progress: Progress::new(time),
+                                                    timeline_entries,
+                                                    video_settings,
+                                                },
+                                                SceneResult::Error => SceneStatus::Error,
+                                                SceneResult::Skipped => SceneStatus::Skipped,
+                                            },
+                                            logger: Logger(
+                                                scene_data
+                                                    .stdout_lines
+                                                    .into_iter()
+                                                    .map(|line| (LoggingCategory::Stdout, line))
+                                                    .chain(scene_data.stderr_lines.into_iter().map(
+                                                        |line| (LoggingCategory::Stderr, line),
+                                                    ))
+                                                    .collect(),
+                                            ),
+                                        },
+                                    )
+                                })
+                                .collect(),
+                            active_name: None,
+                        },
+                    };
+                }
+                iced::Task::none()
+            }
+        }
+    }
+
+    pub(crate) fn view(&self) -> iced::Element<AppMessage> {
+        iced::widget::Shader::new(self).into()
     }
 
     // fn prepare(
@@ -127,32 +273,22 @@ impl ProjectManager {
     // }
 }
 
-#[derive(Debug)]
-pub enum ProjectMessage {
-    Add(PathBuf),
-    Remove(PathBuf),
-    Compile(PathBuf),
-    CompileResult(
-        PathBuf,
-        anyhow::Result<indexmap::IndexMap<String, SceneData>>,
-    ),
-    // Prepare(PathBuf, String),
-    // PrepareResult(PathBuf, String, anyhow::Result<PresentationEntries>),
-    // PresentError(PathBuf, String, anyhow::Error),
-}
+impl ProjectState {
+    fn active_scene_state(&self) -> Option<&SceneState> {
+        if let ProjectStatus::AfterCompile { scenes, active_name } = &self.project_status {
+            active_name.as_ref().map(|active_path| scenes.get(active_path)).flatten()
+        } else {
+            None
+        }
+    }
 
-struct ProjectData {
-    status: ProjectStatus,
-}
-
-enum ProjectStatus {
-    BeforeCompile,
-    OnCompile,
-    AfterCompile {
-        scenes: indexmap::IndexMap<String, SceneData>,
-        active: Option<String>
-    },
-    CompileError(anyhow::Error),
+    fn active_scene_state_mut(&mut self) -> Option<&mut SceneState> {
+        if let ProjectStatus::AfterCompile { scenes, active_name } = &mut self.project_status {
+            active_name.as_mut().map(|active_path| scenes.get_mut(active_path)).flatten()
+        } else {
+            None
+        }
+    }
 }
 
 // #[derive(Debug)]
@@ -173,68 +309,6 @@ enum ProjectStatus {
 //     PresentError(anyhow::Error),
 // }
 
-#[derive(Clone, Copy)]
-enum ProgressSpeed {
-    Forward050,
-    Forward075,
-    Forward100,
-    Forward125,
-    Forward150,
-    Forward200,
-    Backward050,
-    Backward075,
-    Backward100,
-    Backward125,
-    Backward150,
-    Backward200,
-}
-
-impl ProgressSpeed {
-    fn value(&self) -> f32 {
-        match self {
-            Self::Forward050 => 0.50,
-            Self::Forward075 => 0.75,
-            Self::Forward100 => 1.00,
-            Self::Forward125 => 1.25,
-            Self::Forward150 => 1.50,
-            Self::Forward200 => 2.00,
-            Self::Backward050 => -0.50,
-            Self::Backward075 => -0.75,
-            Self::Backward100 => -1.00,
-            Self::Backward125 => -1.25,
-            Self::Backward150 => -1.50,
-            Self::Backward200 => -2.00,
-        }
-    }
-
-    fn display_str(&self) -> &'static str {
-        match self {
-            Self::Forward050 => "0.5x",
-            Self::Forward075 => "0.75x",
-            Self::Forward100 => "speed",
-            Self::Forward125 => "1.25x",
-            Self::Forward150 => "1.5x",
-            Self::Forward200 => "2x",
-            Self::Backward050 => "-0.5x",
-            Self::Backward075 => "-0.75",
-            Self::Backward100 => "-1x",
-            Self::Backward125 => "-1.25",
-            Self::Backward150 => "-1.5x",
-            Self::Backward200 => "-2x",
-        }
-    }
-}
-
-struct Progress {
-    time_interval: Range<f32>,
-    // anchor_time: f32,
-    // instant: Instant,
-    time: f32,
-    // base_speed: f32,
-    progress_speed: ProgressSpeed,
-    paused: bool,
-}
-
 impl Progress {
     fn new(full_time: f32) -> Self {
         Self {
@@ -242,14 +316,15 @@ impl Progress {
             time: 0.0,
             // instant: Instant::now(),
             // base_speed,
-            progress_speed: ProgressSpeed::Forward100,
+            progress_speed_level: 0,
+            progress_direction: ProgressDirection::Forward,
             paused: true,
         }
     }
 
-    fn progress_speed(&self) -> ProgressSpeed {
-        self.progress_speed
-    }
+    // fn progress_speed(&self) -> ProgressSpeed {
+    //     self.progress_speed
+    // }
 
     fn paused(&self) -> bool {
         self.paused
@@ -266,9 +341,12 @@ impl Progress {
     //     time
     // }
 
-    fn forward_time(&mut self, app_delta_time: f32) -> f32 {
+    fn advance_time(&mut self, app_delta_time: f32) -> f32 {
         if !self.paused {
-            self.time += app_delta_time * self.progress_speed.value();
+            self.time += app_delta_time * match self.progress_direction {
+                ProgressDirection::Forward => 1.0,
+                ProgressDirection::Backward => -1.0,
+            } * 2.0f32.powi(self.progress_speed_level);
             if !self.time_interval.contains(&self.time) {
                 self.paused = true;
                 self.time = self
@@ -284,8 +362,8 @@ impl Progress {
         time
     }
 
-    fn set_progress_speed(&mut self, progress_speed: ProgressSpeed) {
-        self.progress_speed = progress_speed;
+    fn set_progress_speed_level(&mut self, progress_speed_level: i32) {
+        self.progress_speed_level = progress_speed_level;
     }
 
     fn play_or_pause(&mut self) {
@@ -300,7 +378,7 @@ impl Progress {
 // }
 
 #[derive(Debug)]
-pub(crate) struct Primitive(Option<(TimelineEntries, f32)>);
+pub struct Primitive(Option<SceneStatus>);
 
 impl iced::widget::shader::Primitive for Primitive {
     fn prepare(
@@ -312,8 +390,8 @@ impl iced::widget::shader::Primitive for Primitive {
         bounds: &iced::Rectangle,
         viewport: &iced::widget::shader::Viewport,
     ) {
-        if let Some((timeline_entries, time)) = &self.0 {
-            timeline_entries.prepare(*time, device, queue, format, storage, bounds, viewport);
+        if let Some(SceneStatus::Success { progress, timeline_entries, .. }) = self.0.as_ref() {
+            timeline_entries.prepare(progress.time, device, queue, format, storage, bounds, viewport);
         }
     }
 
@@ -324,64 +402,44 @@ impl iced::widget::shader::Primitive for Primitive {
         target: &iced::widget::shader::wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
-        {
-            let mut render_pass =
-                encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[Some(
-                        iced::widget::shader::wgpu::RenderPassColorAttachment {
-                            view: target,
-                            resolve_target: None,
-                            ops: iced::widget::shader::wgpu::Operations {
-                                load: iced::widget::shader::wgpu::LoadOp::Clear(
-                                    iced::widget::shader::wgpu::Color::TRANSPARENT,
-                                ),
-                                store: iced::widget::shader::wgpu::StoreOp::Store,
+        if let Some(SceneStatus::Success { progress, timeline_entries, video_settings }) = self.0.as_ref() {
+            {
+                let background_color = iced::widget::shader::wgpu::Color {
+                    r: video_settings.background_color.red as f64,
+                    g: video_settings.background_color.green as f64,
+                    b: video_settings.background_color.blue as f64,
+                    a: video_settings.background_color.alpha as f64,
+                };
+                let mut render_pass =
+                    encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[Some(
+                            iced::widget::shader::wgpu::RenderPassColorAttachment {
+                                view: target,
+                                resolve_target: None,
+                                ops: iced::widget::shader::wgpu::Operations {
+                                    load: iced::widget::shader::wgpu::LoadOp::Clear(background_color),
+                                    store: iced::widget::shader::wgpu::StoreOp::Store,
+                                },
                             },
-                        },
-                    )],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-            render_pass.set_scissor_rect(
-                clip_bounds.x,
-                clip_bounds.y,
-                clip_bounds.width,
-                clip_bounds.height,
-            );
-        }
-        if let Some((timeline_entries, time)) = &self.0 {
-            timeline_entries.render(*time, encoder, storage, target, clip_bounds);
+                        )],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+                render_pass.set_scissor_rect(
+                    clip_bounds.x,
+                    clip_bounds.y,
+                    clip_bounds.width,
+                    clip_bounds.height,
+                );
+            }
+            timeline_entries.render(progress.time, encoder, storage, target, clip_bounds);
         }
     }
 }
 
-#[derive(Default)]
-pub(crate) struct State {
-    scene_settings: Arc<SceneSettings>,
-    player_settings: PlayerSettings,
-    project_manager: ProjectManager,
-    // progress: Progress,
-    // active_scene: Option<SceneData>,
-}
-
-impl State {
-    pub(crate) fn update(&mut self, message: Message) -> iced::Task<Message> {
-        match message {
-            Message::ProjectMessage(project_message) => self
-                .project_manager
-                .update(project_message, self.scene_settings.clone())
-                .map(Message::ProjectMessage),
-        }
-    }
-
-    pub(crate) fn view(&self) -> iced::Element<Message> {
-        iced::widget::Shader::new(self).into()
-    }
-}
-
-impl iced::widget::shader::Program<Message> for State {
+impl iced::widget::shader::Program<AppMessage> for AppState {
     type State = ();
     type Primitive = Primitive;
 
@@ -391,9 +449,15 @@ impl iced::widget::shader::Program<Message> for State {
         _event: iced::widget::shader::Event,
         _bounds: iced::Rectangle,
         _cursor: iced::mouse::Cursor,
-        shell: &mut iced::advanced::Shell<'_, Message>,
-    ) -> (iced::event::Status, Option<Message>) {
-        if self.project_manager.active.is_some() && !self.progress.paused() {
+        shell: &mut iced::advanced::Shell<'_, AppMessage>,
+    ) -> (iced::event::Status, Option<AppMessage>) {
+        if self.active_scene_state().is_some_and(|scene_state| {
+            if let SceneStatus::Success { progress, .. } = &scene_state.scene_status {
+                !progress.paused()
+            } else {
+                false
+            }
+        }) {
             shell.request_redraw(iced::window::RedrawRequest::NextFrame);
         }
         (iced::event::Status::Ignored, None)
@@ -405,17 +469,8 @@ impl iced::widget::shader::Program<Message> for State {
         _cursor: iced::mouse::Cursor,
         _bounds: iced::Rectangle,
     ) -> Self::Primitive {
-        Primitive(
-            self.active_scene
-                .as_ref()
-                .map(|active_scene| (active_scene.timeline_entries.clone(), self.progress.time)),
-        )
+        Primitive(self.active_scene_state().map(|scene_state| scene_state.scene_status.clone()))
     }
-}
-
-#[derive(Debug)]
-pub(crate) enum Message {
-    ProjectMessage(ProjectMessage),
 }
 
 // enum Message {

@@ -1,7 +1,7 @@
 mod app;
 
-use app::State;
+use app::AppState;
 
 fn main() -> iced::Result {
-    iced::application("Morphing Viewer", State::update, State::view).run()
+    iced::application("Morphing Viewer", AppState::update, AppState::view).run()
 }

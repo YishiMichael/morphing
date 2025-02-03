@@ -1,4 +1,5 @@
-use std::io::Read;
+use std::io::BufRead;
+use std::io::BufReader;
 
 pub use inventory;
 pub use morphing_macros::scene;
@@ -19,52 +20,60 @@ inventory::collect!(SceneModule);
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct SceneData {
-    pub timeline_collection: Option<SceneTimelineCollection>,
-    pub stdout_bytes: Vec<u8>,
-    pub stderr_bytes: Vec<u8>,
+    pub name: String,
+    pub result: SceneResult,
+    pub stdout_lines: Vec<String>,
+    pub stderr_lines: Vec<String>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct SceneTimelineCollection {
-    pub time: f32,
-    pub timeline_entries: TimelineEntries,
-    pub video_settings: VideoSettings,
+pub enum SceneResult {
+    Success {
+        time: f32,
+        timeline_entries: TimelineEntries,
+        video_settings: VideoSettings,
+    },
+    Error,
+    Skipped,
 }
 
-pub fn export_scenes() {
+pub fn export_scenes(regex: Option<&lazy_regex::Regex>) {
     let mut buf = String::new();
     std::io::stdin().read_line(&mut buf).unwrap();
     let scene_settings: SceneSettings = ron::de::from_str(&buf).unwrap();
-    let mut shh_stdout = shh::stdout().unwrap();
-    let mut shh_stderr = shh::stderr().unwrap();
+
     for scene_module in inventory::iter::<SceneModule>() {
+        let shh_stdout = BufReader::new(shh::stdout().unwrap());
+        let shh_stderr = BufReader::new(shh::stderr().unwrap());
         let name = scene_module.name.to_string();
-        let timeline_collection = std::panic::catch_unwind(|| {
-            let scene_settings = if let Some(override_settings) = scene_module.override_settings {
-                override_settings(scene_settings.clone())
-            } else {
-                scene_settings.clone()
-            };
-            Supervisor::visit(
-                &World::new(scene_settings.style, scene_settings.typst),
-                scene_module.scene_fn,
-                |time, timeline_entries, _| SceneTimelineCollection {
-                    time,
-                    timeline_entries,
-                    video_settings: scene_settings.video,
-                },
-            )
-        })
-        .ok();
-        let mut stdout_bytes = Vec::new();
-        shh_stdout.read_to_end(&mut stdout_bytes).unwrap();
-        let mut stderr_bytes = Vec::new();
-        shh_stderr.read_to_end(&mut stderr_bytes).unwrap();
-        let scene_data = SceneData {
-            timeline_collection,
-            stdout_bytes,
-            stderr_bytes,
+        let result = if regex.is_none_or(|regex| regex.is_match(&name)) {
+            std::panic::catch_unwind(|| {
+                let scene_settings = if let Some(override_settings) = scene_module.override_settings
+                {
+                    override_settings(scene_settings.clone())
+                } else {
+                    scene_settings.clone()
+                };
+                Supervisor::visit(
+                    &World::new(scene_settings.style, scene_settings.typst),
+                    scene_module.scene_fn,
+                    |time, timeline_entries, _| SceneResult::Success {
+                        time,
+                        timeline_entries,
+                        video_settings: scene_settings.video,
+                    },
+                )
+            })
+            .unwrap_or(SceneResult::Error)
+        } else {
+            SceneResult::Skipped
         };
-        println!("{}", ron::ser::to_string(&(name, scene_data)).unwrap());
+        let scene_data = SceneData {
+            name,
+            result,
+            stdout_lines: shh_stdout.lines().map(Result::unwrap).collect(),
+            stderr_lines: shh_stderr.lines().map(Result::unwrap).collect(),
+        };
+        println!("{}", ron::ser::to_string(&scene_data).unwrap());
     }
 }

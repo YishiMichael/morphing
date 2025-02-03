@@ -13,8 +13,8 @@ pub struct SceneSettings {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct VideoSettings {
     pub size: (u32, u32),
-    pub background_color: palette::Srgb<f32>,
     pub fps: f32,
+    pub background_color: palette::Srgba<f32>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -37,17 +37,15 @@ impl Default for VideoSettings {
     fn default() -> Self {
         Self {
             size: (1920, 1080),
-            background_color: BLACK.into(),
             fps: 60.0,
+            background_color: BLACK.into(),
         }
     }
 }
 
 impl Default for StyleSettings {
     fn default() -> Self {
-        Self {
-            color: WHITE.into(),
-        }
+        Self { color: WHITE }
     }
 }
 

@@ -12,6 +12,7 @@ anyhow = "1.0.95"
 cargo_metadata = "0.19.1"
 essi-ffmpeg = "0.2.0"
 iced = { version = "0.13.1", features = ["advanced"] }
+iced_audio = "0.12.0"
 indexmap = "2.7.1"
 morphing = { path = "../morphing" }
 rfd = "0.15.2"
