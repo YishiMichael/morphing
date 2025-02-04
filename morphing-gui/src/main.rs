@@ -7,5 +7,5 @@ mod progress;
 use app::AppState;
 
 fn main() -> iced::Result {
-    iced::application("Morphing Viewer", AppState::update, AppState::view).run()
+    iced::application("Morphing GUI", AppState::update, AppState::view).run()
 }

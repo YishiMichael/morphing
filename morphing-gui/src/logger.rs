@@ -1,23 +1,38 @@
-#[derive(Debug, Default)]
-pub(crate) struct Logger(Vec<(LoggingCategory, String)>);
+use std::time::SystemTime;
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum LoggingCategory {
-    Stdin,
-    Stdout,
-    Stderr,
+#[derive(Debug)]
+struct LogRecord {
+    timestamp: SystemTime,
+    level: log::Level,
+    message: String,
 }
 
-impl Logger {
-    pub(crate) fn log_line(&mut self, category: LoggingCategory, line: String) {
-        self.0.push((category, line));
-    }
+#[derive(Debug, Default)]
+pub(crate) struct Logger(Vec<LogRecord>);
 
-    pub(crate) fn log_lines<I>(&mut self, category: LoggingCategory, lines: I)
+impl Logger {
+    pub(crate) fn log<S>(&mut self, level: log::Level, message: S)
     where
-        I: IntoIterator<Item = String>,
+        S: ToString,
     {
-        self.0
-            .extend(lines.into_iter().map(|line| (category, line)));
+        self.0.push(LogRecord {
+            timestamp: SystemTime::now(),
+            level,
+            message: message.to_string(),
+        });
+    }
+}
+
+// Use humantime::format_rfc3339_seconds
+// [2025-01-01T12:34:56Z WARN ] message
+
+// Colors from https://docs.rs/env_logger/latest/src/env_logger/fmt/mod.rs.html#159
+fn convert_color(level: log::Level) -> iced::Color {
+    match level {
+        log::Level::Error => iced::Color::from_rgb8(0xFF, 0x55, 0x55), // Red
+        log::Level::Warn => iced::Color::from_rgb8(0xFF, 0xFF, 0x55),  // Yellow
+        log::Level::Info => iced::Color::from_rgb8(0x55, 0xFF, 0x55),  // Green
+        log::Level::Debug => iced::Color::from_rgb8(0x55, 0x55, 0xFF), // Blue
+        log::Level::Trace => iced::Color::from_rgb8(0x55, 0xFF, 0xFF), // Cyan
     }
 }

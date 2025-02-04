@@ -1,4 +1,3 @@
-use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -12,18 +11,8 @@ use super::collection::Collection;
 use super::io::compile_project;
 use super::io::open_project;
 use super::logger::Logger;
-use super::logger::LoggingCategory;
 use super::progress::Progress;
 use super::progress::ProgressMessage;
-
-const PROGRESS_SPEED_LEVEL_RANGE: RangeInclusive<i32> = -5..=5;
-const PLAY_PAUSE_KEY: iced::keyboard::Key =
-    iced::keyboard::Key::Named(iced::keyboard::key::Named::Space);
-const FAST_FORWARD_KEY: iced::keyboard::Key =
-    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowRight);
-const FAST_BACKWARD_KEY: iced::keyboard::Key =
-    iced::keyboard::Key::Named(iced::keyboard::key::Named::ArrowLeft);
-const FAST_SKIP_SECONDS: f32 = 5.0;
 
 // #[derive(Clone, Debug)]
 // struct PlayerSettings {
@@ -47,8 +36,6 @@ const FAST_SKIP_SECONDS: f32 = 5.0;
 #[derive(Debug, Default)]
 pub(crate) struct AppState {
     projects: Collection<ProjectState>,
-    // projects: Vec<ProjectState>,
-    // active_project_path: Option<PathBuf>,
     scene_settings: Arc<SceneSettings>,
 }
 
@@ -56,38 +43,24 @@ pub(crate) struct AppState {
 struct ProjectState {
     path: PathBuf,
     watching: bool, // TODO
-    project_status: ProjectStatus,
+    project_success_state: Option<ProjectSuccessState>,
     logger: Logger,
 }
 
 #[derive(Debug)]
-enum ProjectStatus {
-    Success(ProjectSuccessStatus),
-    Error,
-    Compiling,
-}
-
-#[derive(Debug)]
-struct ProjectSuccessStatus {
+struct ProjectSuccessState {
     scenes: Collection<SceneState>,
 }
 
 #[derive(Debug)]
 struct SceneState {
     name: String,
-    scene_status: SceneStatus,
+    scene_success_state: Option<SceneSuccessState>,
     logger: Logger,
 }
 
 #[derive(Debug)]
-enum SceneStatus {
-    Success(SceneSuccessStatus),
-    Error,
-    Skipped,
-}
-
-#[derive(Debug)]
-struct SceneSuccessStatus {
+struct SceneSuccessState {
     progress: Progress,
     timeline_entries: TimelineEntries,
     video_settings: VideoSettings,
@@ -105,23 +78,27 @@ pub enum AppMessage {
 #[derive(Debug)]
 pub enum ProjectStateMessage {
     Compile(Arc<SceneSettings>),
-    CompileResult(anyhow::Result<Vec<SceneData>>),
-    ProjectSuccessStatus(ProjectSuccessStatusMessage),
+    CompileResult(anyhow::Result<Vec<(String, SceneData)>>),
+    SetWatching(bool),
+    ProjectSuccessState(ProjectSuccessStateMessage),
 }
 
 #[derive(Debug)]
-pub enum ProjectSuccessStatusMessage {
+pub enum ProjectSuccessStateMessage {
     Activate(Option<usize>),
     SceneState(String, SceneStateMessage),
 }
 
 #[derive(Debug)]
 pub enum SceneStateMessage {
-    SceneSuccessStatus(SceneSuccessStatusMessage),
+    Load(SceneData),
+    SceneSuccessState(SceneSuccessStateMessage),
 }
 
 #[derive(Debug)]
-pub enum SceneSuccessStatusMessage {
+pub enum SceneSuccessStateMessage {
+    SetTimelineEntries(f32, TimelineEntries),
+    SetVideoSettings(VideoSettings),
     SaveVideo,
     SaveImage(f32),
     Progress(ProgressMessage),
@@ -162,38 +139,6 @@ impl AppState {
     //         .flatten()
     // }
 
-    //     impl ProjectState {
-    //     fn active_scene_state(&self) -> Option<&SceneState> {
-    //         if let ProjectStatus::Success {
-    //             scenes,
-    //             active_scene,
-    //         } = &self.project_status
-    //         {
-    //             active_scene
-    //                 .as_ref()
-    //                 .map(|active_project| scenes.get(active_project))
-    //                 .flatten()
-    //         } else {
-    //             None
-    //         }
-    //     }
-
-    //     fn active_scene_state_mut(&mut self) -> Option<&mut SceneState> {
-    //         if let ProjectStatus::Success {
-    //             scenes,
-    //             active_scene,
-    //         } = &mut self.project_status
-    //         {
-    //             active_scene
-    //                 .as_mut()
-    //                 .map(|active_project| scenes.get_mut(active_project))
-    //                 .flatten()
-    //         } else {
-    //             None
-    //         }
-    //     }
-    // }
-
     pub(crate) fn update(&mut self, message: AppMessage) -> iced::Task<AppMessage> {
         match message {
             AppMessage::Open(path) => {
@@ -201,24 +146,13 @@ impl AppState {
             }
             AppMessage::OpenResult(result) => {
                 match result {
+                    Ok(path) => iced::Task::done(AppMessage::ProjectState(
+                        path,
+                        ProjectStateMessage::Compile(self.scene_settings.clone()),
+                    )),
                     Err(error) => {
                         todo!(); // TODO: error window
                         iced::Task::none()
-                    }
-                    Ok(path) => {
-                        self.projects.insert_with(
-                            |project_state| project_state.path == path,
-                            || ProjectState {
-                                path: path.clone(),
-                                watching: false,
-                                project_status: ProjectStatus::Compiling,
-                                logger: Logger::default(),
-                            },
-                        );
-                        iced::Task::done(AppMessage::ProjectState(
-                            path,
-                            ProjectStateMessage::Compile(self.scene_settings.clone()),
-                        ))
                     }
                 }
             }
@@ -230,172 +164,93 @@ impl AppState {
                 self.projects.set_active_index(index);
                 iced::Task::none()
             }
-            AppMessage::ProjectState(path, message) => {
-                if let Some(project_state) = self
-                    .projects
-                    .find(|project_state| &project_state.path == &path)
-                {
-                    project_state
-                        .update(message)
-                        .map(move |message| AppMessage::ProjectState(path.clone(), message))
-                } else {
-                    iced::Task::none()
-                }
-            } // AppMessage::ProjectCompile(path) => {
-              //     if let Some(project_state) = self.find(|project_state| project_state.path == path) {
-              //     } else {
-              //         iced::Task::none()
-              //     }
-              // }
-              // AppMessage::ProjectCompileResult(path, compile_result) => {
-              //     if let Some(project_state) = self.find(|project_state| project_state.path == path) {
-              //     }
-              //     iced::Task::none()
-              // }
-              // AppMessage::SceneActivate(index) => {
-              //     if let Some(project_state) = self.projects.get_active_mut() {
-              //         if let ProjectStatus::Success { scenes } = &mut project_state.project_status {
-              //             scenes.set_active_index(index);
-              //         }
-              //     }
-              //     iced::Task::none()
-              // }
-              // AppMessage::ProgressSetTime(time) => {
-              //     if let Some(project_state) = self.projects.get_active_mut() {
-              //         if let ProjectStatus::Success { scenes } = &mut project_state.project_status {
-              //             if let Some(scene_state) = scenes.get_active_mut() {
-              //                 if let SceneStatus::Success { progress, .. } =
-              //                     &mut scene_state.scene_status
-              //                 {
-              //                     progress.set_time(time);
-              //                 }
-              //             }
-              //         }
-              //     }
-              //     iced::Task::none()
-              // }
-              // AppMessage::ProgressSetSpeedLevel(speed_level) => {
-              //     if let Some(scene_state) = self.active_scene_state_mut() {
-              //         if let SceneStatus::Success { progress, .. } = &mut scene_state.scene_status {
-              //             progress.set_speed_level(speed_level);
-              //         }
-              //     }
-              //     iced::Task::none()
-              // }
-              // AppMessage::ProgressSetPlayDirection(play_direction) => {
-              //     if let Some(scene_state) = self.active_scene_state_mut() {
-              //         if let SceneStatus::Success { progress, .. } = &mut scene_state.scene_status {
-              //             progress.set_play_direction(play_direction);
-              //         }
-              //     }
-              //     iced::Task::none()
-              // }
-              // AppMessage::ProgressSetPlaying(playing) => {
-              //     if let Some(scene_state) = self.active_scene_state_mut() {
-              //         if let SceneStatus::Success { progress, .. } = &mut scene_state.scene_status {
-              //             progress.set_playing(playing);
-              //         }
-              //     }
-              //     iced::Task::none()
-              // }
+            AppMessage::ProjectState(path, message) => self
+                .projects
+                .find_or_insert_with(
+                    |project_state| project_state.path == path,
+                    || ProjectState {
+                        path: path.clone(),
+                        watching: false,
+                        project_success_state: None,
+                        logger: Logger::default(),
+                    },
+                )
+                .update(message)
+                .map(move |message| AppMessage::ProjectState(path.clone(), message)),
         }
     }
 
     pub(crate) fn view(&self) -> iced::Element<AppMessage> {
         iced::widget::Shader::new(self).into()
     }
-
-    // fn prepare(
-    //     timeline_entries: Arc<TimelineEntries>,
-    //     device: Arc<wgpu::Device>,
-    // ) -> anyhow::Result<PresentationEntries> {
-    //     timeline_entries.prepare(&device)
-    // }
 }
 
 impl ProjectState {
     fn update(&mut self, message: ProjectStateMessage) -> iced::Task<ProjectStateMessage> {
         match message {
             ProjectStateMessage::Compile(scene_settings) => {
-                self.project_status = ProjectStatus::Compiling;
-                self.logger
-                    .log_line(LoggingCategory::Stdin, String::from("Compiling"));
+                self.logger.log(log::Level::Trace, "Compilation starts");
                 iced::Task::perform(
                     compile_project(self.path.clone(), scene_settings),
                     move |result| ProjectStateMessage::CompileResult(result),
                 )
             }
-            ProjectStateMessage::CompileResult(result) => {
-                self.project_status = match result {
-                    Err(error) => {
-                        self.logger
-                            .log_line(LoggingCategory::Stderr, error.to_string());
-                        ProjectStatus::Error
-                    }
-                    Ok(scenes) => ProjectStatus::Success(ProjectSuccessStatus {
-                        scenes: scenes
-                            .into_iter()
-                            .map(|scene_data| {
-                                let scene_status = match scene_data.result {
-                                    SceneResult::Success {
-                                        time,
-                                        timeline_entries,
-                                        video_settings,
-                                    } => SceneStatus::Success(SceneSuccessStatus {
-                                        progress: Progress::new(time),
-                                        timeline_entries,
-                                        video_settings,
-                                    }),
-                                    SceneResult::Error => SceneStatus::Error,
-                                    SceneResult::Skipped => SceneStatus::Skipped,
-                                };
-                                let mut logger = Logger::default();
-                                logger.log_lines(LoggingCategory::Stdout, scene_data.stdout_lines);
-                                logger.log_lines(LoggingCategory::Stderr, scene_data.stderr_lines);
-                                SceneState {
-                                    name: scene_data.name,
-                                    scene_status,
-                                    logger,
-                                }
-                            })
-                            .collect(),
-                    }),
-                };
-                iced::Task::none()
-            }
-            ProjectStateMessage::ProjectSuccessStatus(message) => {
-                if let ProjectStatus::Success(project_success_status) = &mut self.project_status {
-                    project_success_status
-                        .update(message)
-                        .map(ProjectStateMessage::ProjectSuccessStatus)
-                } else {
+            ProjectStateMessage::CompileResult(result) => match result {
+                Ok(scenes_data) => {
+                    self.logger.log(log::Level::Trace, "Compilation ends");
+                    iced::Task::batch(scenes_data.into_iter().map(|(name, scene_data)| {
+                        iced::Task::done(ProjectStateMessage::ProjectSuccessState(
+                            ProjectSuccessStateMessage::SceneState(
+                                name,
+                                SceneStateMessage::Load(scene_data),
+                            ),
+                        ))
+                    }))
+                }
+                Err(error) => {
+                    self.logger.log(log::Level::Error, error);
+                    self.logger.log(log::Level::Trace, "Compilation fails");
                     iced::Task::none()
                 }
+            },
+            ProjectStateMessage::SetWatching(watching) => {
+                self.watching = watching;
+                todo!();
+                iced::Task::none()
             }
+            ProjectStateMessage::ProjectSuccessState(message) => self
+                .project_success_state
+                .get_or_insert_with(|| ProjectSuccessState {
+                    scenes: Collection::default(),
+                })
+                .update(message)
+                .map(ProjectStateMessage::ProjectSuccessState),
         }
     }
 }
 
-impl ProjectSuccessStatus {
+impl ProjectSuccessState {
     fn update(
         &mut self,
-        message: ProjectSuccessStatusMessage,
-    ) -> iced::Task<ProjectSuccessStatusMessage> {
+        message: ProjectSuccessStateMessage,
+    ) -> iced::Task<ProjectSuccessStateMessage> {
         match message {
-            ProjectSuccessStatusMessage::Activate(index) => {
+            ProjectSuccessStateMessage::Activate(index) => {
                 self.scenes.set_active_index(index);
                 iced::Task::none()
             }
-            ProjectSuccessStatusMessage::SceneState(name, message) => {
-                if let Some(scene_state) = self.scenes.find(|scene_state| scene_state.name == name)
-                {
-                    scene_state.update(message).map(move |message| {
-                        ProjectSuccessStatusMessage::SceneState(name.clone(), message)
-                    })
-                } else {
-                    iced::Task::none()
-                }
-            }
+            ProjectSuccessStateMessage::SceneState(name, message) => self
+                .scenes
+                .find_or_insert_with(
+                    |scene_state| scene_state.name == name,
+                    || SceneState {
+                        name: name.clone(),
+                        scene_success_state: None,
+                        logger: Logger::default(),
+                    },
+                )
+                .update(message)
+                .map(move |message| ProjectSuccessStateMessage::SceneState(name.clone(), message)),
         }
     }
 }
@@ -403,69 +258,93 @@ impl ProjectSuccessStatus {
 impl SceneState {
     fn update(&mut self, message: SceneStateMessage) -> iced::Task<SceneStateMessage> {
         match message {
-            SceneStateMessage::SceneSuccessStatus(message) => {
-                if let SceneStatus::Success(scene_success_status) = &mut self.scene_status {
-                    scene_success_status
-                        .update(message)
-                        .map(SceneStateMessage::SceneSuccessStatus)
-                } else {
+            SceneStateMessage::Load(scene_data) => match scene_data.result {
+                SceneResult::Success {
+                    time,
+                    timeline_entries,
+                    video_settings,
+                } => {
+                    self.logger.log(log::Level::Trace, "Loading starts");
+                    for line in scene_data.stdout_lines {
+                        self.logger.log(log::Level::Info, line);
+                    }
+                    for line in scene_data.stderr_lines {
+                        self.logger.log(log::Level::Error, line);
+                    }
+                    self.logger.log(log::Level::Trace, "Loading ends");
+                    iced::Task::done(SceneStateMessage::SceneSuccessState(
+                        SceneSuccessStateMessage::SetTimelineEntries(time, timeline_entries),
+                    ))
+                    .chain(iced::Task::done(
+                        SceneStateMessage::SceneSuccessState(
+                            SceneSuccessStateMessage::SetVideoSettings(video_settings),
+                        ),
+                    ))
+                }
+                SceneResult::Error => {
+                    self.logger.log(log::Level::Trace, "Loading starts");
+                    for line in scene_data.stdout_lines {
+                        self.logger.log(log::Level::Info, line);
+                    }
+                    for line in scene_data.stderr_lines {
+                        self.logger.log(log::Level::Error, line);
+                    }
+                    self.logger.log(log::Level::Trace, "Loading fails");
                     iced::Task::none()
                 }
-            }
+                SceneResult::Skipped => {
+                    self.logger.log(log::Level::Trace, "Loading skipped");
+                    iced::Task::none()
+                }
+            },
+            SceneStateMessage::SceneSuccessState(message) => self
+                .scene_success_state
+                .get_or_insert_with(|| SceneSuccessState {
+                    progress: Progress::new(0.0),
+                    timeline_entries: TimelineEntries::default(),
+                    video_settings: VideoSettings::default(),
+                })
+                .update(message)
+                .map(SceneStateMessage::SceneSuccessState),
         }
     }
 }
 
-impl SceneSuccessStatus {
+impl SceneSuccessState {
     fn update(
         &mut self,
-        message: SceneSuccessStatusMessage,
-    ) -> iced::Task<SceneSuccessStatusMessage> {
+        message: SceneSuccessStateMessage,
+    ) -> iced::Task<SceneSuccessStateMessage> {
         match message {
-            SceneSuccessStatusMessage::SaveVideo => {
+            SceneSuccessStateMessage::SetTimelineEntries(time, timeline_entries) => {
+                self.progress = Progress::new(time);
+                self.timeline_entries = timeline_entries;
+                iced::Task::none()
+            }
+            SceneSuccessStateMessage::SetVideoSettings(video_settings) => {
+                self.video_settings = video_settings;
+                iced::Task::none()
+            }
+            SceneSuccessStateMessage::SaveVideo => {
                 todo!();
                 iced::Task::none()
             }
-            SceneSuccessStatusMessage::SaveImage(time) => {
+            SceneSuccessStateMessage::SaveImage(time) => {
                 todo!();
                 iced::Task::none()
             }
-            SceneSuccessStatusMessage::Progress(message) => self
+            SceneSuccessStateMessage::Progress(message) => self
                 .progress
                 .update(message)
-                .map(SceneSuccessStatusMessage::Progress),
+                .map(SceneSuccessStateMessage::Progress),
         }
     }
 }
-
-// #[derive(Debug)]
-// pub struct SceneState {
-
-//     timeline_collection: Option<SceneTimelineCollection>,
-//     // video_settings: VideoSettings,
-//     // duration: f32,
-//     // status: SceneStatus,
-//     // timeline_entries: TimelineEntries,
-// }
-
-// enum SceneStatus {
-//     BeforePrepare,
-//     OnPrepare,
-//     AfterPrepare(PresentationEntries),
-//     PrepareError(anyhow::Error),
-//     PresentError(anyhow::Error),
-// }
-
-// impl Default for Progress {
-//     fn default() -> Self {
-//         Self::new(0.0, 1.0)
-//     }
-// }
 
 // #[derive(Debug)]
 // pub struct Primitive(Option<SceneStatus>); // TODO: remove option
 
-impl iced::widget::shader::Primitive for SceneSuccessStatus {
+impl iced::widget::shader::Primitive for SceneSuccessState {
     fn prepare(
         &self,
         device: &iced::widget::shader::wgpu::Device,
@@ -536,7 +415,7 @@ impl iced::widget::shader::Primitive for SceneSuccessStatus {
 
 impl iced::widget::shader::Program<AppMessage> for AppState {
     type State = ();
-    type Primitive = SceneSuccessStatus;
+    type Primitive = SceneSuccessState;
 
     fn update(
         &self,
@@ -547,10 +426,10 @@ impl iced::widget::shader::Program<AppMessage> for AppState {
         shell: &mut iced::advanced::Shell<'_, AppMessage>,
     ) -> (iced::event::Status, Option<AppMessage>) {
         if let Some(project_state) = self.projects.get_active() {
-            if let ProjectStatus::Success(success_project_status) = &project_state.project_status {
-                if let Some(scene_state) = success_project_status.scenes.get_active() {
-                    if let SceneStatus::Success(success_scene_status) = &scene_state.scene_status {
-                        if success_scene_status.progress.is_playing() {
+            if let Some(success_project_state) = project_state.project_success_state.as_ref() {
+                if let Some(scene_state) = success_project_state.scenes.get_active() {
+                    if let Some(success_scene_state) = scene_state.scene_success_state.as_ref() {
+                        if success_scene_state.progress.is_playing() {
                             shell.request_redraw(iced::window::RedrawRequest::NextFrame);
                         }
                     }

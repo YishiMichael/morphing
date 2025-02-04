@@ -20,7 +20,6 @@ inventory::collect!(SceneModule);
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct SceneData {
-    pub name: String,
     pub result: SceneResult,
     pub stdout_lines: Vec<String>,
     pub stderr_lines: Vec<String>,
@@ -37,7 +36,7 @@ pub enum SceneResult {
     Skipped,
 }
 
-pub fn export_scenes(regex: Option<&lazy_regex::Regex>) {
+pub fn export_scenes_by_regex(regex: &lazy_regex::Regex) {
     let mut buf = String::new();
     std::io::stdin().read_line(&mut buf).unwrap();
     let scene_settings: SceneSettings = ron::de::from_str(&buf).unwrap();
@@ -46,7 +45,7 @@ pub fn export_scenes(regex: Option<&lazy_regex::Regex>) {
         let shh_stdout = BufReader::new(shh::stdout().unwrap());
         let shh_stderr = BufReader::new(shh::stderr().unwrap());
         let name = scene_module.name.to_string();
-        let result = if regex.is_none_or(|regex| regex.is_match(&name)) {
+        let result = if regex.is_match(&name) {
             std::panic::catch_unwind(|| {
                 let scene_settings = if let Some(override_settings) = scene_module.override_settings
                 {
@@ -69,11 +68,14 @@ pub fn export_scenes(regex: Option<&lazy_regex::Regex>) {
             SceneResult::Skipped
         };
         let scene_data = SceneData {
-            name,
             result,
             stdout_lines: shh_stdout.lines().map(Result::unwrap).collect(),
             stderr_lines: shh_stderr.lines().map(Result::unwrap).collect(),
         };
-        println!("{}", ron::ser::to_string(&scene_data).unwrap());
+        println!("{}", ron::ser::to_string(&(name, scene_data)).unwrap());
     }
+}
+
+pub fn export_scenes() {
+    export_scenes_by_regex(lazy_regex::regex!(".*"));
 }

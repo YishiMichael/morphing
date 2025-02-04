@@ -25,7 +25,7 @@ pub(crate) async fn open_project(path: PathBuf) -> anyhow::Result<PathBuf> {
 pub(crate) async fn compile_project(
     path: PathBuf,
     scene_settings: Arc<SceneSettings>,
-) -> anyhow::Result<Vec<SceneData>> {
+) -> anyhow::Result<Vec<(String, SceneData)>> {
     let mut child = Command::new("cargo")
         .arg("run")
         .arg("--quiet")
@@ -45,10 +45,10 @@ pub(crate) async fn compile_project(
         stderr.read_to_string(&mut buf)?;
         Err(anyhow::Error::msg(buf))?;
     }
-    let mut scenes = Vec::new();
+    let mut scenes_data = Vec::new();
     for line in BufReader::new(child.stdout.take().unwrap()).lines() {
-        let scene_data: SceneData = ron::de::from_str(&line?)?;
-        scenes.push(scene_data);
+        let (name, scene_data): (String, SceneData) = ron::de::from_str(&line?)?;
+        scenes_data.push((name, scene_data));
     }
-    Ok(scenes)
+    Ok(scenes_data)
 }

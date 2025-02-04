@@ -28,5 +28,5 @@ fn another_demo_scene(sv: &Supervisor<'_>) {
 }
 
 fn main() {
-    export_scenes(None);
+    export_scenes();
 }
