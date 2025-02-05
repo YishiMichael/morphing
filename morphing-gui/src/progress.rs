@@ -1,7 +1,9 @@
+use std::ops::Add;
+use std::ops::Mul;
 use std::ops::RangeInclusive;
 use std::time::Instant;
 
-const PROGRESS_SPEED_EXPONENT_RANGE: RangeInclusive<f32> = -5.0..=5.0;
+const PROGRESS_SPEED_RANGE: RangeInclusive<f32> = 0.03125..=32.0;
 const PLAY_PAUSE_KEY: iced::keyboard::Key =
     iced::keyboard::Key::Named(iced::keyboard::key::Named::Space);
 const FAST_FORWARD_KEY: iced::keyboard::Key =
@@ -14,7 +16,7 @@ const FAST_SKIP_SECONDS: f32 = 5.0;
 pub(crate) struct Progress {
     time_interval: RangeInclusive<f32>,
     time: f32,
-    speed_exponent: f32,
+    speed: f32,
     play_direction: PlayDirection,
     playing: bool,
     anchor_instant: Instant,
@@ -26,10 +28,10 @@ enum PlayDirection {
     Backward,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ProgressMessage {
     SetTime(f32),
-    SetSpeedExponent(f32),
+    SetSpeed(f32),
     SetPlayDirection(PlayDirection),
     SetPlaying(bool),
 }
@@ -39,14 +41,14 @@ impl Progress {
         Self {
             time_interval: 0.0..=full_time,
             time: 0.0,
-            speed_exponent: 0.0,
+            speed: 1.0,
             play_direction: PlayDirection::Forward,
             playing: false,
             anchor_instant: Instant::now(),
         }
     }
 
-    pub(crate) fn get_time(&self) -> f32 {
+    pub(crate) fn time(&self) -> f32 {
         self.time
     }
 
@@ -54,12 +56,28 @@ impl Progress {
         self.playing
     }
 
+    pub(crate) fn frame_range(&self, fps: f32) -> RangeStepInclusive<f32> {
+        RangeStepInclusive {
+            range: self.time_interval.clone(),
+            start: *match self.play_direction {
+                PlayDirection::Forward => self.time_interval.start(),
+                PlayDirection::Backward => self.time_interval.end(),
+            },
+            step: match self.play_direction {
+                PlayDirection::Forward => 1.0,
+                PlayDirection::Backward => -1.0,
+            } * self.speed
+                / fps,
+            count: 0,
+        }
+    }
+
     pub(crate) fn refresh_anchor(&mut self) {
         if self.playing {
             self.time += match self.play_direction {
                 PlayDirection::Forward => 1.0,
                 PlayDirection::Backward => -1.0,
-            } * 2.0f32.powf(self.speed_exponent)
+            } * self.speed
                 * self.anchor_instant.elapsed().as_secs_f32();
             if !self.time_interval.contains(&self.time) {
                 self.time = self
@@ -77,8 +95,8 @@ impl Progress {
             ProgressMessage::SetTime(time) => {
                 self.time = time;
             }
-            ProgressMessage::SetSpeedExponent(speed_exponent) => {
-                self.speed_exponent = speed_exponent;
+            ProgressMessage::SetSpeed(speed) => {
+                self.speed = speed;
             }
             ProgressMessage::SetPlayDirection(play_direction) => {
                 self.play_direction = play_direction;
@@ -88,5 +106,29 @@ impl Progress {
             }
         }
         iced::Task::none()
+    }
+}
+
+pub(crate) struct RangeStepInclusive<T> {
+    range: RangeInclusive<T>,
+    start: T,
+    step: T,
+    count: usize,
+}
+
+impl<T> Iterator for RangeStepInclusive<T>
+where
+    T: Copy + From<usize> + PartialOrd + Add<Output = T> + Mul<Output = T>,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.start + self.step * T::from(self.count);
+        if self.range.contains(&item) {
+            self.count += 1;
+            Some(item)
+        } else {
+            None
+        }
     }
 }
