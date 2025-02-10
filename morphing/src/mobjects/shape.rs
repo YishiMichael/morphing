@@ -7,7 +7,6 @@ use lyon::tessellation::{
     BuffersBuilder, FillOptions, FillVertex, FillVertexConstructor, StrokeOptions, StrokeVertex,
     StrokeVertexConstructor,
 };
-use palette::WithAlpha;
 
 use super::super::components::camera::{Camera, CameraShaderTypes};
 use super::super::components::component::Component;
@@ -18,8 +17,8 @@ use super::super::components::path::Path;
 use super::super::components::stroke::Stroke;
 use super::super::components::transform::Transform;
 use super::super::components::transform::TransformShaderTypes;
-use super::super::toplevel::palette::{TEAL, WHITE};
-use super::super::toplevel::world::World;
+use super::super::toplevel::config::Config;
+use super::super::toplevel::constants::Color;
 use super::mobject::{Mobject, MobjectBuilder, MobjectPresentation};
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -307,7 +306,7 @@ pub struct Rect(pub nalgebra::Vector2<f64>);
 impl MobjectBuilder for Rect {
     type Instantiation = ShapeMobject;
 
-    fn instantiate(self, _world: &World) -> Self::Instantiation {
+    fn instantiate(self, _config: &Config) -> Self::Instantiation {
         ShapeMobject {
             transform: Transform::default(),
             path: Path::from_iter(std::iter::once(bezier_rs::Subpath::new_rect(
@@ -317,7 +316,7 @@ impl MobjectBuilder for Rect {
             fill: Some(Fill {
                 options: FillOptions::default(),
                 paint: Paint {
-                    color: WHITE.into_format().with_alpha(1.0),
+                    color: Color::White.into(),
                     gradients: Vec::new(),
                 },
             }),
@@ -325,7 +324,7 @@ impl MobjectBuilder for Rect {
                 dash_pattern: None,
                 options: StrokeOptions::default(),
                 paint: Paint {
-                    color: TEAL.into_format().with_alpha(1.0),
+                    color: Color::Teal.into(),
                     gradients: Vec::new(),
                 },
             }),

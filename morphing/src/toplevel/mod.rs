@@ -1,4 +1,3 @@
-pub mod palette;
+pub mod config;
+pub mod constants;
 pub mod scene;
-pub mod settings;
-pub mod world;

@@ -59,7 +59,7 @@ pub mod traits {
     }
 
     pub trait Destroy {
-        fn destroy(self);
+        fn destroy(self); // TODO
     }
 
     pub trait Quantize: Sized {
@@ -185,7 +185,7 @@ pub mod base_impl {
             Alive::new(
                 supervisor,
                 SteadyTimeline {
-                    mobject: self.instantiate(supervisor.world()),
+                    mobject: self.instantiate(supervisor.config()),
                 },
             )
         }
@@ -414,7 +414,7 @@ pub mod base_impl {
         {
             self.archive(|supervisor, _, dynamic_timeline| {
                 Supervisor::visit(
-                    supervisor.world(),
+                    supervisor.config(),
                     |supervisor| {
                         construct
                             .construct(

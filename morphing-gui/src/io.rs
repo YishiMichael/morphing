@@ -1,13 +1,13 @@
-use std::io::BufRead;
-use std::io::BufReader;
-use std::io::Read;
-use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::task::Context;
+use std::task::Poll;
 
-use morphing::toplevel::scene::SceneData;
-use morphing::toplevel::settings::SceneSettings;
+use morphing::toplevel::scene::ProjectRedirectedResult;
+use morphing::toplevel::scene::SceneRedirectedResult;
+use tokio::io::AsyncBufRead;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
 
 // pub(crate) async fn open_project(path: PathBuf) -> anyhow::Result<PathBuf> {
 //     let metadata = cargo_metadata::MetadataCommand::new().exec()?;
@@ -44,41 +44,37 @@ pub(crate) async fn pick_save_file(name: &str, extensions: &[&str]) -> Option<Pa
         .map(PathBuf::from)
 }
 
+pub(crate) struct SceneStream<R>(tokio_stream::wrappers::LinesStream<R>);
+
+impl<R> futures_core::Stream for SceneStream<R> where R: Unpin + AsyncBufRead {
+    type Item = (String, SceneRedirectedResult);
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.0).poll_next(cx).map(|line| line.map(|line| {
+            let line = line.unwrap();
+            ron::de::from_str(&line).unwrap()
+        }))
+    }
+}
+
 pub(crate) async fn compile_project(
     path: PathBuf,
-    scene_settings: Arc<SceneSettings>,
-) -> Result<Vec<(String, SceneData)>, String> {
+) -> std::io::Result<Result<(ProjectRedirectedResult, SceneStream<tokio::io::BufReader<tokio::process::ChildStdout>>), String>> {
+    let mut child = tokio::process::Command::new("cargo")
+        .arg("run")
+        .arg("--quiet")
+        .current_dir(path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
 
-    async fn compile_project_inner(
-        path: PathBuf,
-        scene_settings: &SceneSettings,
-    ) -> anyhow::Result<Vec<(String, SceneData)>> {
-        let mut child = Command::new("cargo")
-            .arg("run")
-            .arg("--quiet")
-            .current_dir(path)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
-        writeln!(
-            child.stdin.take().unwrap(),
-            "{}",
-            ron::ser::to_string(&scene_settings)?
-        )?;
-        if !child.wait()?.success() {
-            let mut stderr = BufReader::new(child.stderr.take().unwrap());
-            let mut buf = String::new();
-            stderr.read_to_string(&mut buf)?;
-            Err(anyhow::Error::msg(buf))?;
-        }
-        let mut scenes_data = Vec::new();
-        for line in BufReader::new(child.stdout.take().unwrap()).lines() {
-            let (name, scene_data): (String, SceneData) = ron::de::from_str(&line?)?;
-            scenes_data.push((name, scene_data));
-        }
-        Ok(scenes_data)
-    }
-
-    compile_project_inner(path, &scene_settings).await.map_err(|error| error.to_string())
+    Ok(if child.wait().await?.success() {
+        let mut lines = tokio::io::BufReader::new(child.stdout.take().unwrap()).lines();
+        let line = lines.next_line().await?.unwrap();
+        Ok((ron::de::from_str(&line).unwrap(), SceneStream(tokio_stream::wrappers::LinesStream::new(lines))))
+    } else {
+        let mut buf = String::new();
+        child.stderr.take().unwrap().read_to_string(&mut buf).await?;
+        Err(buf)
+    })
 }

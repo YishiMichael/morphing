@@ -1,0 +1,13 @@
+[video]
+size = "1920x1080"
+fps = 60.0
+
+[style]
+foreground_color = "#FFFFFFFF"
+background_color = "#000000FF"
+
+[typst]
+inputs = []
+include_system_fonts = true
+include_embedded_fonts = true
+font_paths = []

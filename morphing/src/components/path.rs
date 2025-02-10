@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use itertools::Itertools;
 
 use super::stroke::DashPattern;
@@ -263,10 +265,10 @@ pub struct ManipulatorGroupId(usize);
 
 impl bezier_rs::Identifier for ManipulatorGroupId {
     fn new() -> Self {
-        let mut counter_ref = MANIPULATOR_GROUP_ID_COUNTER.lock();
+        let mut counter_ref = MANIPULATOR_GROUP_ID_COUNTER.lock().unwrap();
         *counter_ref += 1;
         Self(*counter_ref)
     }
 }
 
-static MANIPULATOR_GROUP_ID_COUNTER: parking_lot::Mutex<usize> = parking_lot::Mutex::new(0);
+static MANIPULATOR_GROUP_ID_COUNTER: Mutex<usize> = Mutex::new(0);

@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use super::super::toplevel::world::World;
+use super::super::toplevel::config::Config;
 
 pub trait Mobject:
     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
@@ -52,7 +52,7 @@ pub trait MobjectPresentation: 'static + Send + Sync {
 pub trait MobjectBuilder {
     type Instantiation: Mobject;
 
-    fn instantiate(self, world: &World) -> Self::Instantiation;
+    fn instantiate(self, config: &Config) -> Self::Instantiation;
 }
 
 // TODO: alive container morphisms

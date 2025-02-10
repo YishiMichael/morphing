@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::panic::UnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -9,90 +9,128 @@ pub use morphing_macros::scene;
 
 use super::super::timelines::timeline::Supervisor;
 use super::super::timelines::timeline::TimelineEntries;
-use super::settings::SceneSettings;
-use super::settings::VideoSettings;
-use super::world::World;
+use super::config::Config;
+use super::config::ConfigValues;
+// use super::settings::SceneSettings;
+// use super::settings::VideoSettings;
+// use super::world::World;
 
 pub struct SceneModule {
     pub name: &'static str,
-    pub override_settings: Option<fn(SceneSettings) -> SceneSettings>,
+    pub config_path: Option<&'static str>,
     pub scene_fn: fn(&Supervisor),
 }
 
 inventory::collect!(SceneModule);
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct SceneData {
-    pub result: SceneResult,
+pub struct RedirectedResult<R> {
+    pub result: Result<R, ()>,
     pub stdout_lines: Arc<Vec<String>>,
     pub stderr_lines: Arc<Vec<String>>,
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub enum SceneResult {
-    Success {
-        time: f32,
-        timeline_entries: TimelineEntries,
-        video_settings: VideoSettings,
-    },
-    Error,
-    Skipped,
-}
-
-pub fn export_scenes_by_regex(regex: &lazy_regex::Regex) {
-    let mut buf = String::new();
-    std::io::stdin().read_line(&mut buf).unwrap();
-    let scene_settings: SceneSettings = ron::de::from_str(&buf).unwrap();
-    let mut override_settings_map = HashMap::new();
-
-    for scene_module in inventory::iter::<SceneModule>() {
+impl<R> RedirectedResult<R> {
+    fn execute<F>(f: F) -> Self
+    where
+        F: FnOnce() -> R + UnwindSafe,
+    {
         let shh_stdout = BufReader::new(shh::stdout().unwrap());
         let shh_stderr = BufReader::new(shh::stderr().unwrap());
-        let name = scene_module.name.to_string();
-        let (world, video_settings) = override_settings_map
-            .entry(scene_module.override_settings)
-            .or_insert_with_key(|override_settings| {
-                let scene_settings = override_settings
-                    .and_then(|override_settings| {
-                        std::panic::catch_unwind(|| override_settings(scene_settings.clone()))
-                            .inspect_err(|_| {
-                                eprintln!(
-                                "`override_settings` panicked. Use default scene settings instead"
-                            )
-                            })
-                            .ok()
-                    })
-                    .unwrap_or(scene_settings.clone());
-                (
-                    Mutex::new(World::new(scene_settings.style, scene_settings.typst)),
-                    scene_settings.video,
-                )
-            });
-        let result = if regex.is_match(&name) {
-            std::panic::catch_unwind(|| {
-                Supervisor::visit(
-                    &world.lock().unwrap(),
-                    scene_module.scene_fn,
-                    |time, timeline_entries, _| SceneResult::Success {
-                        time,
-                        timeline_entries,
-                        video_settings: video_settings.clone(),
-                    },
-                )
-            })
-            .unwrap_or(SceneResult::Error)
-        } else {
-            SceneResult::Skipped
-        };
-        let scene_data = SceneData {
+        let result = std::panic::catch_unwind(f).map_err(|_| ());
+        Self {
             result,
             stdout_lines: Arc::new(shh_stdout.lines().map(Result::unwrap).collect()),
             stderr_lines: Arc::new(shh_stderr.lines().map(Result::unwrap).collect()),
-        };
-        println!("{}", ron::ser::to_string(&(name, scene_data)).unwrap());
+        }
+    }
+
+    fn is_ok(&self) -> bool {
+        self.result.is_ok()
     }
 }
 
-pub fn export_scenes() {
-    export_scenes_by_regex(lazy_regex::regex!(".*"));
+pub type ProjectRedirectedResult = RedirectedResult<()>;
+
+pub type SceneRedirectedResult = RedirectedResult<Option<SceneData>>;
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct SceneData {
+    pub time: f32,
+    pub timeline_entries: TimelineEntries,
+    pub config_values: ConfigValues,
+}
+
+pub enum SceneFilter {
+    All,
+    Whitelist(&'static [&'static str]),
+    Blacklist(&'static [&'static str]),
+    Regex(lazy_regex::Lazy<lazy_regex::Regex>),
+    FilterFn(fn(&str) -> bool),
+}
+
+impl SceneFilter {
+    fn is_match(&self, name: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Whitelist(names) => names.contains(&name),
+            Self::Blacklist(names) => !names.contains(&name),
+            Self::Regex(regex) => regex.is_match(name),
+            Self::FilterFn(f) => f(name),
+        }
+    }
+}
+
+pub fn export_scenes(scene_filter: SceneFilter) {
+    // let mut buf = String::new();
+    // std::io::stdin().read_line(&mut buf).unwrap();
+    // let scene_settings: SceneSettings = ron::de::from_str(&buf).unwrap();
+    // let mut override_settings_map = HashMap::new();
+
+    let project_config_values = Mutex::new(ConfigValues::default());
+    let project_redirected_result = ProjectRedirectedResult::execute(|| {
+        {
+            let content =
+                std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/scene_config.toml"))
+                    .unwrap();
+            project_config_values.lock().unwrap().overwrite(&content);
+        }
+        if let Ok(content) = std::fs::read_to_string("scene_config.toml") {
+            project_config_values.lock().unwrap().overwrite(&content);
+        } else {
+            println!("Did not find project-level `scene_config.toml` file. Skipped.");
+        }
+    });
+    println!(
+        "{}",
+        ron::ser::to_string(&project_redirected_result).unwrap()
+    );
+
+    if project_redirected_result.is_ok() {
+        for scene_module in inventory::iter::<SceneModule>() {
+            let name = scene_module.name.split_once("::").unwrap().1.to_string(); // Remove the crate root
+            let scene_redirected_result = SceneRedirectedResult::execute(|| {
+                let mut config_values = project_config_values.lock().unwrap().clone();
+                if let Some(path) = scene_module.config_path {
+                    let content = std::fs::read_to_string(path).unwrap();
+                    config_values.overwrite(&content);
+                }
+                scene_filter.is_match(&name).then(|| {
+                    Supervisor::visit(
+                        &Config::new(config_values.clone()),
+                        scene_module.scene_fn,
+                        |time, timeline_entries, _| SceneData {
+                            time,
+                            timeline_entries,
+                            config_values,
+                        },
+                    )
+                })
+            });
+            println!(
+                "{}",
+                ron::ser::to_string(&(name, scene_redirected_result)).unwrap()
+            );
+        }
+    }
 }

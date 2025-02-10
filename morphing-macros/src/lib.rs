@@ -3,7 +3,7 @@ use proc_macro::TokenStream;
 
 #[derive(FromMeta)]
 struct SceneArgs {
-    override_settings: Option<syn::Path>,
+    config_path: Option<syn::LitStr>,
 }
 
 #[proc_macro_attribute]
@@ -18,8 +18,8 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
     let scene_fn = syn::parse_macro_input!(tokens as syn::ItemFn);
 
     let scene_name = scene_fn.sig.ident.clone();
-    let override_settings = if let Some(override_settings) = args.override_settings {
-        quote::quote! { Some(#override_settings) }
+    let config_path = if let Some(config_path) = args.config_path {
+        quote::quote! { Some(#config_path) }
     } else {
         quote::quote! { None }
     };
@@ -29,7 +29,7 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
         ::morphing::toplevel::scene::inventory::submit! {
             ::morphing::toplevel::scene::SceneModule {
                 name: concat!(module_path!(), "::", stringify!(#scene_name)),
-                override_settings: #override_settings,
+                config_path: #config_path,
                 scene_fn: #scene_name,
             }
         }

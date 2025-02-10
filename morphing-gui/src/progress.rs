@@ -109,6 +109,12 @@ impl Progress {
     }
 }
 
+impl Default for Progress {
+    fn default() -> Self {
+        Self::new(0.0)
+    }
+}
+
 pub(crate) struct RangeStepInclusive<T> {
     range: RangeInclusive<T>,
     start: T,

@@ -3,11 +3,7 @@ use morphing::timelines::alive::traits::Destroy;
 use morphing::timelines::timeline::Supervisor;
 use morphing::toplevel::scene::export_scenes;
 use morphing::toplevel::scene::scene;
-use morphing::toplevel::settings::SceneSettings;
-
-fn override_settings(scene_settings: SceneSettings) -> SceneSettings {
-    scene_settings
-}
+use morphing::toplevel::scene::SceneFilter;
 
 #[scene]
 fn demo_scene(sv: &Supervisor<'_>) {
@@ -18,7 +14,7 @@ fn demo_scene(sv: &Supervisor<'_>) {
     sv.wait(12.0);
 }
 
-#[scene(override_settings = "override_settings")]
+#[scene(config_path = "my_config.toml")]
 fn another_demo_scene(sv: &Supervisor<'_>) {
     sv.wait(1.0);
     let mobject = sv.spawn(Rect(nalgebra::Vector2::new(1.0, 1.0)));
@@ -28,5 +24,5 @@ fn another_demo_scene(sv: &Supervisor<'_>) {
 }
 
 fn main() {
-    export_scenes();
+    export_scenes(SceneFilter::All);
 }

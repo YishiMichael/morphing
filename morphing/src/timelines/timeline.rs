@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
-use super::super::toplevel::world::World;
+use super::super::toplevel::config::Config;
 
 pub trait Timeline:
     'static + Send + Sync + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
@@ -188,20 +188,20 @@ impl TimelineEntries {
     }
 }
 
-pub struct Supervisor<'w> {
-    world: &'w World,
+pub struct Supervisor<'c> {
+    config: &'c Config,
     time: RefCell<Arc<f32>>,
     timeline_entries: RefCell<Vec<TimelineEntry>>,
 }
 
-impl<'w> Supervisor<'w> {
-    pub(crate) fn visit<V, VO, F, FO>(world: &'w World, visitor: V, f: F) -> FO
+impl<'c> Supervisor<'c> {
+    pub(crate) fn visit<V, VO, F, FO>(config: &'c Config, visitor: V, f: F) -> FO
     where
         V: for<'s> FnOnce(&'s Self) -> VO,
         F: FnOnce(f32, TimelineEntries, VO) -> FO,
     {
         let supervisor = Self {
-            world,
+            config,
             time: RefCell::new(Arc::new(0.0)),
             timeline_entries: RefCell::new(Vec::new()),
         };
@@ -213,8 +213,8 @@ impl<'w> Supervisor<'w> {
         )
     }
 
-    pub(crate) fn world(&self) -> &World {
-        &self.world
+    pub(crate) fn config(&self) -> &Config {
+        &self.config
     }
 
     pub(crate) fn time(&self) -> Arc<f32> {

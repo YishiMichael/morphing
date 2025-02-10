@@ -1,6 +1,9 @@
 use std::borrow::Cow;
+use std::ops::Deref;
 use std::ops::Range;
+use std::path::PathBuf;
 
+use comemo::Track;
 use itertools::Itertools;
 use palette::Srgba;
 use ttf_parser::OutlineBuilder;
@@ -13,11 +16,163 @@ use super::super::components::path::PathBuilder;
 use super::super::components::stroke::DashPattern;
 use super::super::components::stroke::Stroke;
 use super::super::components::transform::Transform;
-use super::super::toplevel::world::World;
+use super::super::toplevel::config::Config;
+use super::super::toplevel::config::ConfigField;
 use super::mobject::Mobject;
 use super::mobject::MobjectBuilder;
 use super::shape::PlanarTrianglesPresentation;
 use super::shape::ShapeMobject;
+
+// Modified from typst/lib.rs, typst-cli/src/world.rs
+
+#[derive(serde::Deserialize)]
+struct TypstWorldInput {
+    inputs: Vec<(String, String)>,
+    include_system_fonts: bool,
+    include_embedded_fonts: bool,
+    font_paths: Vec<PathBuf>,
+}
+
+struct TypstWorld {
+    library: typst::utils::LazyHash<typst::Library>,
+    book: typst::utils::LazyHash<typst::text::FontBook>,
+    fonts: Vec<typst_kit::fonts::FontSlot>,
+    main_id: typst::syntax::FileId,
+}
+
+impl TypstWorld {
+    fn new(typst_world_input: TypstWorldInput) -> Self {
+        let inputs = typst_world_input
+            .inputs
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.as_str().into(),
+                    typst::foundations::IntoValue::into_value(v.as_str()),
+                )
+            })
+            .collect();
+        let fonts = typst_kit::fonts::FontSearcher::new()
+            .include_system_fonts(typst_world_input.include_system_fonts)
+            .include_embedded_fonts(typst_world_input.include_embedded_fonts)
+            .search_with(typst_world_input.font_paths);
+        Self {
+            library: typst::utils::LazyHash::new(
+                typst::Library::builder().with_inputs(inputs).build(),
+            ),
+            book: typst::utils::LazyHash::new(fonts.book),
+            fonts: fonts.fonts,
+            main_id: typst::syntax::FileId::new_fake(typst::syntax::VirtualPath::new("main.typ")),
+        }
+    }
+
+    fn source(&self, text: String) -> typst::syntax::Source {
+        typst::syntax::Source::new(self.main_id, text)
+    }
+
+    fn document(&self, source: &typst::syntax::Source) -> typst::model::Document {
+        // Modified from reflexo-typst/src/error.rs
+        fn eprint_diagnostics<I>(iter: I) -> !
+        where
+            I: IntoIterator<Item = typst::diag::SourceDiagnostic>,
+        {
+            for (index, diagnostic) in iter.into_iter().enumerate() {
+                eprintln!("{index}. {diagnostic:?}");
+                if !diagnostic.hints.is_empty() {
+                    eprintln!("  - Hints: {}", diagnostic.hints.join(", "));
+                }
+            }
+            panic!("Typst error. See diagnostics above.");
+        }
+
+        let styles = typst::foundations::StyleChain::new(&self.library().styles);
+        let traced = typst::engine::Traced::default();
+        let introspector = typst::introspection::Introspector::default();
+        let world = self.track();
+        let traced = traced.track();
+        let introspector = introspector.track();
+
+        let mut sink = typst::engine::Sink::new();
+        let content = typst::eval::eval(
+            world,
+            traced,
+            sink.track_mut(),
+            typst::engine::Route::default().track(),
+            source,
+        )
+        .unwrap_or_else(|errors| {
+            sink.delay(errors);
+            eprint_diagnostics(sink.delayed());
+        })
+        .content();
+
+        let mut engine = typst::engine::Engine {
+            world,
+            introspector,
+            traced,
+            sink: sink.track_mut(),
+            route: typst::engine::Route::default(),
+        };
+        let document = typst::layout::layout_document(&mut engine, &content, styles)
+            .unwrap_or_else(|errors| {
+                sink.delay(errors);
+                eprint_diagnostics(sink.delayed());
+            });
+
+        let delayed = sink.delayed();
+        if !delayed.is_empty() {
+            eprint_diagnostics(delayed);
+        }
+        document
+    }
+}
+
+impl Deref for TypstWorld {
+    type Target = dyn typst::World;
+
+    fn deref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl typst::World for TypstWorld {
+    fn library(&self) -> &typst::utils::LazyHash<typst::Library> {
+        &self.library
+    }
+
+    fn book(&self) -> &typst::utils::LazyHash<typst::text::FontBook> {
+        &self.book
+    }
+
+    fn main(&self) -> typst::syntax::FileId {
+        self.main_id
+    }
+
+    fn source(&self, _id: typst::syntax::FileId) -> typst::diag::FileResult<typst::syntax::Source> {
+        Err(typst::diag::FileError::AccessDenied)
+    }
+
+    fn file(
+        &self,
+        _id: typst::syntax::FileId,
+    ) -> typst::diag::FileResult<typst::foundations::Bytes> {
+        Err(typst::diag::FileError::AccessDenied)
+    }
+
+    fn font(&self, index: usize) -> Option<typst::text::Font> {
+        self.fonts[index].get()
+    }
+
+    fn today(&self, _: Option<i64>) -> Option<typst::foundations::Datetime> {
+        None
+    }
+}
+
+impl ConfigField for TypstWorld {
+    fn parse(value: &toml::Value) -> Self {
+        Self::new(value.clone().try_into().unwrap())
+    }
+}
 
 pub struct Typst(String);
 
@@ -33,8 +188,8 @@ impl Typst {
 impl MobjectBuilder for Typst {
     type Instantiation = TypstMobject;
 
-    fn instantiate(self, world: &World) -> Self::Instantiation {
-        TypstMobject::instantiate(self.0, world)
+    fn instantiate(self, config: &Config) -> Self::Instantiation {
+        TypstMobject::instantiate(self.0, config)
     }
 }
 
@@ -51,12 +206,14 @@ pub struct TypstMobject {
 }
 
 impl TypstMobject {
-    fn instantiate(text: String, world: &World) -> Self {
-        let source = world.typst_world.source(text.clone());
-        let document = world.typst_world.document(&source);
+    fn instantiate(text: String, config: &Config) -> Self {
         Self {
-            text,
-            tokens: TypstMobject::from_typst_document(&document, &source),
+            text: text.clone(),
+            tokens: config.operate("typst", |typst_world: &TypstWorld| {
+                let source = typst_world.source(text);
+                let document = typst_world.document(&source);
+                Self::from_typst_document(&document, &source)
+            }),
         }
     }
 
@@ -455,20 +612,24 @@ impl Mobject for TypstMobject {
 
 #[cfg(test)]
 mod typst_tests {
-    use super::super::super::toplevel::settings::StyleSettings;
-    use super::super::super::toplevel::settings::TypstSettings;
-    use super::super::super::toplevel::world::World;
     use super::TypstMobject;
+    use super::TypstWorld;
+    use super::TypstWorldInput;
 
     #[test]
-    fn test_typst_mobject() -> () {
-        let world = World::new(StyleSettings::default(), TypstSettings::default());
-        let mob = TypstMobject::instantiate(
-            "typst \\ text text #[text] text $ a b c - d^2 $".to_string(),
-            &world,
-        );
+    fn test_typst_mobject() {
+        let typst_world = TypstWorld::new(TypstWorldInput {
+            inputs: Vec::new(),
+            include_system_fonts: true,
+            include_embedded_fonts: true,
+            font_paths: Vec::new(),
+        });
+        let source =
+            typst_world.source("typst \\ text text #[text] text $ a b c - d^2 $".to_string());
+        let document = typst_world.document(&source);
+        let tokens = TypstMobject::from_typst_document(&document, &source);
         // let mobs = typst_mobject("fish \\ #[f]ish");
-        for token in mob.tokens {
+        for token in tokens {
             dbg!(token.span);
         }
 
