@@ -1,5 +1,3 @@
-use std::sync::OnceLock;
-
 use super::color::Color;
 use super::component::Component;
 use super::component::ComponentShaderTypes;
@@ -122,8 +120,8 @@ impl Component for Paint {
     }
 }
 
-static PAINT_BIND_GROUP_LAYOUT: OnceLock<iced::widget::shader::wgpu::BindGroupLayout> =
-    OnceLock::new();
+static PAINT_BIND_GROUP_LAYOUT: ::std::sync::OnceLock<iced::widget::shader::wgpu::BindGroupLayout> =
+    ::std::sync::OnceLock::new();
 
 impl ComponentShaderTypes for PaintShaderTypes {
     type Buffers = PaintBuffers;

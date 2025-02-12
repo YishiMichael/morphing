@@ -48,9 +48,11 @@ impl<R> RedirectedResult<R> {
     }
 }
 
-pub type ProjectRedirectedResult = RedirectedResult<()>;
-
-pub type SceneRedirectedResult = RedirectedResult<Option<SceneData>>;
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub enum LineResult {
+    Project(RedirectedResult<()>),
+    Scene(String, RedirectedResult<Option<SceneData>>),
+}
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct SceneData {
@@ -77,21 +79,12 @@ impl SceneFilter {
     }
 }
 
-fn serialize_and_write<T>(value: &T)
-where
-    T: serde::Serialize,
-{
+fn serialize_and_write(value: &LineResult) {
     println!("{}", ron::ser::to_string(&value).unwrap());
 }
 
-pub fn read_and_deserialize<R, T>(reader: &mut R) -> T
-where
-    R: BufRead,
-    T: serde::de::DeserializeOwned,
-{
-    let mut buf = String::new();
-    reader.read_line(&mut buf).unwrap();
-    ron::de::from_str(&buf).unwrap()
+pub fn read_and_deserialize(s: &str) -> LineResult {
+    ron::de::from_str(s).unwrap()
 }
 
 pub fn export_scenes(scene_filter: SceneFilter) {
@@ -101,7 +94,7 @@ pub fn export_scenes(scene_filter: SceneFilter) {
     // let mut override_settings_map = HashMap::new();
 
     let project_config_values = Mutex::new(ConfigValues::default());
-    let project_redirected_result = ProjectRedirectedResult::execute(|| {
+    let project_redirected_result = RedirectedResult::execute(|| {
         for config_fallback_content in inventory::iter::<ConfigFallbackContent>() {
             project_config_values
                 .lock()
@@ -114,9 +107,10 @@ pub fn export_scenes(scene_filter: SceneFilter) {
             println!("Did not find project-level `scene_config.toml` file. Skipped.");
         }
     });
-    serialize_and_write(&project_redirected_result);
+    let is_ok = project_redirected_result.is_ok();
+    serialize_and_write(&LineResult::Project(project_redirected_result));
 
-    if project_redirected_result.is_ok() {
+    if is_ok {
         let project_config_values = project_config_values.into_inner().unwrap();
         let handles: Vec<_> = inventory::iter::<SceneModule>()
             .map(|scene_module| {
@@ -124,7 +118,7 @@ pub fn export_scenes(scene_filter: SceneFilter) {
                 let scene_is_match = scene_filter.is_match(&name);
                 let mut config_values = project_config_values.clone();
                 std::thread::spawn(move || {
-                    let scene_redirected_result = SceneRedirectedResult::execute(|| {
+                    let scene_redirected_result = RedirectedResult::execute(|| {
                         scene_is_match.then(|| {
                             if let Some(path) = scene_module.config_path {
                                 let content = std::fs::read_to_string(path).unwrap();
@@ -140,7 +134,7 @@ pub fn export_scenes(scene_filter: SceneFilter) {
                             }
                         })
                     });
-                    serialize_and_write(&(name, scene_redirected_result));
+                    serialize_and_write(&LineResult::Scene(name, scene_redirected_result));
                 })
             })
             .collect();

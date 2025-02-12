@@ -1,14 +1,9 @@
-use std::sync::OnceLock;
-
-use encase::ShaderType;
 use geometric_algebra::ppga3d as pga;
 use geometric_algebra::One;
-use iced::widget::shader::wgpu::util::DeviceExt;
 
 use super::component::Component;
 use super::component::ComponentShaderTypes;
 use super::motor::Motor;
-use super::paint::QueueWriteBufferMutWrapper;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Transform {
@@ -24,7 +19,7 @@ pub struct TransformBuffers {
     transform_uniform: iced::widget::shader::wgpu::Buffer,
 }
 
-#[derive(ShaderType)]
+#[derive(encase::ShaderType)]
 struct TransformUniform {
     motor: nalgebra::Matrix4x2<f32>,
     scale: f32,
@@ -43,8 +38,9 @@ impl Component for Transform {
     }
 }
 
-static TRANSFORM_BIND_GROUP_LAYOUT: OnceLock<iced::widget::shader::wgpu::BindGroupLayout> =
-    OnceLock::new();
+static TRANSFORM_BIND_GROUP_LAYOUT: ::std::sync::OnceLock<
+    iced::widget::shader::wgpu::BindGroupLayout,
+> = ::std::sync::OnceLock::new();
 
 impl ComponentShaderTypes for TransformShaderTypes {
     type Buffers = TransformBuffers;
@@ -64,7 +60,9 @@ impl ComponentShaderTypes for TransformShaderTypes {
                             ty: iced::widget::shader::wgpu::BindingType::Buffer {
                                 ty: iced::widget::shader::wgpu::BufferBindingType::Uniform,
                                 has_dynamic_offset: false,
-                                min_binding_size: Some(TransformUniform::min_size()),
+                                min_binding_size: Some(
+                                    <TransformUniform as encase::ShaderType>::min_size(),
+                                ),
                             },
                             count: None,
                         },
@@ -93,7 +91,7 @@ impl ComponentShaderTypes for TransformShaderTypes {
             transform_uniform: device.create_buffer(
                 &iced::widget::shader::wgpu::BufferDescriptor {
                     label: None,
-                    size: self.transform_uniform.size().get(),
+                    size: encase::ShaderType::size(&self.transform_uniform).get(),
                     usage: iced::widget::shader::wgpu::BufferUsages::UNIFORM
                         | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
@@ -103,6 +101,7 @@ impl ComponentShaderTypes for TransformShaderTypes {
     }
 
     fn initialize_buffers(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Buffers {
+        use iced::widget::shader::wgpu::util::DeviceExt;
         TransformBuffers {
             transform_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
@@ -121,14 +120,21 @@ impl ComponentShaderTypes for TransformShaderTypes {
         queue: &iced::widget::shader::wgpu::Queue,
         buffers: &mut Self::Buffers,
     ) {
-        {
-            let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
-                queue
-                    .write_buffer_with(&buffers.transform_uniform, 0, self.transform_uniform.size())
+        encase::internal::WriteInto::write_into(
+            &self.transform_uniform,
+            &mut encase::internal::Writer::new(
+                &self.transform_uniform,
+                &mut *queue
+                    .write_buffer_with(
+                        &buffers.transform_uniform,
+                        0,
+                        encase::ShaderType::size(&self.transform_uniform),
+                    )
                     .unwrap(),
-            ));
-            buffer.write(&self.transform_uniform).unwrap();
-        }
+                0,
+            )
+            .unwrap(),
+        );
     }
 }
 

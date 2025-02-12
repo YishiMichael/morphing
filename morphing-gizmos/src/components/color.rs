@@ -2,7 +2,6 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 use std::str::FromStr;
 
-use encase::ShaderType;
 use palette::WithAlpha;
 use strum::EnumProperty;
 use strum::VariantArray;
@@ -62,19 +61,6 @@ impl From<Color> for nalgebra::Vector4<f32> {
         let (r, g, b, a) = color.into_components();
         nalgebra::Vector4::new(r, g, b, a)
     }
-}
-
-pub struct ColorShaderTypes {
-    color_uniform: ColorUniform,
-}
-
-pub struct ColorBuffers {
-    color_uniform: iced::widget::shader::wgpu::Buffer,
-}
-
-#[derive(ShaderType)]
-struct ColorUniform {
-    color: nalgebra::Vector4<f32>,
 }
 
 #[derive(Clone, Copy, Debug, EnumProperty, VariantArray)]

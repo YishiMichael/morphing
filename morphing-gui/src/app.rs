@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-use morphing::timelines::timeline::TimelineEntries;
-use morphing::toplevel::config::Config;
-use morphing::toplevel::scene::ProjectRedirectedResult;
-use morphing::toplevel::scene::SceneData;
-use morphing::toplevel::scene::SceneRedirectedResult;
+use morphing_core::config::Config;
+use morphing_core::scene::read_and_deserialize;
+use morphing_core::scene::LineResult;
+use morphing_core::scene::RedirectedResult;
+use morphing_core::scene::SceneData;
+use morphing_core::timeline::TimelineEntries;
 
 use super::collection::Collection;
 use super::collection::CollectionItem;
@@ -28,11 +29,11 @@ struct ProjectState {
     watching: bool, // TODO
     project_success_state: Option<ProjectSuccessState>,
     logger: Logger,
+    generation: usize,
 }
 
 #[derive(Debug, Default)]
 struct ProjectSuccessState {
-    generation: usize,
     scenes: Collection<SceneState>,
 }
 
@@ -41,11 +42,11 @@ struct SceneState {
     name: String,
     scene_success_state: Option<SceneSuccessState>,
     logger: Logger,
+    generation: usize,
 }
 
 #[derive(Debug, Default)]
 struct SceneSuccessState {
-    generation: usize,
     progress: Progress,
     timeline_entries: TimelineEntries,
     config: Config,
@@ -67,13 +68,12 @@ pub enum ProjectStateMessage {
     Compile,
     CompileError(String),
     SetWatching(bool),
-    ReloadProject(ProjectRedirectedResult),
+    ReloadProject(RedirectedResult<()>),
     ProjectSuccessState(ProjectSuccessStateMessage),
 }
 
 #[derive(Clone, Debug)]
 pub enum ProjectSuccessStateMessage {
-    ReloadProjectSuccess,
     SaveVideos,
     SaveVideosReply(Option<PathBuf>),
     Activate(Option<String>),
@@ -82,7 +82,7 @@ pub enum ProjectSuccessStateMessage {
 
 #[derive(Clone, Debug)]
 pub enum SceneStateMessage {
-    ReloadScene(SceneRedirectedResult),
+    ReloadScene(RedirectedResult<Option<SceneData>>),
     SceneSuccessState(SceneSuccessStateMessage),
 }
 
@@ -184,6 +184,7 @@ impl AppState {
                     watching: false,
                     project_success_state: None,
                     logger: Logger::default(),
+                    generation: 0,
                 })
                 .update(message)
                 .map(move |message| AppMessage::ProjectState(path.clone(), message)),
@@ -410,32 +411,48 @@ impl ProjectState {
                 self.logger.log(LogLevel::Trace, "Compilation starts");
                 iced::Task::future(compile_project(self.path.clone())).then(|io_result| {
                     match io_result {
-                        Ok(Ok((project_redirected_result, scene_stream))) => {
-                            iced::Task::done(ProjectStateMessage::ReloadProject(
-                                project_redirected_result,
-                            ))
-                            .chain(
-                                iced::Task::stream(scene_stream).map(
-                                    |(name, scene_redirected_result)| {
-                                        ProjectStateMessage::ProjectSuccessState(
-                                            ProjectSuccessStateMessage::SceneState(
-                                                name,
-                                                SceneStateMessage::ReloadScene(
-                                                    scene_redirected_result,
-                                                ),
-                                            ),
-                                        )
-                                    },
-                                ),
-                            )
+                        Ok(lines) => iced::Task::stream(lines).map(|line| match line {
+                            Ok(line) => match read_and_deserialize(&line) {
+                                LineResult::Project(project_redirected_result) => {
+                                    ProjectStateMessage::ReloadProject(project_redirected_result)
+                                }
+                                LineResult::Scene(name, scene_redirected_result) => {
+                                    ProjectStateMessage::ProjectSuccessState(
+                                        ProjectSuccessStateMessage::SceneState(
+                                            name,
+                                            SceneStateMessage::ReloadScene(scene_redirected_result),
+                                        ),
+                                    )
+                                }
+                            },
+                            Err(_) => ProjectStateMessage::CompileError("Invalid line".to_string()),
+                        }),
+                        // Ok(Ok((project_redirected_result, scene_stream))) => {
+                        //     iced::Task::done(ProjectStateMessage::ReloadProject(
+                        //         project_redirected_result,
+                        //     ))
+                        //     .chain(
+                        //         iced::Task::stream(scene_stream).map(
+                        //             |(name, scene_redirected_result)| {
+                        //                 ProjectStateMessage::ProjectSuccessState(
+                        //                     ProjectSuccessStateMessage::SceneState(
+                        //                         name,
+                        //                         SceneStateMessage::ReloadScene(
+                        //                             scene_redirected_result,
+                        //                         ),
+                        //                     ),
+                        //                 )
+                        //             },
+                        //         ),
+                        //     )
 
-                            // self.logger.log(LogLevel::Trace, "Compilation ends");
-                        }
-                        Ok(Err(compile_error)) => {
-                            // self.logger.log(LogLevel::Error, compile_error);
-                            // self.logger.log(LogLevel::Trace, "Compilation fails");
-                            iced::Task::done(ProjectStateMessage::CompileError(compile_error))
-                        }
+                        //     // self.logger.log(LogLevel::Trace, "Compilation ends");
+                        // }
+                        // Ok(Err(compile_error)) => {
+                        //     // self.logger.log(LogLevel::Error, compile_error);
+                        //     // self.logger.log(LogLevel::Trace, "Compilation fails");
+                        //     iced::Task::done(ProjectStateMessage::CompileError(compile_error))
+                        // }
                         Err(io_error) => {
                             // self.logger.log(LogLevel::Error, io_error.to_string());
                             // self.logger.log(LogLevel::Trace, "Compilation fails");
@@ -463,19 +480,20 @@ impl ProjectState {
                 }
                 match project_redirected_result.result {
                     Ok(()) => {
-                        self.logger.log(LogLevel::Trace, "Project reloaded");
-                        iced::Task::done(ProjectStateMessage::ProjectSuccessState(
-                            ProjectSuccessStateMessage::ReloadProjectSuccess,
-                        ))
+                        self.generation += 1;
+                        self.logger.log(
+                            LogLevel::Trace,
+                            format!("Project reloaded [generation #{}]", self.generation),
+                        );
                     }
                     Err(()) => {
                         self.logger.log(
                             LogLevel::Error,
                             "Failed to reload project (see errors above)",
                         );
-                        iced::Task::none()
                     }
                 }
+                iced::Task::none()
             }
             // ProjectStateMessage::CompileResult(result) => match result {
             //     Ok(scenes_data) => {
@@ -515,10 +533,6 @@ impl ProjectSuccessState {
         message: ProjectSuccessStateMessage,
     ) -> iced::Task<ProjectSuccessStateMessage> {
         match message {
-            ProjectSuccessStateMessage::ReloadProjectSuccess => {
-                self.generation += 1;
-                iced::Task::none()
-            }
             ProjectSuccessStateMessage::SaveVideos => {
                 iced::Task::perform(pick_folder(), ProjectSuccessStateMessage::SaveVideosReply)
             }
@@ -546,6 +560,7 @@ impl ProjectSuccessState {
                     name,
                     scene_success_state: None,
                     logger: Logger::default(),
+                    generation: 0,
                 })
                 .update(message)
                 .map(move |message| ProjectSuccessStateMessage::SceneState(name.clone(), message)),
@@ -565,7 +580,11 @@ impl SceneState {
                 }
                 match scene_redirected_result.result {
                     Ok(Some(scene_data)) => {
-                        self.logger.log(LogLevel::Trace, "Scene reloaded");
+                        self.generation += 1;
+                        self.logger.log(
+                            LogLevel::Trace,
+                            format!("Scene reloaded [generation #{}]", self.generation),
+                        );
                         iced::Task::done(SceneStateMessage::SceneSuccessState(
                             SceneSuccessStateMessage::ReloadSceneSuccess(scene_data),
                         ))
@@ -597,7 +616,6 @@ impl SceneSuccessState {
     ) -> iced::Task<SceneSuccessStateMessage> {
         match message {
             SceneSuccessStateMessage::ReloadSceneSuccess(scene_data) => {
-                self.generation += 1;
                 self.progress = Progress::new(scene_data.time);
                 self.timeline_entries = scene_data.timeline_entries;
                 self.config = Config::new(scene_data.config_values);
@@ -631,80 +649,80 @@ impl SceneSuccessState {
     }
 }
 
-#[derive(Debug)]
-struct ScenePrimitive {
-    time: f32,
-    timeline_entries: TimelineEntries,
-    resolution: iced::Size<u32>,
-    fps: f64,
-    background_color: iced::widget::shader::wgpu::Color,
-}
+// #[derive(Debug)]
+// struct ScenePrimitive {
+//     time: f32,
+//     timeline_entries: TimelineEntries,
+//     resolution: iced::Size<u32>,
+//     fps: f64,
+//     background_color: iced::widget::shader::wgpu::Color,
+// }
 
-impl ScenePrimitive {
-    fn new(scene_success_state: &SceneSuccessState) -> Self {
-        let config = &scene_success_state.config;
-        Self {
-            time: scene_success_state.progress.time(),
-            timeline_entries: scene_success_state.timeline_entries.clone(),
-            resolution: config.get_cloned("camera.resolution"),
-            fps: config.get_cloned("camera.fps"),
-            background_color: config.get_cloned("style.background_color"),
-        }
-    }
-}
+// impl ScenePrimitive {
+//     fn new(scene_success_state: &SceneSuccessState) -> Self {
+//         let config = &scene_success_state.config;
+//         Self {
+//             time: scene_success_state.progress.time(),
+//             timeline_entries: scene_success_state.timeline_entries.clone(),
+//             resolution: config.get_cloned("camera.resolution"),
+//             fps: config.get_cloned("camera.fps"),
+//             background_color: config.get_cloned("style.background_color"),
+//         }
+//     }
+// }
 
-impl iced::widget::shader::Primitive for ScenePrimitive {
-    fn prepare(
-        &self,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
-        storage: &mut iced::widget::shader::Storage,
-        bounds: &iced::Rectangle,
-        viewport: &iced::widget::shader::Viewport,
-    ) {
-        self.timeline_entries
-            .prepare(self.time, device, queue, format, storage, bounds, viewport);
-    }
+// impl iced::widget::shader::Primitive for ScenePrimitive {
+//     fn prepare(
+//         &self,
+//         device: &iced::widget::shader::wgpu::Device,
+//         queue: &iced::widget::shader::wgpu::Queue,
+//         format: iced::widget::shader::wgpu::TextureFormat,
+//         storage: &mut iced::widget::shader::Storage,
+//         bounds: &iced::Rectangle,
+//         viewport: &iced::widget::shader::Viewport,
+//     ) {
+//         self.timeline_entries
+//             .prepare(self.time, device, queue, format, storage, bounds, viewport);
+//     }
 
-    fn render(
-        &self,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        storage: &iced::widget::shader::Storage,
-        target: &iced::widget::shader::wgpu::TextureView,
-        clip_bounds: &iced::Rectangle<u32>,
-    ) {
-        {
-            let mut render_pass =
-                encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[Some(
-                        iced::widget::shader::wgpu::RenderPassColorAttachment {
-                            view: target,
-                            resolve_target: None,
-                            ops: iced::widget::shader::wgpu::Operations {
-                                load: iced::widget::shader::wgpu::LoadOp::Clear(
-                                    self.background_color,
-                                ),
-                                store: iced::widget::shader::wgpu::StoreOp::Store,
-                            },
-                        },
-                    )],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
-            render_pass.set_scissor_rect(
-                clip_bounds.x,
-                clip_bounds.y,
-                clip_bounds.width,
-                clip_bounds.height,
-            );
-        }
-        self.timeline_entries
-            .render(self.time, encoder, storage, target, clip_bounds);
-    }
-}
+//     fn render(
+//         &self,
+//         encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
+//         storage: &iced::widget::shader::Storage,
+//         target: &iced::widget::shader::wgpu::TextureView,
+//         clip_bounds: &iced::Rectangle<u32>,
+//     ) {
+//         {
+//             let mut render_pass =
+//                 encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
+//                     label: None,
+//                     color_attachments: &[Some(
+//                         iced::widget::shader::wgpu::RenderPassColorAttachment {
+//                             view: target,
+//                             resolve_target: None,
+//                             ops: iced::widget::shader::wgpu::Operations {
+//                                 load: iced::widget::shader::wgpu::LoadOp::Clear(
+//                                     self.background_color,
+//                                 ),
+//                                 store: iced::widget::shader::wgpu::StoreOp::Store,
+//                             },
+//                         },
+//                     )],
+//                     depth_stencil_attachment: None,
+//                     timestamp_writes: None,
+//                     occlusion_query_set: None,
+//                 });
+//             render_pass.set_scissor_rect(
+//                 clip_bounds.x,
+//                 clip_bounds.y,
+//                 clip_bounds.width,
+//                 clip_bounds.height,
+//             );
+//         }
+//         self.timeline_entries
+//             .render(self.time, encoder, storage, target, clip_bounds);
+//     }
+// }
 
 // impl iced::widget::shader::Program<AppMessage> for AppState {
 //     type State = ();

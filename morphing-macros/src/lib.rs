@@ -26,8 +26,8 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
     quote::quote! {
         #scene_fn
 
-        ::morphing::toplevel::scene::inventory::submit! {
-            ::morphing::toplevel::scene::SceneModule {
+        ::morphing_core::scene::inventory::submit! {
+            ::morphing_core::scene::SceneModule {
                 name: concat!(module_path!(), "::", stringify!(#scene_name)),
                 config_path: #config_path,
                 scene_fn: #scene_name,

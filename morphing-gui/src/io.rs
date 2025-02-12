@@ -1,14 +1,8 @@
 use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Lines;
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::process::ChildStdout;
-use std::task::Context;
-use std::task::Poll;
-
-use morphing::toplevel::scene::ProjectRedirectedResult;
-use morphing::toplevel::scene::SceneRedirectedResult;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::AsyncReadExt;
 
 // pub(crate) async fn open_project(path: PathBuf) -> anyhow::Result<PathBuf> {
 //     let metadata = cargo_metadata::MetadataCommand::new().exec()?;
@@ -50,60 +44,13 @@ pub(crate) async fn pick_save_file(
 
 pub(crate) async fn compile_project(
     path: PathBuf,
-) -> std::io::Result<
-    Result<
-        (
-            ProjectRedirectedResult,
-            SceneStream<
-                tokio_stream::wrappers::LinesStream<
-                    tokio::io::BufReader<tokio::process::ChildStdout>,
-                >,
-            >,
-        ),
-        String,
-    >,
-> {
+) -> std::io::Result<futures::stream::Iter<Lines<BufReader<ChildStdout>>>> {
     let mut child = std::process::Command::new("cargo")
         .arg("run")
+        .arg("--quiet")
         .current_dir(path)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;
-
-    Ok(if child.wait()?.success() {
-        ChildStdout
-        let mut lines = std::io::BufReader::new(child.stdout.take().unwrap()).lines();
-        let line = lines.next()?.unwrap();
-        Ok((
-            ron::de::from_str(&line).unwrap(),
-            SceneStream(tokio_stream::wrappers::LinesStream::new(lines)),
-        ))
-    } else {
-        let mut buf = String::new();
-        child
-            .stderr
-            .take()
-            .unwrap()
-            .read_to_string(&mut buf)
-            .await?;
-        Err(buf)
-    })
-}
-
-pub(crate) struct SceneStream<S>(S);
-
-impl<S> futures_core::Stream for SceneStream<S>
-where
-    S: Unpin + futures_core::Stream<Item = std::io::Result<String>>,
-{
-    type Item = (String, SceneRedirectedResult);
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.0).poll_next(cx).map(|line| {
-            line.map(|line| {
-                let line = line.unwrap();
-                ron::de::from_str(&line).unwrap()
-            })
-        })
-    }
+    Ok(futures::stream::iter(BufReader::new(child.stdout.take().unwrap()).lines()))
 }
