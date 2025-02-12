@@ -1,14 +1,12 @@
 use std::sync::OnceLock;
 
-use encase::ShaderType;
-use iced::widget::shader::wgpu::util::DeviceExt;
-
+use super::color::Color;
 use super::component::Component;
 use super::component::ComponentShaderTypes;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Paint {
-    pub color: palette::Srgba<f32>,
+    pub color: Color,
     pub gradients: Vec<Gradient>,
 }
 
@@ -18,30 +16,30 @@ pub struct Gradient {
     pub to_position: nalgebra::Vector2<f32>,
     pub radius_slope: f32,
     pub radius_quotient: f32,
-    pub radial_stops: Vec<(f32, palette::Srgba<f32>)>,
-    pub angular_stops: Vec<(f32, palette::Srgba<f32>)>,
+    pub radial_stops: Vec<(f32, Color)>,
+    pub angular_stops: Vec<(f32, Color)>,
 }
 
 pub struct PaintBuffers {
-    paint_uniform: iced::widget::shader::wgpu::Buffer,
+    color_uniform: iced::widget::shader::wgpu::Buffer,
     gradients_storage: iced::widget::shader::wgpu::Buffer,
     radial_stops_storage: iced::widget::shader::wgpu::Buffer,
     angular_stops_storage: iced::widget::shader::wgpu::Buffer,
 }
 
 pub struct PaintShaderTypes {
-    paint_uniform: PaintUniform,
+    color_uniform: ColorUniform,
     gradients_storage: Vec<GradientStorage>,
     radial_stops_storage: Vec<GradientStopStorage>,
     angular_stops_storage: Vec<GradientStopStorage>,
 }
 
-#[derive(ShaderType)]
-struct PaintUniform {
+#[derive(encase::ShaderType)]
+struct ColorUniform {
     color: nalgebra::Vector4<f32>,
 }
 
-#[derive(ShaderType)]
+#[derive(encase::ShaderType)]
 struct GradientStorage {
     from_position: nalgebra::Vector2<f32>,
     to_position: nalgebra::Vector2<f32>,
@@ -51,38 +49,16 @@ struct GradientStorage {
     angular_stops_range: nalgebra::Vector2<u32>,
 }
 
-#[derive(ShaderType)]
+#[derive(encase::ShaderType)]
 struct GradientStopStorage {
     alpha: f32,
     color: nalgebra::Vector4<f32>,
-}
-
-pub struct QueueWriteBufferMutWrapper<'a>(pub iced::widget::shader::wgpu::QueueWriteBufferView<'a>); // TODO: move to another place
-
-impl encase::internal::BufferMut for QueueWriteBufferMutWrapper<'_> {
-    fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
-
-    fn write<const N: usize>(&mut self, offset: usize, val: &[u8; N]) {
-        self.0.write(offset, val);
-    }
-
-    fn write_slice(&mut self, offset: usize, val: &[u8]) {
-        self.0.write_slice(offset, val);
-    }
 }
 
 impl Component for Paint {
     type ShaderTypes = PaintShaderTypes;
 
     fn to_shader_types(&self) -> Self::ShaderTypes {
-        #[inline]
-        fn convert_color(color: palette::Srgba) -> nalgebra::Vector4<f32> {
-            let (r, g, b, a) = color.into_components();
-            nalgebra::Vector4::new(r, g, b, a)
-        }
-
         //let mut gradients = Vec::new();
         let mut radial_stops_storage = Vec::new();
         let mut angular_stops_storage = Vec::new();
@@ -109,13 +85,13 @@ impl Component for Paint {
                     radial_stops_storage.extend(radial_stops.iter().map(|&(alpha, color)| {
                         GradientStopStorage {
                             alpha: alpha,
-                            color: convert_color(color),
+                            color: color.into(),
                         }
                     }));
                     angular_stops_storage.extend(angular_stops.iter().map(|&(alpha, color)| {
                         GradientStopStorage {
                             alpha: alpha,
-                            color: convert_color(color),
+                            color: color.into(),
                         }
                     }));
                     Some(GradientStorage {
@@ -136,8 +112,8 @@ impl Component for Paint {
             )
             .collect();
         PaintShaderTypes {
-            paint_uniform: PaintUniform {
-                color: convert_color(self.color),
+            color_uniform: ColorUniform {
+                color: self.color.into(),
             },
             gradients_storage,
             radial_stops_storage,
@@ -160,14 +136,16 @@ impl ComponentShaderTypes for PaintShaderTypes {
                 &iced::widget::shader::wgpu::BindGroupLayoutDescriptor {
                     label: None,
                     entries: &[
-                        // pub(FRAGMENT) @binding(0) var<uniform> u_paint: PaintUniform;
+                        // pub(FRAGMENT) @binding(0) var<uniform> u_paint: ColorUniform;
                         iced::widget::shader::wgpu::BindGroupLayoutEntry {
                             binding: 0,
                             visibility: iced::widget::shader::wgpu::ShaderStages::FRAGMENT,
                             ty: iced::widget::shader::wgpu::BindingType::Buffer {
                                 ty: iced::widget::shader::wgpu::BufferBindingType::Uniform,
                                 has_dynamic_offset: false,
-                                min_binding_size: Some(PaintUniform::min_size()),
+                                min_binding_size: Some(
+                                    <ColorUniform as encase::ShaderType>::min_size(),
+                                ),
                             },
                             count: None,
                         },
@@ -180,7 +158,9 @@ impl ComponentShaderTypes for PaintShaderTypes {
                                     read_only: true,
                                 },
                                 has_dynamic_offset: false,
-                                min_binding_size: Some(GradientStorage::min_size()),
+                                min_binding_size: Some(
+                                    <GradientStorage as encase::ShaderType>::min_size(),
+                                ),
                             },
                             count: None,
                         },
@@ -193,7 +173,9 @@ impl ComponentShaderTypes for PaintShaderTypes {
                                     read_only: true,
                                 },
                                 has_dynamic_offset: false,
-                                min_binding_size: Some(GradientStopStorage::min_size()),
+                                min_binding_size: Some(
+                                    <GradientStopStorage as encase::ShaderType>::min_size(),
+                                ),
                             },
                             count: None,
                         },
@@ -206,7 +188,9 @@ impl ComponentShaderTypes for PaintShaderTypes {
                                     read_only: true,
                                 },
                                 has_dynamic_offset: false,
-                                min_binding_size: Some(GradientStopStorage::min_size()),
+                                min_binding_size: Some(
+                                    <GradientStopStorage as encase::ShaderType>::min_size(),
+                                ),
                             },
                             count: None,
                         },
@@ -226,7 +210,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
             entries: &[
                 iced::widget::shader::wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: buffers.paint_uniform.as_entire_binding(),
+                    resource: buffers.color_uniform.as_entire_binding(),
                 },
                 iced::widget::shader::wgpu::BindGroupEntry {
                     binding: 1,
@@ -246,9 +230,9 @@ impl ComponentShaderTypes for PaintShaderTypes {
 
     fn new_buffers(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Buffers {
         PaintBuffers {
-            paint_uniform: device.create_buffer(&iced::widget::shader::wgpu::BufferDescriptor {
+            color_uniform: device.create_buffer(&iced::widget::shader::wgpu::BufferDescriptor {
                 label: None,
-                size: self.paint_uniform.size().get(),
+                size: encase::ShaderType::size(&self.color_uniform).get(),
                 usage: iced::widget::shader::wgpu::BufferUsages::UNIFORM
                     | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
@@ -256,7 +240,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
             gradients_storage: device.create_buffer(
                 &iced::widget::shader::wgpu::BufferDescriptor {
                     label: None,
-                    size: self.gradients_storage.size().get(),
+                    size: encase::ShaderType::size(&self.gradients_storage).get(),
                     usage: iced::widget::shader::wgpu::BufferUsages::STORAGE
                         | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
@@ -265,7 +249,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
             radial_stops_storage: device.create_buffer(
                 &iced::widget::shader::wgpu::BufferDescriptor {
                     label: None,
-                    size: self.radial_stops_storage.size().get(),
+                    size: encase::ShaderType::size(&self.radial_stops_storage).get(),
                     usage: iced::widget::shader::wgpu::BufferUsages::STORAGE
                         | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
@@ -274,7 +258,7 @@ impl ComponentShaderTypes for PaintShaderTypes {
             angular_stops_storage: device.create_buffer(
                 &iced::widget::shader::wgpu::BufferDescriptor {
                     label: None,
-                    size: self.angular_stops_storage.size().get(),
+                    size: encase::ShaderType::size(&self.angular_stops_storage).get(),
                     usage: iced::widget::shader::wgpu::BufferUsages::STORAGE
                         | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
@@ -284,10 +268,11 @@ impl ComponentShaderTypes for PaintShaderTypes {
     }
 
     fn initialize_buffers(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Buffers {
+        use iced::widget::shader::wgpu::util::DeviceExt;
         PaintBuffers {
-            paint_uniform: {
+            color_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
-                buffer.write(&self.paint_uniform).unwrap();
+                buffer.write(&self.color_uniform).unwrap();
                 device.create_buffer_init(&iced::widget::shader::wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
@@ -329,45 +314,65 @@ impl ComponentShaderTypes for PaintShaderTypes {
         queue: &iced::widget::shader::wgpu::Queue,
         buffers: &mut Self::Buffers,
     ) {
-        {
-            let mut buffer = encase::UniformBuffer::new(QueueWriteBufferMutWrapper(
-                queue
-                    .write_buffer_with(&buffers.paint_uniform, 0, self.paint_uniform.size())
+        encase::internal::WriteInto::write_into(
+            &self.color_uniform,
+            &mut encase::internal::Writer::new(
+                &self.color_uniform,
+                &mut *queue
+                    .write_buffer_with(
+                        &buffers.color_uniform,
+                        0,
+                        encase::ShaderType::size(&self.color_uniform),
+                    )
                     .unwrap(),
-            ));
-            buffer.write(&self.paint_uniform).unwrap();
-        }
-        {
-            let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
-                queue
-                    .write_buffer_with(&buffers.gradients_storage, 0, self.gradients_storage.size())
+                0,
+            )
+            .unwrap(),
+        );
+        encase::internal::WriteInto::write_into(
+            &self.gradients_storage,
+            &mut encase::internal::Writer::new(
+                &self.gradients_storage,
+                &mut *queue
+                    .write_buffer_with(
+                        &buffers.gradients_storage,
+                        0,
+                        encase::ShaderType::size(&self.gradients_storage),
+                    )
                     .unwrap(),
-            ));
-            buffer.write(&self.gradients_storage).unwrap();
-        }
-        {
-            let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
-                queue
+                0,
+            )
+            .unwrap(),
+        );
+        encase::internal::WriteInto::write_into(
+            &self.radial_stops_storage,
+            &mut encase::internal::Writer::new(
+                &self.radial_stops_storage,
+                &mut *queue
                     .write_buffer_with(
                         &buffers.radial_stops_storage,
                         0,
-                        self.radial_stops_storage.size(),
+                        encase::ShaderType::size(&self.radial_stops_storage),
                     )
                     .unwrap(),
-            ));
-            buffer.write(&self.radial_stops_storage).unwrap();
-        }
-        {
-            let mut buffer = encase::DynamicStorageBuffer::new(QueueWriteBufferMutWrapper(
-                queue
+                0,
+            )
+            .unwrap(),
+        );
+        encase::internal::WriteInto::write_into(
+            &self.angular_stops_storage,
+            &mut encase::internal::Writer::new(
+                &self.angular_stops_storage,
+                &mut *queue
                     .write_buffer_with(
                         &buffers.angular_stops_storage,
                         0,
-                        self.angular_stops_storage.size(),
+                        encase::ShaderType::size(&self.angular_stops_storage),
                     )
                     .unwrap(),
-            ));
-            buffer.write(&self.angular_stops_storage).unwrap();
-        }
+                0,
+            )
+            .unwrap(),
+        );
     }
 }

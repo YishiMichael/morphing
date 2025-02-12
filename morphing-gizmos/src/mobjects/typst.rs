@@ -5,9 +5,13 @@ use std::path::PathBuf;
 
 use comemo::Track;
 use itertools::Itertools;
-use palette::Srgba;
+use morphing_core::config::Config;
+use morphing_core::config::ConfigField;
+use morphing_core::traits::Mobject;
+use morphing_core::traits::MobjectBuilder;
 use ttf_parser::OutlineBuilder;
 
+use super::super::components::color::Color;
 use super::super::components::fill::Fill;
 use super::super::components::paint::Gradient;
 use super::super::components::paint::Paint;
@@ -16,12 +20,8 @@ use super::super::components::path::PathBuilder;
 use super::super::components::stroke::DashPattern;
 use super::super::components::stroke::Stroke;
 use super::super::components::transform::Transform;
-use super::super::toplevel::config::Config;
-use super::super::toplevel::config::ConfigField;
-use super::mobject::Mobject;
-use super::mobject::MobjectBuilder;
-use super::shape::PlanarTrianglesPresentation;
 use super::shape::ShapeMobject;
+use super::shape::VecPlanarTrianglesPresentation;
 
 // Modified from typst/lib.rs, typst-cli/src/world.rs
 
@@ -251,7 +251,7 @@ impl TypstMobject {
     fn typst_paint_to_paint(paint: &typst::visualize::Paint, path: &Path) -> Paint {
         match paint {
             typst::visualize::Paint::Solid(color) => Paint {
-                color: palette::Srgba::from(color.to_vec4()),
+                color: color.to_rgb().to_vec4().into(),
                 gradients: Vec::new(),
             },
             typst::visualize::Paint::Gradient(gradient) => {
@@ -288,7 +288,7 @@ impl TypstMobject {
                                 .stops
                                 .iter()
                                 .map(|(color, ratio)| {
-                                    (ratio.get() as f32, palette::Srgba::from(color.to_vec4()))
+                                    (ratio.get() as f32, color.to_rgb().to_vec4().into())
                                 })
                                 .collect(),
                             angular_stops: Vec::new(),
@@ -319,7 +319,7 @@ impl TypstMobject {
                                 .stops
                                 .iter()
                                 .map(|(color, ratio)| {
-                                    (ratio.get() as f32, palette::Srgba::from(color.to_vec4()))
+                                    (ratio.get() as f32, color.to_rgb().to_vec4().into())
                                 })
                                 .collect(),
                             angular_stops: Vec::new(),
@@ -345,14 +345,14 @@ impl TypstMobject {
                                 .stops
                                 .iter()
                                 .map(|(color, ratio)| {
-                                    (ratio.get() as f32, palette::Srgba::from(color.to_vec4()))
+                                    (ratio.get() as f32, color.to_rgb().to_vec4().into())
                                 })
                                 .collect(),
                         }
                     }
                 };
                 Paint {
-                    color: Srgba::new(1.0, 1.0, 1.0, 1.0),
+                    color: Color::max(),
                     gradients: vec![gradient],
                 }
             }
@@ -597,7 +597,7 @@ impl TypstMobject {
 }
 
 impl Mobject for TypstMobject {
-    type MobjectPresentation = Vec<PlanarTrianglesPresentation>;
+    type MobjectPresentation = VecPlanarTrianglesPresentation;
 
     fn presentation(
         &self,

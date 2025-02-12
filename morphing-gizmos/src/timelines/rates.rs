@@ -1,13 +1,8 @@
 use std::fmt::Debug;
 use std::ops::Range;
 
-use super::alive::traits::ApplyRate;
-
-pub trait Rate:
-    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
-{
-    fn eval(&self, t: f32) -> f32;
-}
+use morphing_core::timeline::ApplyRate;
+use morphing_core::traits::Rate;
 
 macro_rules! rate {
     ($($vis:vis fn $name:ident($t:ident: $t_ty:ty$(, $rate_var:ident: $rate_var_ty:ty)*) -> $return_ty:ty $body:block)*) => {paste::paste! {$(

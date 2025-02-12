@@ -10,7 +10,7 @@ struct TransformUniform {
     scale: f32,
 }
 
-struct PaintUniform {
+struct ColorUniform {
     color: vec4<f32>,
 }
 
@@ -38,7 +38,7 @@ struct VertexOutput {
 }
 
 @group(0) @binding(0) var<uniform> u_transform: TransformUniform;
-@group(1) @binding(0) var<uniform> u_paint: PaintUniform;
+@group(1) @binding(0) var<uniform> u_color: ColorUniform;
 @group(1) @binding(1) var<storage> s_gradients: array<GradientStorage>;
 @group(1) @binding(2) var<storage> s_radial_stops: array<GradientStopStorage>;
 @group(1) @binding(3) var<storage> s_angular_stops: array<GradientStopStorage>;
@@ -67,7 +67,7 @@ fn apply_motor(
 fn fs_main(
     in: VertexOutput,
 ) -> @location(0) vec4<f32> {
-    var color = u_paint.color;
+    var color = u_color.color;
     for (var i = 0u; i < arrayLength(&s_gradients); i++) {
         color *= eval_gradient_color(s_gradients[i], in.position);
     }

@@ -14,8 +14,5 @@ futures-core = "0.3.31"
 humantime = "2.1.0"
 iced = { version = "0.13.1", features = ["advanced"] }
 iced_aw = "0.11.0"
-morphing = { path = "../morphing" }
+morphing-core = { path = "../morphing-core" }
 rfd = "0.15.2"
-ron = "0.8.1"
-tokio = "1.43.0"
-tokio-stream = { version = "0.1.17", features = ["io-util"] }

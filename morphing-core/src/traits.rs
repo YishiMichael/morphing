@@ -1,6 +1,9 @@
 use std::fmt::Debug;
 
-use super::super::toplevel::config::Config;
+use super::config::Config;
+use super::timeline::Alive;
+use super::timeline::SteadyTimeline;
+use super::timeline::Supervisor;
 
 pub trait Mobject:
     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
@@ -15,44 +18,71 @@ pub trait Mobject:
 
 pub trait MobjectPresentation: 'static + Send + Sync {
     fn draw<'rp>(&'rp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'rp>);
+}
 
-    fn render(
+pub trait MobjectDiff<M>:
+    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+where
+    M: Mobject,
+{
+    fn apply(&self, mobject: &mut M, alpha: f32);
+    fn apply_presentation(
         &self,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        target: &iced::widget::shader::wgpu::TextureView,
-        clip_bounds: &iced::Rectangle<u32>,
-    ) {
-        let mut render_pass =
-            encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(
-                    iced::widget::shader::wgpu::RenderPassColorAttachment {
-                        view: target,
-                        resolve_target: None,
-                        ops: iced::widget::shader::wgpu::Operations {
-                            load: iced::widget::shader::wgpu::LoadOp::Load,
-                            store: iced::widget::shader::wgpu::StoreOp::Store,
-                        },
-                    },
-                )],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-        render_pass.set_scissor_rect(
-            clip_bounds.x,
-            clip_bounds.y,
-            clip_bounds.width,
-            clip_bounds.height,
-        );
-        self.draw(&mut render_pass);
-    }
+        mobject_presentation: &mut M::MobjectPresentation,
+        reference_mobject: &M,
+        alpha: f32,
+        queue: &iced::widget::shader::wgpu::Queue,
+    ); // mobject_presentation write-only
 }
 
 pub trait MobjectBuilder {
     type Instantiation: Mobject;
 
     fn instantiate(self, config: &Config) -> Self::Instantiation;
+}
+
+pub trait Rate:
+    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+{
+    fn eval(&self, t: f32) -> f32;
+}
+
+pub trait Act<M>: Clone
+where
+    M: Mobject,
+{
+    type Diff: MobjectDiff<M>;
+
+    fn act(self, mobject: &M) -> Self::Diff;
+}
+
+pub trait Update<M>:
+    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+where
+    M: Mobject,
+{
+    fn update(&self, mobject: &mut M, alpha: f32);
+    fn update_presentation(
+        &self,
+        mobject_presentation: &mut M::MobjectPresentation,
+        reference_mobject: &M,
+        alpha: f32,
+        device: &iced::widget::shader::wgpu::Device,
+        queue: &iced::widget::shader::wgpu::Queue,
+    ); // mobject_presentation write-only
+}
+
+pub trait Construct<M>: Clone
+where
+    M: Mobject,
+{
+    type Output: Mobject;
+
+    fn construct<'c>(
+        self,
+        input: Alive<'c, SteadyTimeline<M>>,
+        supervisor: &Supervisor,
+    ) -> Alive<'c, SteadyTimeline<Self::Output>>;
 }
 
 // TODO: alive container morphisms

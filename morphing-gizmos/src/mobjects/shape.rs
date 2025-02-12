@@ -7,8 +7,13 @@ use lyon::tessellation::{
     BuffersBuilder, FillOptions, FillVertex, FillVertexConstructor, StrokeOptions, StrokeVertex,
     StrokeVertexConstructor,
 };
+use morphing_core::config::Config;
+use morphing_core::traits::Mobject;
+use morphing_core::traits::MobjectBuilder;
+use morphing_core::traits::MobjectPresentation;
 
 use super::super::components::camera::{Camera, CameraShaderTypes};
+use super::super::components::color::Palette;
 use super::super::components::component::Component;
 use super::super::components::component::ComponentShaderTypes;
 use super::super::components::fill::Fill;
@@ -17,9 +22,6 @@ use super::super::components::path::Path;
 use super::super::components::stroke::Stroke;
 use super::super::components::transform::Transform;
 use super::super::components::transform::TransformShaderTypes;
-use super::super::toplevel::config::Config;
-use super::super::toplevel::constants::Color;
-use super::mobject::{Mobject, MobjectBuilder, MobjectPresentation};
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ShapeMobject {
@@ -50,14 +52,6 @@ impl StrokeVertexConstructor<Vertex> for VertexConstructor {
         let (x, y) = vertex.position().into();
         Vertex {
             position: nalgebra::Vector2::new(x, y),
-        }
-    }
-}
-
-impl MobjectPresentation for Vec<PlanarTrianglesPresentation> {
-    fn draw<'rp>(&'rp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'rp>) {
-        for planar_triangles_presentation in self {
-            planar_triangles_presentation.draw(render_pass);
         }
     }
 }
@@ -173,8 +167,36 @@ impl MobjectPresentation for PlanarTrianglesPresentation {
     }
 }
 
+pub struct VecPlanarTrianglesPresentation(Vec<PlanarTrianglesPresentation>);
+
+impl FromIterator<PlanarTrianglesPresentation> for VecPlanarTrianglesPresentation {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = PlanarTrianglesPresentation>,
+    {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl IntoIterator for VecPlanarTrianglesPresentation {
+    type Item = PlanarTrianglesPresentation;
+    type IntoIter = <Vec<PlanarTrianglesPresentation> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl MobjectPresentation for VecPlanarTrianglesPresentation {
+    fn draw<'rp>(&'rp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'rp>) {
+        for planar_triangles_presentation in &self.0 {
+            planar_triangles_presentation.draw(render_pass);
+        }
+    }
+}
+
 impl Mobject for ShapeMobject {
-    type MobjectPresentation = Vec<PlanarTrianglesPresentation>;
+    type MobjectPresentation = VecPlanarTrianglesPresentation;
 
     fn presentation(
         &self,
@@ -316,7 +338,7 @@ impl MobjectBuilder for Rect {
             fill: Some(Fill {
                 options: FillOptions::default(),
                 paint: Paint {
-                    color: Color::White.into(),
+                    color: Palette::White.into(),
                     gradients: Vec::new(),
                 },
             }),
@@ -324,7 +346,7 @@ impl MobjectBuilder for Rect {
                 dash_pattern: None,
                 options: StrokeOptions::default(),
                 paint: Paint {
-                    color: Color::Teal.into(),
+                    color: Palette::Teal.into(),
                     gradients: Vec::new(),
                 },
             }),

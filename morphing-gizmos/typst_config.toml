@@ -1,0 +1,5 @@
+[typst]
+inputs = []
+include_system_fonts = true
+include_embedded_fonts = true
+font_paths = []

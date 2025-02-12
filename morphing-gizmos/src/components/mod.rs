@@ -1,10 +1,9 @@
 pub mod camera;
+pub mod color;
 pub mod component;
 pub mod fill;
-pub mod interpolate;
 pub mod motor;
 pub mod paint;
 pub mod path;
-pub mod scalar;
 pub mod stroke;
 pub mod transform;

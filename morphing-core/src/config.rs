@@ -1,8 +1,20 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
+
+pub struct ConfigFallbackContent(pub &'static str);
+
+impl Deref for ConfigFallbackContent {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+inventory::collect!(ConfigFallbackContent);
 
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct ConfigValues(Vec<Arc<toml::Value>>);
@@ -43,10 +55,10 @@ impl Config {
         }
     }
 
-    pub fn operate<F, T, OT>(&self, path: &'static str, f: F) -> OT
+    pub fn operate<F, T, FO>(&self, path: &'static str, f: F) -> FO
     where
         T: ConfigField,
-        F: FnOnce(&T) -> OT,
+        F: FnOnce(&T) -> FO,
     {
         f(self
             .storage
@@ -55,6 +67,13 @@ impl Config {
             .or_insert_with(HashMap::new)
             .entry(path)
             .or_insert_with(|| T::parse(self.values.read_value(path))))
+    }
+
+    pub fn get_cloned<T>(&self, path: &'static str) -> T
+    where
+        T: Clone + ConfigField,
+    {
+        self.operate(path, T::clone)
     }
 }
 
@@ -80,6 +99,12 @@ impl ConfigField for bool {
     }
 }
 
+impl ConfigField for String {
+    fn parse(value: &toml::Value) -> Self {
+        value.as_str().unwrap().into()
+    }
+}
+
 impl<T> ConfigField for Vec<T>
 where
     T: ConfigField,
@@ -96,14 +121,41 @@ where
 
 impl ConfigField for PathBuf {
     fn parse(value: &toml::Value) -> Self {
-        PathBuf::from_str(value.as_str().unwrap()).unwrap().into()
+        value.as_str().unwrap().into()
     }
 }
 
-impl ConfigField for palette::Srgba {
-    fn parse(value: &toml::Value) -> Self {
-        palette::Srgba::from_str(value.as_str().unwrap())
-            .unwrap()
-            .into()
-    }
-}
+// impl ConfigField for palette::Srgba {
+//     fn parse(value: &toml::Value) -> Self {
+//         palette::Srgba::from_str(value.as_str().unwrap())
+//             .unwrap()
+//             .into()
+//     }
+// }
+
+// impl ConfigField for palette::Srgba<f64> {
+//     fn parse(value: &toml::Value) -> Self {
+//         palette::Srgba::from_str(value.as_str().unwrap())
+//             .unwrap()
+//             .into()
+//     }
+// }
+
+// impl ConfigField for iced::widget::shader::wgpu::Color {
+//     fn parse(value: &toml::Value) -> Self {
+//         let color = palette::Srgba::<f64>::parse(value);
+//         iced::widget::shader::wgpu::Color {
+//             r: color.red,
+//             g: color.green,
+//             b: color.blue,
+//             a: color.alpha,
+//         }
+//     }
+// }
+
+// impl ConfigField for iced::Size<u32> {
+//     fn parse(value: &toml::Value) -> Self {
+//         let (width, height) = value.as_str().unwrap().split_once('x').unwrap();
+//         iced::Size::new(width.parse().unwrap(), height.parse().unwrap())
+//     }
+// }

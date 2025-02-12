@@ -1,0 +1,5 @@
+[general]
+resolution = "1920x1080"
+fps = 60.0
+foreground_color = "#FFFFFF"
+background_color = "#000000"

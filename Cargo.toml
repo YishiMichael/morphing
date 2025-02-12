@@ -2,7 +2,8 @@
 resolver = "2"
 members = [
     "examples/hello_morphing",
-    "morphing",
+    "morphing-core",
+    "morphing-gizmos",
     "morphing-gui",
     "morphing-macros",
     "winit-egui-wgpu-template",

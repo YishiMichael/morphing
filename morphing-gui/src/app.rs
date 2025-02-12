@@ -54,7 +54,6 @@ struct SceneSuccessState {
 #[derive(Clone, Debug)]
 pub enum AppMessage {
     Menu, // Sentinel message to activate menu buttons
-    // SetDefaultSceneSettings(SceneSettings),
     Open,
     OpenReply(Option<Vec<PathBuf>>),
     Close(PathBuf),
@@ -158,12 +157,18 @@ impl AppState {
             //     iced::Task::none()
             // }
             AppMessage::Open => iced::Task::perform(pick_folders(), AppMessage::OpenReply),
-            AppMessage::OpenReply(reply) => match reply {
-                Some(paths) => iced::Task::batch(paths.into_iter().map(|path| {
-                    iced::Task::done(AppMessage::ProjectState(path, ProjectStateMessage::Compile))
-                })),
-                None => iced::Task::none(),
-            },
+            AppMessage::OpenReply(reply) => {
+                dbg!(reply.clone());
+                match reply {
+                    Some(paths) => iced::Task::batch(paths.into_iter().map(|path| {
+                        iced::Task::done(AppMessage::ProjectState(
+                            path,
+                            ProjectStateMessage::Compile,
+                        ))
+                    })), // TODO: verify they are crate folders
+                    None => iced::Task::none(),
+                }
+            }
             AppMessage::Close(path) => {
                 self.projects.remove(&path);
                 iced::Task::none()
@@ -630,9 +635,22 @@ impl SceneSuccessState {
 struct ScenePrimitive {
     time: f32,
     timeline_entries: TimelineEntries,
-    size: (u32, u32),
+    resolution: iced::Size<u32>,
     fps: f64,
     background_color: iced::widget::shader::wgpu::Color,
+}
+
+impl ScenePrimitive {
+    fn new(scene_success_state: &SceneSuccessState) -> Self {
+        let config = &scene_success_state.config;
+        Self {
+            time: scene_success_state.progress.time(),
+            timeline_entries: scene_success_state.timeline_entries.clone(),
+            resolution: config.get_cloned("camera.resolution"),
+            fps: config.get_cloned("camera.fps"),
+            background_color: config.get_cloned("style.background_color"),
+        }
+    }
 }
 
 impl iced::widget::shader::Primitive for ScenePrimitive {
