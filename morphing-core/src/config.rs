@@ -1,8 +1,8 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::RwLock;
 
 pub struct ConfigFallbackContent(pub &'static str);
 
@@ -44,14 +44,14 @@ impl ConfigValues {
 #[derive(Debug, Default)]
 pub struct Config {
     values: ConfigValues,
-    storage: RefCell<type_map::TypeMap>,
+    storage: RwLock<type_map::TypeMap>,
 }
 
 impl Config {
     pub fn new(values: ConfigValues) -> Self {
         Self {
             values,
-            storage: RefCell::new(type_map::TypeMap::new()),
+            storage: RwLock::new(type_map::TypeMap::new()),
         }
     }
 
@@ -60,13 +60,24 @@ impl Config {
         T: ConfigField,
         F: FnOnce(&T) -> FO,
     {
-        f(self
+        if let Some(element) = self
             .storage
-            .borrow_mut()
-            .entry()
-            .or_insert_with(HashMap::new)
-            .entry(path)
-            .or_insert_with(|| T::parse(self.values.read_value(path))))
+            .read()
+            .unwrap()
+            .get::<HashMap<&str, T>>()
+            .and_then(|map| map.get(path))
+        {
+            f(element)
+        } else {
+            f(self
+                .storage
+                .write()
+                .unwrap()
+                .entry()
+                .or_insert_with(HashMap::new)
+                .entry(path)
+                .or_insert_with(|| T::parse(self.values.read_value(path))))
+        }
     }
 
     pub fn get_cloned<T>(&self, path: &'static str) -> T

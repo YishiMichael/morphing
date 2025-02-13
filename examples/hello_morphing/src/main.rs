@@ -23,5 +23,5 @@ fn another_demo_scene(sv: &Supervisor<'_>) {
 }
 
 fn main() {
-    export_scenes(SceneFilter::All);
+    export_scenes(SceneFilter::All, None);
 }

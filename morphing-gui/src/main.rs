@@ -1,15 +1,12 @@
 #![feature(option_get_or_insert_default)]
 
-mod app;
-mod collection;
-mod io;
-mod logger;
-mod progress;
-
-use app::AppState;
+mod message;
+mod state;
+mod update;
+mod view;
 
 fn main() -> iced::Result {
-    iced::application("Morphing GUI", AppState::update, AppState::view)
-        .theme(AppState::theme)
+    iced::application("Morphing GUI", update::update, view::view)
+        .theme(view::theme)
         .run()
 }

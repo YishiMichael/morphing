@@ -18,8 +18,8 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
     let scene_fn = syn::parse_macro_input!(tokens as syn::ItemFn);
 
     let scene_name = scene_fn.sig.ident.clone();
-    let config_path = if let Some(config_path) = args.config_path {
-        quote::quote! { Some(#config_path) }
+    let config_content = if let Some(config_path) = args.config_path {
+        quote::quote! { Some(::std::include_str!(#config_path)) }
     } else {
         quote::quote! { None }
     };
@@ -29,7 +29,7 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
         ::morphing_core::scene::inventory::submit! {
             ::morphing_core::scene::SceneModule {
                 name: concat!(module_path!(), "::", stringify!(#scene_name)),
-                config_path: #config_path,
+                config_content: #config_content,
                 scene_fn: #scene_name,
             }
         }
