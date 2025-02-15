@@ -3,7 +3,7 @@ use proc_macro::TokenStream;
 
 #[derive(FromMeta)]
 struct SceneArgs {
-    config_path: Option<syn::LitStr>,
+    config: Option<syn::LitStr>,
 }
 
 #[proc_macro_attribute]
@@ -18,8 +18,8 @@ pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
     let scene_fn = syn::parse_macro_input!(tokens as syn::ItemFn);
 
     let scene_name = scene_fn.sig.ident.clone();
-    let config_content = if let Some(config_path) = args.config_path {
-        quote::quote! { Some(::std::include_str!(#config_path)) }
+    let config_content = if let Some(config) = args.config {
+        quote::quote! { Some(::std::include_str!(#config)) }
     } else {
         quote::quote! { None }
     };

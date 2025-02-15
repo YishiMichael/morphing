@@ -13,7 +13,7 @@ fn demo_scene(sv: &Supervisor<'_>) {
     sv.wait(12.0);
 }
 
-#[scene(config_path = "my_config.toml")]
+#[scene(config = "my_config.toml")]
 fn another_demo_scene(sv: &Supervisor<'_>) {
     sv.wait(1.0);
     let mobject = sv.spawn(Rect(nalgebra::Vector2::new(1.0, 1.0)));

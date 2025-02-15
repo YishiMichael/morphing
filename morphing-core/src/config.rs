@@ -1,8 +1,7 @@
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::fmt::Debug;
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::RwLock;
 
 pub struct ConfigFallbackContent(pub &'static str);
 
@@ -44,97 +43,93 @@ impl ConfigValues {
 #[derive(Debug, Default)]
 pub struct Config {
     values: ConfigValues,
-    storage: RwLock<type_map::TypeMap>,
+    storage: RefCell<typemap_rev::TypeMap<dyn typemap_rev::DebuggableStorage>>,
 }
 
 impl Config {
     pub fn new(values: ConfigValues) -> Self {
         Self {
             values,
-            storage: RwLock::new(type_map::TypeMap::new()),
+            storage: RefCell::new(typemap_rev::TypeMap::custom()),
         }
     }
 
-    pub fn operate<F, T, FO>(&self, path: &'static str, f: F) -> FO
+    pub fn operate<CF, F, FO>(&self, path: &'static str, f: F) -> FO
     where
-        T: ConfigField,
-        F: FnOnce(&T) -> FO,
+        CF: ConfigField,
+        CF::Value: Debug,
+        F: FnOnce(&CF::Value) -> FO,
     {
-        if let Some(element) = self
-            .storage
-            .read()
-            .unwrap()
-            .get::<HashMap<&str, T>>()
-            .and_then(|map| map.get(path))
-        {
-            f(element)
+        if let Some(value) = self.storage.borrow().get::<CF>() {
+            f(value)
         } else {
             f(self
                 .storage
-                .write()
-                .unwrap()
-                .entry()
-                .or_insert_with(HashMap::new)
-                .entry(path)
-                .or_insert_with(|| T::parse(self.values.read_value(path))))
+                .borrow_mut()
+                .entry::<CF>()
+                .or_insert(CF::parse(self.values.read_value(path))))
         }
     }
 
-    pub fn get_cloned<T>(&self, path: &'static str) -> T
+    pub fn get_cloned<CF>(&self, path: &'static str) -> CF::Value
     where
-        T: Clone + ConfigField,
+        CF: ConfigField,
+        CF::Value: Debug,
+        CF::Value: Clone,
     {
-        self.operate(path, T::clone)
+        self.operate::<CF, _, _>(path, CF::Value::clone)
     }
 }
 
-pub trait ConfigField: 'static + Sized {
-    fn parse(value: &toml::Value) -> Self;
+pub trait ConfigField: 'static + Send + Sized + Sync + typemap_rev::TypeMapKey {
+    const NAME: &'static str;
+
+    fn parse(value: &toml::Value) -> Self::Value;
 }
 
-impl ConfigField for i64 {
-    fn parse(value: &toml::Value) -> Self {
-        value.as_integer().unwrap()
-    }
-}
+// impl ConfigField for i64 {
+//     fn parse(value: &toml::Value) -> Self {
+//         value.as_integer().unwrap()
+//     }
+// }
 
-impl ConfigField for f64 {
-    fn parse(value: &toml::Value) -> Self {
-        value.as_float().unwrap()
-    }
-}
+// impl ConfigField for f64 {
+//     fn parse(value: &toml::Value) -> Self {
+//         value.as_float().unwrap()
+//     }
+// }
 
-impl ConfigField for bool {
-    fn parse(value: &toml::Value) -> Self {
-        value.as_bool().unwrap()
-    }
-}
+// impl ConfigField for bool {
+//     fn parse(value: &toml::Value) -> Self {
+//         value.as_bool().unwrap()
+//     }
+// }
 
-impl ConfigField for String {
-    fn parse(value: &toml::Value) -> Self {
-        value.as_str().unwrap().into()
-    }
-}
+// impl ConfigField for String {
+//     fn parse(value: &toml::Value) -> Self {
+//         value.as_str().unwrap().into()
+//     }
+// }
 
-impl<T> ConfigField for Vec<T>
-where
-    T: ConfigField,
-{
-    fn parse(value: &toml::Value) -> Self {
-        value
-            .as_array()
-            .unwrap()
-            .into_iter()
-            .map(|element| T::parse(element))
-            .collect()
-    }
-}
+// impl<T> ConfigField for Vec<T>
+// where
+//     T: ConfigField,
+// {
+//     fn parse(value: &toml::Value) -> Self {
+//         value
+//             .as_array()
+//             .unwrap()
+//             .into_iter()
+//             .map(|element| T::parse(element))
+//             .collect()
+//     }
+// // }
 
-impl ConfigField for PathBuf {
-    fn parse(value: &toml::Value) -> Self {
-        value.as_str().unwrap().into()
-    }
-}
+// impl ConfigField for PathBuf {
+//     fn parse(value: &toml::Value) -> Self {
+//         value.as_str().unwrap().into()
+//     }
+// }
 
 // impl ConfigField for palette::Srgba {
 //     fn parse(value: &toml::Value) -> Self {

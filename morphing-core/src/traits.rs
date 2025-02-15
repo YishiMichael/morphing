@@ -10,14 +10,11 @@ pub trait Mobject:
 {
     type MobjectPresentation: MobjectPresentation;
 
-    fn presentation(
-        &self,
-        device: &iced::widget::shader::wgpu::Device,
-    ) -> Self::MobjectPresentation;
+    fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
 }
 
 pub trait MobjectPresentation: 'static + Send + Sync {
-    fn draw<'rp>(&'rp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'rp>);
+    fn draw<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>);
 }
 
 pub trait MobjectDiff<M>:
@@ -31,7 +28,7 @@ where
         mobject_presentation: &mut M::MobjectPresentation,
         reference_mobject: &M,
         alpha: f32,
-        queue: &iced::widget::shader::wgpu::Queue,
+        queue: &wgpu::Queue,
     ); // mobject_presentation write-only
 }
 
@@ -46,6 +43,8 @@ pub trait Rate:
 {
     fn eval(&self, t: f32) -> f32;
 }
+
+pub trait IncreasingRate: Rate {}
 
 pub trait Act<M>: Clone
 where
@@ -67,8 +66,8 @@ where
         mobject_presentation: &mut M::MobjectPresentation,
         reference_mobject: &M,
         alpha: f32,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
     ); // mobject_presentation write-only
 }
 
@@ -83,6 +82,16 @@ where
         input: Alive<'c, SteadyTimeline<M>>,
         supervisor: &Supervisor,
     ) -> Alive<'c, SteadyTimeline<Self::Output>>;
+}
+
+pub trait Storage {
+    type Key;
+
+    fn generate_key<T>(&self, value: &T) -> Self::Key;
+    fn get_unwrap<T>(&self, key: &Self::Key) -> &T; // TODO: operate closure?
+    fn get_mut_or_insert<T, F>(&mut self, key: &Self::Key, f: F) -> &mut T
+    where
+        F: FnOnce() -> T;
 }
 
 // TODO: alive container morphisms

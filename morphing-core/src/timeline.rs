@@ -12,133 +12,301 @@ use super::traits::MobjectBuilder;
 use super::traits::MobjectDiff;
 use super::traits::MobjectPresentation;
 use super::traits::Rate;
+use super::traits::Storage;
 use super::traits::Update;
 
-pub trait Timeline:
-    'static + Send + Sync + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
-{
-    type Presentation: Send;
+// #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
+// pub struct TimelineId(u64);
 
-    fn presentation(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Presentation;
+// impl TimelineId {
+//     fn new(timeline: &serde_traitobject::Arc<dyn Timeline>) -> Self {
+//         // Hash `Arc<T>` instead of `T`.
+//         // Presentation maps inside `storage` are identified only by `T::Presentation` type, without `T`.
+//         Self(seahash::hash(
+//             &ron::ser::to_string(timeline).unwrap().into_bytes(),
+//         ))
+//     }
+
+//     fn prepare_presentation<P, C, F>(
+//         self,
+//         storage: &mut iced::widget::shader::Storage,
+//         device: &wgpu::Device,
+//         presentation_constructor: C,
+//         prepare: F,
+//     ) where
+//         P: 'static + Send,
+//         C: FnOnce(&wgpu::Device) -> P,
+//         F: FnOnce(&mut P),
+//     {
+//         prepare(
+//             &mut match storage.get_mut::<dashmap::DashMap<Self, P>>() {
+//                 Some(presentation_map) => presentation_map,
+//                 None => {
+//                     storage.store::<dashmap::DashMap<Self, P>>(dashmap::DashMap::new());
+//                     storage.get_mut::<dashmap::DashMap<Self, P>>().unwrap()
+//                 }
+//             }
+//             .entry(self)
+//             .or_insert_with(|| presentation_constructor(device)),
+//         )
+//     }
+
+//     fn render_presentation<P, F>(self, storage: &iced::widget::shader::Storage, render: F)
+//     where
+//         P: 'static,
+//         F: FnOnce(&P),
+//     {
+//         render(
+//             &storage
+//                 .get::<dashmap::DashMap<Self, P>>()
+//                 .unwrap()
+//                 .get(&self)
+//                 .unwrap(),
+//         )
+//     }
+// }
+
+trait TimelineNode<S>:
+    'static + Send + Sync + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
+where
+    S: Storage,
+{
+    type MobjectTimelineEntries: Iterator<Item = MobjectTimelineEntry<S>>;
+
+    fn collect_entries(
+        self,
+        time_interval: Range<f32>,
+        storage: &S,
+    ) -> Self::MobjectTimelineEntries;
+
+    // type Descendants: Iterator<Item = Arc<dyn MobjectTimelineEntry<S>>>;
+    // type Presentation: Send;
+
+    // fn presentation(&self, device: &wgpu::Device) -> Self::Presentation;
+    // fn prepare(
+    //     &self,
+    //     id: TimelineId,
+    //     time_interval: Range<f32>,
+    //     time: f32,
+    //     // presentation: &mut Self::Presentation,
+    //     device: &wgpu::Device,
+    //     queue: &wgpu::Queue,
+    //     format: wgpu::TextureFormat,
+    //     storage: &mut iced::widget::shader::Storage,
+    //     bounds: &iced::Rectangle,
+    //     viewport: &iced::widget::shader::Viewport,
+    // );
+    // fn render(
+    //     &self,
+    //     id: TimelineId,
+    //     // time_interval: Range<f32>,
+    //     // time: f32,
+    //     // presentation: &Self::Presentation,
+    //     encoder: &mut wgpu::CommandEncoder,
+    //     storage: &iced::widget::shader::Storage,
+    //     target: &wgpu::TextureView,
+    //     clip_bounds: &iced::Rectangle<u32>,
+    // );
+}
+
+trait TimelineLeaf<S>:
+    'static + Send + Sync + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
+where
+    S: Storage,
+{
+    fn generate_key(&self, storage: &S) -> S::Key;
+    fn dyn_prepare(
+        &self,
+        time: f32,
+        storage: &mut S,
+        key: &S::Key,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    );
+}
+
+trait TimelinePrepare {
+    type MobjectPresentation: MobjectPresentation;
+    // type Rate: Rate;
+
     fn prepare(
         &self,
-        time_interval: Range<f32>,
         time: f32,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
-        presentation: &mut Self::Presentation,
-        bounds: &iced::Rectangle,
-        viewport: &iced::widget::shader::Viewport,
-    );
-    fn render(
-        &self,
-        time_interval: Range<f32>,
-        time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        presentation: &Self::Presentation,
-        target: &iced::widget::shader::wgpu::TextureView,
-        clip_bounds: &iced::Rectangle<u32>,
+        presentation: &mut Self::MobjectPresentation,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
     );
 }
 
-trait DynTimeline:
-    Send + Sync + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
-{
-    fn dyn_prepare(
-        &self,
-        hash: u64,
-        time_interval: Range<f32>,
-        time: f32,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
-        storage: &mut iced::widget::shader::Storage,
-        bounds: &iced::Rectangle,
-        viewport: &iced::widget::shader::Viewport,
-    );
-    fn dyn_render(
-        &self,
-        hash: u64,
-        time_interval: Range<f32>,
-        time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        storage: &iced::widget::shader::Storage,
-        target: &iced::widget::shader::wgpu::TextureView,
-        clip_bounds: &iced::Rectangle<u32>,
-    );
+struct MobjectTimeline<T, M> {
+    timeline: T,
+    mobject: M,
+    // rate: R,
+    // mobject_storage_key: K,
 }
 
-impl<T> DynTimeline for T
+impl<T, S> TimelineNode<S> for T
 where
-    T: Timeline,
+    T: TimelineLeaf<S>,
+    S: Storage,
 {
-    fn dyn_prepare(
-        &self,
-        hash: u64,
+    type MobjectTimelineEntries = std::iter::Once<MobjectTimelineEntry<S>>;
+
+    fn collect_entries(
+        self,
         time_interval: Range<f32>,
-        time: f32,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
-        storage: &mut iced::widget::shader::Storage,
-        bounds: &iced::Rectangle,
-        viewport: &iced::widget::shader::Viewport,
-    ) {
-        let presentation_map = match storage.get_mut::<dashmap::DashMap<u64, T::Presentation>>() {
-            Some(presentation_map) => presentation_map,
-            None => {
-                storage.store::<dashmap::DashMap<u64, T::Presentation>>(dashmap::DashMap::new());
-                storage
-                    .get_mut::<dashmap::DashMap<u64, T::Presentation>>()
-                    .unwrap()
-            }
-        };
-        let mut presentation = presentation_map
-            .entry(hash)
-            .or_insert_with(|| self.presentation(device));
-        self.prepare(
+        storage: &S,
+    ) -> Self::MobjectTimelineEntries {
+        std::iter::once(MobjectTimelineEntry {
             time_interval,
-            time,
-            device,
-            queue,
-            format,
-            &mut presentation,
-            bounds,
-            viewport,
-        );
+            storage_key: self.generate_key(storage),
+            timeline: Arc::new(self),
+        })
+    }
+}
+
+impl<T, M, S> TimelineLeaf<S> for MobjectTimeline<T, M>
+where
+    T: TimelinePrepare<MobjectPresentation = M::MobjectPresentation>,
+    M: Mobject,
+    // R: Rate,
+    S: Storage,
+{
+    fn generate_key(&self, storage: &S) -> S::Key {
+        storage.generate_key(&self.mobject) // TODO: serde_traitobject::Arc? timeline?
     }
 
-    fn dyn_render(
+    fn dyn_prepare(
         &self,
-        hash: u64,
-        time_interval: Range<f32>,
         time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        storage: &iced::widget::shader::Storage,
-        target: &iced::widget::shader::wgpu::TextureView,
-        clip_bounds: &iced::Rectangle<u32>,
+        storage: &mut S,
+        key: &S::Key,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
     ) {
-        let presentation_map = storage
-            .get::<dashmap::DashMap<u64, T::Presentation>>()
-            .unwrap();
-        let presentation = presentation_map.get(&hash).unwrap();
-        self.render(
-            time_interval,
-            time,
-            encoder,
-            &presentation,
-            target,
-            clip_bounds,
-        );
+        let presentation = storage.get_mut_or_insert(key, || self.mobject.presentation(device));
+        self.timeline
+            .prepare(time, presentation, device, queue, format);
     }
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct TimelineEntry {
-    hash: u64,
+struct MobjectTimelineEntry<S>
+where
+    S: Storage,
+{
     time_interval: Range<f32>,
-    timeline: serde_traitobject::Arc<dyn DynTimeline>,
+    storage_key: S::Key,
+    timeline: Arc<dyn TimelineLeaf<S>>,
+}
+
+struct CompositeTimeline
+
+impl<I, S> TimelineNode<S> for I
+where
+    I: Iterator<Item = MobjectTimelineEntry<S>>,
+{
+    type MobjectTimelineEntries = Self;
+
+    fn collect_entries(
+        self,
+        time_interval: Range<f32>,
+        storage: &S,
+    ) -> Self::MobjectTimelineEntries {
+    }
+}
+
+// trait DynTimeline:
+//     Send + Sync + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
+// {
+//     fn dyn_prepare(
+//         &self,
+//         hash: u64,
+//         time_interval: Range<f32>,
+//         time: f32,
+//         device: &wgpu::Device,
+//         queue: &wgpu::Queue,
+//         format: wgpu::TextureFormat,
+//         storage: &mut iced::widget::shader::Storage,
+//         bounds: &iced::Rectangle,
+//         viewport: &iced::widget::shader::Viewport,
+//     );
+//     fn dyn_render(
+//         &self,
+//         hash: u64,
+//         time_interval: Range<f32>,
+//         time: f32,
+//         encoder: &mut wgpu::CommandEncoder,
+//         storage: &iced::widget::shader::Storage,
+//         target: &wgpu::TextureView,
+//         clip_bounds: &iced::Rectangle<u32>,
+//     );
+// }
+
+// impl<T> DynTimeline for T
+// where
+//     T: Timeline,
+// {
+//     fn dyn_prepare(
+//         &self,
+//         hash: u64,
+//         time_interval: Range<f32>,
+//         time: f32,
+//         device: &wgpu::Device,
+//         queue: &wgpu::Queue,
+//         format: wgpu::TextureFormat,
+//         storage: &mut iced::widget::shader::Storage,
+//         bounds: &iced::Rectangle,
+//         viewport: &iced::widget::shader::Viewport,
+//     ) {
+
+//         self.prepare(
+//             time_interval,
+//             time,
+//             &mut presentation,
+//             device,
+//             queue,
+//             format,
+//             storage,
+//             bounds,
+//             viewport,
+//         );
+//     }
+
+//     fn dyn_render(
+//         &self,
+//         hash: u64,
+//         time_interval: Range<f32>,
+//         time: f32,
+//         encoder: &mut wgpu::CommandEncoder,
+//         storage: &iced::widget::shader::Storage,
+//         target: &wgpu::TextureView,
+//         clip_bounds: &iced::Rectangle<u32>,
+//     ) {
+//         let presentation_map = storage
+//             .get::<dashmap::DashMap<u64, T::Presentation>>()
+//             .unwrap();
+//         let presentation = presentation_map.get(&hash).unwrap();
+//         self.render(
+//             time_interval,
+//             time,
+//             &presentation,
+//             encoder,
+//             storage,
+//             target,
+//             clip_bounds,
+//         );
+//     }
+// }
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct TimelineEntry {
+    id: TimelineId,
+    time_interval: Range<f32>,
+    timeline: serde_traitobject::Arc<dyn Timeline>,
 }
 
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
@@ -148,17 +316,17 @@ impl TimelineEntries {
     fn prepare(
         &self,
         time: f32,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
         storage: &mut iced::widget::shader::Storage,
         bounds: &iced::Rectangle,
         viewport: &iced::widget::shader::Viewport,
     ) {
         for timeline_entry in &*self.0 {
             if timeline_entry.time_interval.contains(&time) {
-                timeline_entry.timeline.dyn_prepare(
-                    timeline_entry.hash,
+                timeline_entry.timeline.prepare(
+                    timeline_entry.id,
                     timeline_entry.time_interval.clone(),
                     time,
                     device,
@@ -175,17 +343,17 @@ impl TimelineEntries {
     fn render(
         &self,
         time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         storage: &iced::widget::shader::Storage,
-        target: &iced::widget::shader::wgpu::TextureView,
+        target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
         for timeline_entry in &*self.0 {
             if timeline_entry.time_interval.contains(&time) {
-                timeline_entry.timeline.dyn_render(
-                    timeline_entry.hash,
-                    timeline_entry.time_interval.clone(),
-                    time,
+                timeline_entry.timeline.render(
+                    timeline_entry.id,
+                    // timeline_entry.time_interval.clone(),
+                    // time,
                     encoder,
                     storage,
                     target,
@@ -197,70 +365,61 @@ impl TimelineEntries {
 }
 
 fn new_render_pass<'ce>(
-    encoder: &'ce mut iced::widget::shader::wgpu::CommandEncoder,
-    target: &'ce iced::widget::shader::wgpu::TextureView,
-    clip_bounds: &iced::Rectangle<u32>,
-    load: iced::widget::shader::wgpu::LoadOp<iced::widget::shader::wgpu::Color>,
-) -> iced::widget::shader::wgpu::RenderPass<'ce> {
-    let mut render_pass =
-        encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(
-                iced::widget::shader::wgpu::RenderPassColorAttachment {
-                    view: target,
-                    resolve_target: None,
-                    ops: iced::widget::shader::wgpu::Operations {
-                        load,
-                        store: iced::widget::shader::wgpu::StoreOp::Store,
-                    },
-                },
-            )],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-    render_pass.set_scissor_rect(
-        clip_bounds.x,
-        clip_bounds.y,
-        clip_bounds.width,
-        clip_bounds.height,
-    );
-    render_pass
+    encoder: &'ce mut wgpu::CommandEncoder,
+    target: &'ce wgpu::TextureView,
+    // clip_bounds: &iced::Rectangle<u32>,
+    load: wgpu::LoadOp<wgpu::Color>,
+) -> wgpu::RenderPass<'ce> {
+    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: None,
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: target,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load,
+                store: wgpu::StoreOp::Store,
+            },
+        })],
+        depth_stencil_attachment: None,
+        timestamp_writes: None,
+        occlusion_query_set: None,
+    })
 }
 
 #[derive(Debug)]
 pub struct ScenePrimitive {
     time: f32,
     timeline_entries: TimelineEntries,
-    background_color: iced::widget::shader::wgpu::Color,
+    background_color: wgpu::Color,
 }
 
 impl iced::widget::shader::Primitive for ScenePrimitive {
     fn prepare(
         &self,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
         storage: &mut iced::widget::shader::Storage,
         bounds: &iced::Rectangle,
         viewport: &iced::widget::shader::Viewport,
     ) {
+        // TODO: clean up storage for older scenes
         self.timeline_entries
             .prepare(self.time, device, queue, format, storage, bounds, viewport);
     }
 
     fn render(
         &self,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         storage: &iced::widget::shader::Storage,
-        target: &iced::widget::shader::wgpu::TextureView,
+        target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
         new_render_pass(
             encoder,
             target,
             clip_bounds,
-            iced::widget::shader::wgpu::LoadOp::Clear(self.background_color),
+            wgpu::LoadOp::Clear(self.background_color),
         );
         self.timeline_entries
             .render(self.time, encoder, storage, target, clip_bounds);
@@ -270,7 +429,7 @@ impl iced::widget::shader::Primitive for ScenePrimitive {
 pub struct Supervisor<'c> {
     config: &'c Config,
     time: RefCell<Arc<f32>>,
-    timeline_items: RefCell<Vec<(Option<Range<f32>>, Option<Arc<dyn DynTimeline>>)>>,
+    timeline_items: RefCell<Vec<(Option<Range<f32>>, Option<Arc<dyn Timeline>>)>>,
 }
 
 impl<'c> Supervisor<'c> {
@@ -291,13 +450,9 @@ impl<'c> Supervisor<'c> {
                     time_interval
                         .zip(timeline)
                         .map(|(time_interval, timeline)| {
-                            // Hash `Arc<T>` instead of `T`.
-                            // Presentation maps inside `storage` are identified only by `T::Presentation` type, without `T`.
                             let timeline = serde_traitobject::Arc::from(timeline);
                             TimelineEntry {
-                                hash: seahash::hash(
-                                    &ron::ser::to_string(&timeline).unwrap().into_bytes(),
-                                ),
+                                id: TimelineId::new(&timeline),
                                 time_interval,
                                 timeline,
                             }
@@ -339,7 +494,7 @@ impl<'c> Supervisor<'c> {
     // {
     //     // Hash `Arc<T>` instead of `T`.
     //     // Presentation maps inside `storage` are identified only by `T::Presentation` type, without `T`.
-    //     let timeline = serde_traitobject::Arc::from(timeline as Arc<dyn DynTimeline>);
+    //     let timeline = serde_traitobject::Arc::from(timeline as Arc<dyn Timeline>);
     //     let hash = seahash::hash(&ron::ser::to_string(&timeline).unwrap().into_bytes());
     //     self.timeline_entries.borrow_mut().push(TimelineEntry {
     //         hash,
@@ -347,15 +502,6 @@ impl<'c> Supervisor<'c> {
     //         timeline,
     //     });
     // }
-
-    pub fn wait(&self, delta_time: f32) {
-        assert!(
-            delta_time.is_sign_positive(),
-            "`Supervisor::wait` expects a non-negative argument `delta_time`, got {delta_time}",
-        );
-        let mut time = self.time.borrow_mut();
-        *time = Arc::new(**time + delta_time);
-    }
 
     #[must_use]
     pub fn spawn<MB>(&'c self, mobject_builder: MB) -> Alive<'c, SteadyTimeline<MB::Instantiation>>
@@ -369,6 +515,15 @@ impl<'c> Supervisor<'c> {
                 mobject: mobject_builder.instantiate(&self.config),
             },
         )
+    }
+
+    pub fn wait(&self, delta_time: f32) {
+        assert!(
+            delta_time.is_sign_positive(),
+            "`Supervisor::wait` expects a non-negative `delta_time`, got {delta_time}",
+        );
+        let mut time = self.time.borrow_mut();
+        *time = Arc::new(**time + delta_time);
     }
 }
 
@@ -542,6 +697,12 @@ where
                 },
             )
         })
+    }
+
+    #[must_use]
+    pub fn play(self, delta_time: f32) -> Alive<'s, SteadyTimeline<CO::CollapseOutput>> {
+        self.supervisor.wait(delta_time);
+        self.collapse()
     }
 }
 
@@ -836,7 +997,7 @@ where
         mobject_presentation: &mut M::MobjectPresentation,
         reference_mobject: &M,
         alpha: f32,
-        queue: &iced::widget::shader::wgpu::Queue,
+        queue: &wgpu::Queue,
     ) {
         self.1
             .apply_presentation(mobject_presentation, reference_mobject, alpha, queue);
@@ -856,42 +1017,73 @@ impl<M> Timeline for SteadyTimeline<M>
 where
     M: Mobject,
 {
-    type Presentation = M::MobjectPresentation;
-
-    fn presentation(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Presentation {
-        self.mobject.presentation(device)
-    }
-
     fn prepare(
         &self,
+        id: TimelineId,
         _time_interval: Range<f32>,
         _time: f32,
-        _device: &iced::widget::shader::wgpu::Device,
-        _queue: &iced::widget::shader::wgpu::Queue,
-        _format: iced::widget::shader::wgpu::TextureFormat,
-        _presentation: &mut Self::Presentation,
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _format: wgpu::TextureFormat,
+        storage: &mut iced::widget::shader::Storage,
         _bounds: &iced::Rectangle,
         _viewport: &iced::widget::shader::Viewport,
     ) {
+        id.prepare_presentation(storage, device, &self.mobject, |_| ());
     }
 
     fn render(
         &self,
+        id: TimelineId,
         _time_interval: Range<f32>,
         _time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        presentation: &Self::Presentation,
-        target: &iced::widget::shader::wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        storage: &iced::widget::shader::Storage,
+        target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
-        let mut render_pass = new_render_pass(
-            encoder,
-            target,
-            clip_bounds,
-            iced::widget::shader::wgpu::LoadOp::Load,
-        );
-        presentation.draw(&mut render_pass);
+        id.render_presentation::<M, _>(storage, |presentation| {
+            let mut render_pass = new_render_pass(encoder, target, clip_bounds, wgpu::LoadOp::Load);
+            presentation.draw(&mut render_pass);
+        });
     }
+
+    // type Presentation = M::MobjectPresentation;
+
+    // fn presentation(&self, device: &wgpu::Device) -> Self::Presentation {
+    //     self.mobject.presentation(device)
+    // }
+
+    // fn prepare(
+    //     &self,
+    //     _time_interval: Range<f32>,
+    //     _time: f32,
+    //     _device: &wgpu::Device,
+    //     _queue: &wgpu::Queue,
+    //     _format: wgpu::TextureFormat,
+    //     _presentation: &mut Self::Presentation,
+    //     _bounds: &iced::Rectangle,
+    //     _viewport: &iced::widget::shader::Viewport,
+    // ) {
+    // }
+
+    // fn render(
+    //     &self,
+    //     _time_interval: Range<f32>,
+    //     _time: f32,
+    //     encoder: &mut wgpu::CommandEncoder,
+    //     presentation: &Self::Presentation,
+    //     target: &wgpu::TextureView,
+    //     clip_bounds: &iced::Rectangle<u32>,
+    // ) {
+    //     let mut render_pass = new_render_pass(
+    //         encoder,
+    //         target,
+    //         clip_bounds,
+    //         wgpu::LoadOp::Load,
+    //     );
+    //     presentation.draw(&mut render_pass);
+    // }
 }
 
 // dynamic
@@ -909,29 +1101,31 @@ pub trait ApplyRate: Sized {
 pub trait DynamicTimelineContent:
     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
 {
-    type ContentPresentation: Send;
+    // type ContentPresentation: Send;
     type CollapseOutput: Mobject;
 
-    fn content_presentation(
-        &self,
-        device: &iced::widget::shader::wgpu::Device,
-    ) -> Self::ContentPresentation;
+    // fn content_presentation(
+    //     &self,
+    //     device: &wgpu::Device,
+    // ) -> Self::ContentPresentation;
     fn content_prepare(
         &self,
+        id: TimelineId,
         time: f32,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
-        presentation: &mut Self::ContentPresentation,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        storage: &mut iced::widget::shader::Storage,
         bounds: &iced::Rectangle,
         viewport: &iced::widget::shader::Viewport,
     );
     fn content_render(
         &self,
+        id: TimelineId,
         time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        presentation: &Self::ContentPresentation,
-        target: &iced::widget::shader::wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        storage: &iced::widget::shader::Storage,
+        target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     );
     fn content_collapse(self, time: f32) -> Self::CollapseOutput;
@@ -974,29 +1168,31 @@ where
     ME: DynamicTimelineMetric,
     R: Rate,
 {
-    type Presentation = CO::ContentPresentation;
+    // type Presentation = CO::ContentPresentation;
 
-    fn presentation(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Presentation {
-        self.content.content_presentation(device)
-    }
+    // fn presentation(&self, device: &wgpu::Device) -> Self::Presentation {
+    //     self.content.content_presentation(device)
+    // }
 
     fn prepare(
         &self,
+        id: TimelineId,
         time_interval: Range<f32>,
         time: f32,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
-        presentation: &mut Self::Presentation,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        storage: &mut iced::widget::shader::Storage,
         bounds: &iced::Rectangle,
         viewport: &iced::widget::shader::Viewport,
     ) {
         self.content.content_prepare(
+            id,
             self.rate.eval(self.metric.eval(time, time_interval)),
             device,
             queue,
             format,
-            presentation,
+            storage,
             bounds,
             viewport,
         );
@@ -1004,17 +1200,19 @@ where
 
     fn render(
         &self,
+        id: TimelineId,
         time_interval: Range<f32>,
         time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        presentation: &Self::Presentation,
-        target: &iced::widget::shader::wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        storage: &iced::widget::shader::Storage,
+        target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
         self.content.content_render(
+            id,
             self.rate.eval(self.metric.eval(time, time_interval)),
             encoder,
-            presentation,
+            storage,
             target,
             clip_bounds,
         );
@@ -1030,44 +1228,73 @@ impl<M> DynamicTimelineContent for IndeterminedTimelineContent<M>
 where
     M: Mobject,
 {
-    type ContentPresentation = M::MobjectPresentation;
+    // type ContentPresentation = M::MobjectPresentation;
     type CollapseOutput = M;
-
-    fn content_presentation(
-        &self,
-        device: &iced::widget::shader::wgpu::Device,
-    ) -> Self::ContentPresentation {
-        self.mobject.presentation(device)
-    }
 
     fn content_prepare(
         &self,
+        id: TimelineId,
         _time: f32,
-        _device: &iced::widget::shader::wgpu::Device,
-        _queue: &iced::widget::shader::wgpu::Queue,
-        _format: iced::widget::shader::wgpu::TextureFormat,
-        _presentation: &mut Self::ContentPresentation,
+        device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _format: wgpu::TextureFormat,
+        storage: &mut iced::widget::shader::Storage,
         _bounds: &iced::Rectangle,
         _viewport: &iced::widget::shader::Viewport,
     ) {
+        id.prepare_presentation(storage, device, &self.mobject, |_| ());
     }
 
     fn content_render(
         &self,
+        id: TimelineId,
         _time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        presentation: &Self::ContentPresentation,
-        target: &iced::widget::shader::wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        storage: &iced::widget::shader::Storage,
+        target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
-        let mut render_pass = new_render_pass(
-            encoder,
-            target,
-            clip_bounds,
-            iced::widget::shader::wgpu::LoadOp::Load,
-        );
-        presentation.draw(&mut render_pass);
+        id.render_presentation::<M, _>(storage, |presentation| {
+            let mut render_pass = new_render_pass(encoder, target, clip_bounds, wgpu::LoadOp::Load);
+            presentation.draw(&mut render_pass)
+        });
     }
+
+    // fn content_presentation(
+    //     &self,
+    //     device: &wgpu::Device,
+    // ) -> Self::ContentPresentation {
+    //     self.mobject.presentation(device)
+    // }
+
+    // fn content_prepare(
+    //     &self,
+    //     _time: f32,
+    //     _device: &wgpu::Device,
+    //     _queue: &wgpu::Queue,
+    //     _format: wgpu::TextureFormat,
+    //     _presentation: &mut Self::ContentPresentation,
+    //     _bounds: &iced::Rectangle,
+    //     _viewport: &iced::widget::shader::Viewport,
+    // ) {
+    // }
+
+    // fn content_render(
+    //     &self,
+    //     _time: f32,
+    //     encoder: &mut wgpu::CommandEncoder,
+    //     presentation: &Self::ContentPresentation,
+    //     target: &wgpu::TextureView,
+    //     clip_bounds: &iced::Rectangle<u32>,
+    // ) {
+    //     let mut render_pass = new_render_pass(
+    //         encoder,
+    //         target,
+    //         clip_bounds,
+    //         wgpu::LoadOp::Load,
+    //     );
+    //     presentation.draw(&mut render_pass);
+    // }
 
     fn content_collapse(self, _time: f32) -> Self::CollapseOutput {
         self.mobject
@@ -1100,46 +1327,78 @@ where
     M: Mobject,
     MD: MobjectDiff<M>,
 {
-    type ContentPresentation = M::MobjectPresentation;
+    // type ContentPresentation = M::MobjectPresentation;
     type CollapseOutput = M;
-
-    fn content_presentation(
-        &self,
-        device: &iced::widget::shader::wgpu::Device,
-    ) -> Self::ContentPresentation {
-        self.mobject.presentation(device)
-    }
 
     fn content_prepare(
         &self,
+        id: TimelineId,
         time: f32,
-        _device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        _format: iced::widget::shader::wgpu::TextureFormat,
-        presentation: &mut Self::ContentPresentation,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _format: wgpu::TextureFormat,
+        storage: &mut iced::widget::shader::Storage,
         _bounds: &iced::Rectangle,
         _viewport: &iced::widget::shader::Viewport,
     ) {
-        self.diff
-            .apply_presentation(presentation, &self.mobject, time, queue);
+        id.prepare_presentation(storage, device, &self.mobject, |presentation| {
+            self.diff
+                .apply_presentation(presentation, &self.mobject, time, queue);
+        });
     }
 
     fn content_render(
         &self,
+        id: TimelineId,
         _time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        presentation: &Self::ContentPresentation,
-        target: &iced::widget::shader::wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        storage: &iced::widget::shader::Storage,
+        target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
-        let mut render_pass = new_render_pass(
-            encoder,
-            target,
-            clip_bounds,
-            iced::widget::shader::wgpu::LoadOp::Load,
-        );
-        presentation.draw(&mut render_pass);
+        id.render_presentation::<M, _>(storage, |presentation| {
+            let mut render_pass = new_render_pass(encoder, target, clip_bounds, wgpu::LoadOp::Load);
+            presentation.draw(&mut render_pass)
+        });
     }
+
+    // fn content_presentation(
+    //     &self,
+    //     device: &wgpu::Device,
+    // ) -> Self::ContentPresentation {
+    //     self.mobject.presentation(device)
+    // }
+
+    // fn content_prepare(
+    //     &self,
+    //     time: f32,
+    //     _device: &wgpu::Device,
+    //     queue: &wgpu::Queue,
+    //     _format: wgpu::TextureFormat,
+    //     presentation: &mut Self::ContentPresentation,
+    //     _bounds: &iced::Rectangle,
+    //     _viewport: &iced::widget::shader::Viewport,
+    // ) {
+    //     self.diff
+    //         .apply_presentation(presentation, &self.mobject, time, queue);
+    // }
+
+    // fn content_render(
+    //     &self,
+    //     _time: f32,
+    //     encoder: &mut wgpu::CommandEncoder,
+    //     presentation: &Self::ContentPresentation,
+    //     target: &wgpu::TextureView,
+    //     clip_bounds: &iced::Rectangle<u32>,
+    // ) {
+    //     let mut render_pass = new_render_pass(
+    //         encoder,
+    //         target,
+    //         clip_bounds,
+    //         wgpu::LoadOp::Load,
+    //     );
+    //     presentation.draw(&mut render_pass);
+    // }
 
     fn content_collapse(self, time: f32) -> Self::CollapseOutput {
         let mut mobject = self.mobject;
@@ -1174,46 +1433,78 @@ where
     M: Mobject,
     U: Update<M>,
 {
-    type ContentPresentation = M::MobjectPresentation;
+    // type ContentPresentation = M::MobjectPresentation;
     type CollapseOutput = M;
-
-    fn content_presentation(
-        &self,
-        device: &iced::widget::shader::wgpu::Device,
-    ) -> Self::ContentPresentation {
-        self.mobject.presentation(device)
-    }
 
     fn content_prepare(
         &self,
+        id: TimelineId,
         time: f32,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        _format: iced::widget::shader::wgpu::TextureFormat,
-        presentation: &mut Self::ContentPresentation,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _format: wgpu::TextureFormat,
+        storage: &mut iced::widget::shader::Storage,
         _bounds: &iced::Rectangle,
         _viewport: &iced::widget::shader::Viewport,
     ) {
-        self.update
-            .update_presentation(presentation, &self.mobject, time, device, queue);
+        id.prepare_presentation(storage, device, &self.mobject, |presentation| {
+            self.update
+                .update_presentation(presentation, &self.mobject, time, device, queue);
+        });
     }
 
     fn content_render(
         &self,
+        id: TimelineId,
         _time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        presentation: &Self::ContentPresentation,
-        target: &iced::widget::shader::wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        storage: &iced::widget::shader::Storage,
+        target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
-        let mut render_pass = new_render_pass(
-            encoder,
-            target,
-            clip_bounds,
-            iced::widget::shader::wgpu::LoadOp::Load,
-        );
-        presentation.draw(&mut render_pass);
+        id.render_presentation::<M, _>(storage, |presentation| {
+            let mut render_pass = new_render_pass(encoder, target, clip_bounds, wgpu::LoadOp::Load);
+            presentation.draw(&mut render_pass);
+        });
     }
+
+    // fn content_presentation(
+    //     &self,
+    //     device: &wgpu::Device,
+    // ) -> Self::ContentPresentation {
+    //     self.mobject.presentation(device)
+    // }
+
+    // fn content_prepare(
+    //     &self,
+    //     time: f32,
+    //     device: &wgpu::Device,
+    //     queue: &wgpu::Queue,
+    //     _format: wgpu::TextureFormat,
+    //     presentation: &mut Self::ContentPresentation,
+    //     _bounds: &iced::Rectangle,
+    //     _viewport: &iced::widget::shader::Viewport,
+    // ) {
+    //     self.update
+    //         .update_presentation(presentation, &self.mobject, time, device, queue);
+    // }
+
+    // fn content_render(
+    //     &self,
+    //     _time: f32,
+    //     encoder: &mut wgpu::CommandEncoder,
+    //     presentation: &Self::ContentPresentation,
+    //     target: &wgpu::TextureView,
+    //     clip_bounds: &iced::Rectangle<u32>,
+    // ) {
+    //     let mut render_pass = new_render_pass(
+    //         encoder,
+    //         target,
+    //         clip_bounds,
+    //         wgpu::LoadOp::Load,
+    //     );
+    //     presentation.draw(&mut render_pass);
+    // }
 
     fn content_collapse(self, time: f32) -> Self::CollapseOutput {
         let mut mobject = self.mobject;
@@ -1247,41 +1538,69 @@ impl<M> DynamicTimelineContent for DiscreteTimelineContent<M>
 where
     M: Mobject,
 {
-    type ContentPresentation = iced::widget::shader::Storage;
+    // type ContentPresentation = iced::widget::shader::Storage;
     type CollapseOutput = M;
-
-    fn content_presentation(
-        &self,
-        _device: &iced::widget::shader::wgpu::Device,
-    ) -> Self::ContentPresentation {
-        iced::widget::shader::Storage::default()
-    }
 
     fn content_prepare(
         &self,
+        _id: TimelineId,
         time: f32,
-        device: &iced::widget::shader::wgpu::Device,
-        queue: &iced::widget::shader::wgpu::Queue,
-        format: iced::widget::shader::wgpu::TextureFormat,
-        presentation: &mut Self::ContentPresentation,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        storage: &mut iced::widget::shader::Storage,
         bounds: &iced::Rectangle,
         viewport: &iced::widget::shader::Viewport,
     ) {
         self.timeline_entries
-            .prepare(time, device, queue, format, presentation, bounds, viewport);
+            .prepare(time, device, queue, format, storage, bounds, viewport);
     }
 
     fn content_render(
         &self,
+        _id: TimelineId,
         time: f32,
-        encoder: &mut iced::widget::shader::wgpu::CommandEncoder,
-        presentation: &Self::ContentPresentation,
-        target: &iced::widget::shader::wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        storage: &iced::widget::shader::Storage,
+        target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
         self.timeline_entries
-            .render(time, encoder, presentation, target, clip_bounds);
+            .render(time, encoder, storage, target, clip_bounds);
     }
+
+    // fn content_presentation(
+    //     &self,
+    //     _device: &wgpu::Device,
+    // ) -> Self::ContentPresentation {
+    //     iced::widget::shader::Storage::default()
+    // }
+
+    // fn content_prepare(
+    //     &self,
+    //     time: f32,
+    //     device: &wgpu::Device,
+    //     queue: &wgpu::Queue,
+    //     format: wgpu::TextureFormat,
+    //     presentation: &mut Self::ContentPresentation,
+    //     bounds: &iced::Rectangle,
+    //     viewport: &iced::widget::shader::Viewport,
+    // ) {
+    //     self.timeline_entries
+    //         .prepare(time, device, queue, format, presentation, bounds, viewport);
+    // }
+
+    // fn content_render(
+    //     &self,
+    //     time: f32,
+    //     encoder: &mut wgpu::CommandEncoder,
+    //     presentation: &Self::ContentPresentation,
+    //     target: &wgpu::TextureView,
+    //     clip_bounds: &iced::Rectangle<u32>,
+    // ) {
+    //     self.timeline_entries
+    //         .render(time, encoder, presentation, target, clip_bounds);
+    // }
 
     fn content_collapse(self, _time: f32) -> Self::CollapseOutput {
         self.mobject
