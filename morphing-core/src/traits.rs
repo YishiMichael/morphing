@@ -2,8 +2,9 @@ use std::fmt::Debug;
 
 use super::config::Config;
 use super::timeline::Alive;
-use super::timeline::SteadyTimeline;
+use super::timeline::CollapsedTimelineState;
 use super::timeline::Supervisor;
+use super::timeline::TimeMetric;
 
 pub trait Mobject:
     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
@@ -14,23 +15,23 @@ pub trait Mobject:
 }
 
 pub trait MobjectPresentation: 'static + Send + Sync {
-    fn draw<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>);
+    fn render(&self, command_encoder: &mut wgpu::CommandEncoder, texture_view: &wgpu::TextureView);
 }
 
-pub trait MobjectDiff<M>:
-    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
-where
-    M: Mobject,
-{
-    fn apply(&self, mobject: &mut M, alpha: f32);
-    fn apply_presentation(
-        &self,
-        mobject_presentation: &mut M::MobjectPresentation,
-        reference_mobject: &M,
-        alpha: f32,
-        queue: &wgpu::Queue,
-    ); // mobject_presentation write-only
-}
+// pub trait MobjectDiff<M>:
+//     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+// where
+//     M: Mobject,
+// {
+//     fn apply(&self, mobject: &mut M, t: f32);
+//     fn apply_presentation(
+//         &self,
+//         mobject_presentation: &mut M::MobjectPresentation,
+//         reference_mobject: &M,
+//         t: f32,
+//         queue: &wgpu::Queue,
+//     ); // mobject_presentation write-only
+// }
 
 pub trait MobjectBuilder {
     type Instantiation: Mobject;
@@ -38,56 +39,70 @@ pub trait MobjectBuilder {
     fn instantiate(self, config: &Config) -> Self::Instantiation;
 }
 
-pub trait Rate:
+pub trait Rate<TM>:
     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+where
+    TM: TimeMetric,
 {
+    type OutputMetric: TimeMetric;
+
     fn eval(&self, t: f32) -> f32;
 }
 
-pub trait IncreasingRate: Rate {}
-
-pub trait Act<M>: Clone
+pub trait IncreasingRate<TM>: Rate<TM>
 where
-    M: Mobject,
+    TM: TimeMetric,
 {
-    type Diff: MobjectDiff<M>;
-
-    fn act(self, mobject: &M) -> Self::Diff;
 }
 
-pub trait Update<M>:
+pub trait Act<M, TM>: Clone
+where
+    M: Mobject,
+    TM: TimeMetric,
+{
+    type Update: Update<M, TM>;
+
+    fn act(self, mobject: &M) -> Self::Update;
+}
+
+pub trait Update<M, TM>:
     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
 where
     M: Mobject,
+    TM: TimeMetric,
 {
-    fn update(&self, mobject: &mut M, alpha: f32);
+    fn update(&self, mobject: &mut M, t: f32);
     fn update_presentation(
         &self,
         mobject_presentation: &mut M::MobjectPresentation,
         reference_mobject: &M,
-        alpha: f32,
+        t: f32,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
     ); // mobject_presentation write-only
 }
 
-pub trait Construct<M>: Clone
+pub trait Construct<S, M>: Clone
 where
+    S: Storage,
     M: Mobject,
 {
     type Output: Mobject;
 
-    fn construct<'c>(
+    fn construct<'sv, 'c, 's>(
         self,
-        input: Alive<'c, SteadyTimeline<M>>,
-        supervisor: &Supervisor,
-    ) -> Alive<'c, SteadyTimeline<Self::Output>>;
+        input: Alive<'sv, 'c, 's, S, CollapsedTimelineState<M>>,
+        supervisor: &'sv Supervisor<'c, 's, S>,
+    ) -> Alive<'sv, 'c, 's, S, CollapsedTimelineState<Self::Output>>;
 }
 
-pub trait Storage {
+pub trait Storage: 'static {
     type Key;
 
-    fn generate_key<T>(&self, value: &T) -> Self::Key;
+    fn generate_key<KI>(&self, key_input: &KI) -> Self::Key
+    where
+        KI: serde::Serialize;
     fn get_unwrap<T>(&self, key: &Self::Key) -> &T; // TODO: operate closure?
     fn get_mut_or_insert<T, F>(&mut self, key: &Self::Key, f: F) -> &mut T
     where

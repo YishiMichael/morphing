@@ -32,12 +32,12 @@ macro_rules! rate {
 }
 
 rate! {
-    pub fn clamp(t: f32, range: Range<f32>) -> f32 {
-        t.clamp(range.start, range.end)
-    }
-
     pub fn speed(t: f32, speed: f32) -> f32 {
         t * speed
+    }
+
+    pub fn rewind(t: f32) -> f32 {
+        -t
     }
 
     pub fn smooth(t: f32) -> f32 {
