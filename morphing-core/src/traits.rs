@@ -1,10 +1,11 @@
+use std::any::Any;
+use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 
 use super::config::Config;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
 use super::timeline::Supervisor;
-use super::timeline::TimeMetric;
 
 pub trait Mobject:
     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
@@ -14,8 +15,8 @@ pub trait Mobject:
     fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
 }
 
-pub trait MobjectPresentation: 'static + Send + Sync {
-    fn render(&self, command_encoder: &mut wgpu::CommandEncoder, texture_view: &wgpu::TextureView);
+pub trait MobjectPresentation: Send + Sync + Any {
+    fn render(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView);
 }
 
 // pub trait MobjectDiff<M>:
@@ -39,14 +40,16 @@ pub trait MobjectBuilder {
     fn instantiate(self, config: &Config) -> Self::Instantiation;
 }
 
+pub trait TimeMetric: Clone {}
+
 pub trait Rate<TM>:
     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
 where
     TM: TimeMetric,
 {
-    type OutputMetric: TimeMetric;
+    type OutputTimeMetric: TimeMetric;
 
-    fn eval(&self, t: f32) -> f32;
+    fn eval(&self, time_metric: TM) -> Self::OutputTimeMetric;
 }
 
 pub trait IncreasingRate<TM>: Rate<TM>
@@ -55,58 +58,85 @@ where
 {
 }
 
-pub trait Act<M, TM>: Clone
-where
-    M: Mobject,
-    TM: TimeMetric,
-{
-    type Update: Update<M, TM>;
-
-    fn act(self, mobject: &M) -> Self::Update;
-}
-
-pub trait Update<M, TM>:
+pub trait Update<TM, M>:
     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
 where
-    M: Mobject,
     TM: TimeMetric,
+    M: Mobject,
 {
-    fn update(&self, mobject: &mut M, t: f32);
+    fn update(&self, time_metric: TM, mobject: &mut M);
     fn update_presentation(
         &self,
+        time_metric: TM,
+        mobject: &M,
         mobject_presentation: &mut M::MobjectPresentation,
-        reference_mobject: &M,
-        t: f32,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ); // mobject_presentation write-only
 }
 
-pub trait Construct<S, M>: Clone
+// pub trait Act<TM, M>: Clone
+// where
+//     TM: TimeMetric,
+//     M: Mobject,
+// {
+//     type Update: Update<TM, M>;
+
+//     fn act(self, mobject: &M) -> Self::Update;
+// }
+
+pub trait Construct<M>: 'static + Clone
 where
-    S: Storage,
     M: Mobject,
 {
-    type Output: Mobject;
+    type OutputMobject: Mobject;
 
-    fn construct<'sv, 'c, 's>(
+    fn construct<'sv, 'c, 's, S>(
         self,
         input: Alive<'sv, 'c, 's, S, CollapsedTimelineState<M>>,
         supervisor: &'sv Supervisor<'c, 's, S>,
-    ) -> Alive<'sv, 'c, 's, S, CollapsedTimelineState<Self::Output>>;
+    ) -> Alive<'sv, 'c, 's, S, CollapsedTimelineState<Self::OutputMobject>>
+    where
+        S: Storage;
 }
 
-pub trait Storage: 'static {
-    type Key;
+// pub trait SerdeMobject: serde_traitobject::Deserialize + serde_traitobject::Serialize {}
 
-    fn generate_key<KI>(&self, key_input: &KI) -> Self::Key
-    where
-        KI: serde::Serialize;
-    fn get_unwrap<T>(&self, key: &Self::Key) -> &T; // TODO: operate closure?
-    fn get_mut_or_insert<T, F>(&mut self, key: &Self::Key, f: F) -> &mut T
-    where
-        F: FnOnce() -> T;
+// struct SerdeMobjectWrapper<M>(M);
+
+// impl<M> SerdeMobject for M where M: Mobject {}
+
+// pub trait SerdeUpdate: serde_traitobject::Deserialize + serde_traitobject::Serialize {}
+
+// struct SerdeUpdateWrapper<U>(U);
+
+// impl<U, TM, M> SerdeUpdate for SerdeUpdateWrapper<U>
+// where
+//     U: Update<TM, M>,
+//     TM: TimeMetric,
+// {
+// }
+
+pub trait Storage: 'static {
+    type Key: 'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize;
+
+    fn static_allocate(&self, mobject: &dyn serde_traitobject::Serialize) -> Self::Key;
+    fn static_get(&self, storage_key: &Self::Key) -> Option<&dyn MobjectPresentation>; // TODO: operate closure?
+    fn static_entry(
+        &self,
+        storage_key: Self::Key,
+    ) -> Entry<'_, Self::Key, Box<dyn MobjectPresentation>>;
+    fn dynamic_allocate(
+        &self,
+        mobject: &dyn serde_traitobject::Serialize,
+        update: &dyn serde_traitobject::Serialize,
+    ) -> Self::Key;
+    fn dynamic_get(&self, storage_key: &Self::Key) -> Option<&dyn MobjectPresentation>; // TODO: operate closure?
+    fn dynamic_entry(
+        &self,
+        storage_key: Self::Key,
+    ) -> Entry<'_, Self::Key, Box<dyn MobjectPresentation>>;
 }
 
 // TODO: alive container morphisms

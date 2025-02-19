@@ -12,6 +12,7 @@ use super::config::ConfigFallbackContent;
 use super::config::ConfigValues;
 use super::timeline::Supervisor;
 use super::timeline::TimelineEntries;
+use super::traits::Storage;
 
 pub struct SceneModule {
     pub name: &'static str,

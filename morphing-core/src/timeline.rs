@@ -1,18 +1,19 @@
+use std::any::Any;
 use std::cell::RefCell;
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::Weak;
 
 use super::config::Config;
-use super::traits::Act;
 use super::traits::Construct;
 use super::traits::IncreasingRate;
 use super::traits::Mobject;
 use super::traits::MobjectBuilder;
-use super::traits::MobjectPresentation;
 use super::traits::Rate;
 use super::traits::Storage;
+use super::traits::TimeMetric;
 use super::traits::Update;
 
 // #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -66,73 +67,250 @@ use super::traits::Update;
 //     }
 // }
 
+// trait Prepare<TM, M>:
+//     'static + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+// where
+//     TM: TimeMetric,
+//     M: Mobject,
+// {
+//     fn prepare(
+//         &self,
+//         time_metric: TM,
+//         mobject: &M,
+//         mobject_presentation: &mut M::MobjectPresentation,
+//         device: &wgpu::Device,
+//         queue: &wgpu::Queue,
+//         format: wgpu::TextureFormat,
+//     );
+// }
+
 trait Timeline<S>:
     'static + Send + Sync + Debug + serde_traitobject::Deserialize + serde_traitobject::Serialize
 where
     S: Storage,
 {
+    fn allocate(&self, storage: &S) -> S::Key;
     fn prepare(
         &self,
         time: f32,
         time_interval: Range<f32>,
-        key: &S::Key,
         storage: &mut S,
+        storage_key: S::Key,
+        // mobject: &M,
+        // mobject_presentation: &mut M::MobjectPresentation,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     );
     fn render(
         &self,
-        key: &S::Key,
         storage: &S,
+        storage_key: &S::Key,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
     );
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct SteadyTimeline<M> {
+struct StaticTimeline<M> {
     mobject: Arc<M>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct DynamicTimeline<M, TM, R, U> {
+struct DynamicTimeline<M, TE, U> {
     mobject: Arc<M>,
-    time_metric: TM,
-    rate: R,
-    update: U,
+    time_eval: Arc<TE>,
+    update: Arc<U>,
 }
 
-impl<M, S> Timeline<S> for SteadyTimeline<M>
+impl<S, M> Timeline<S> for StaticTimeline<M>
 where
-    M: Mobject,
     S: Storage,
+    M: Mobject,
 {
+    fn allocate(&self, storage: &S) -> S::Key {
+        storage.static_allocate(&self.mobject)
+    }
+
     fn prepare(
         &self,
         _time: f32,
         _time_interval: Range<f32>,
-        key: &S::Key,
         storage: &mut S,
+        storage_key: S::Key,
         device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
     ) {
-        storage.get_mut_or_insert(key, || self.mobject.presentation(device));
+        storage
+            .static_entry(storage_key)
+            .or_insert_with(|| Box::new(self.mobject.presentation(device)));
     }
 
     fn render(
         &self,
-        key: &S::Key,
         storage: &S,
+        storage_key: &S::Key,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
     ) {
-        let presentation = storage.get_unwrap::<M::MobjectPresentation>(key);
-        // let mut render_pass = new_render_pass(encoder, target, wgpu::LoadOp::Load);
-        presentation.render(encoder, target);
+        let mobject_presentation = storage.static_get(storage_key).unwrap();
+        mobject_presentation.render(encoder, target);
     }
 }
+
+impl<S, M, TE, U> Timeline<S> for DynamicTimeline<M, TE, U>
+where
+    S: Storage,
+    M: Mobject,
+    TE: TimeEval,
+    U: Update<TE::OutputTimeMetric, M>,
+{
+    fn allocate(&self, storage: &S) -> S::Key {
+        storage.dynamic_allocate(&self.mobject, &self.update)
+    }
+
+    fn prepare(
+        &self,
+        time: f32,
+        time_interval: Range<f32>,
+        storage: &mut S,
+        storage_key: S::Key,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) {
+        let mobject_presentation = (storage
+            .dynamic_entry(storage_key)
+            .or_insert_with(|| Box::new(self.mobject.presentation(device)))
+            as &mut dyn Any)
+            .downcast_mut::<M::MobjectPresentation>()
+            .unwrap();
+        self.update.update_presentation(
+            self.time_eval.time_eval(time, time_interval),
+            &self.mobject,
+            mobject_presentation,
+            device,
+            queue,
+            format,
+        );
+    }
+
+    fn render(
+        &self,
+        storage: &S,
+        storage_key: &S::Key,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+    ) {
+        let mobject_presentation = storage.dynamic_get(storage_key).unwrap();
+        mobject_presentation.render(encoder, target);
+    }
+}
+
+// #[derive(Debug, serde::Deserialize, serde::Serialize)]
+// pub struct SteadyTimeline;
+
+// #[derive(Debug, serde::Deserialize, serde::Serialize)]
+// pub struct DynamicTimeline<U> {
+//     // time_eval: TE,
+//     update: U,
+// }
+
+// impl<TM, M> Timeline<TM, M> for SteadyTimeline
+// where
+//     TM: TimeMetric,
+//     M: Mobject,
+// {
+//     fn prepare(
+//         &self,
+//         _time_metric: TM,
+//         _mobject: &M,
+//         _mobject_presentation: &mut M::MobjectPresentation,
+//         _device: &wgpu::Device,
+//         _queue: &wgpu::Queue,
+//         _format: wgpu::TextureFormat,
+//     ) {
+//     }
+
+//     fn render(
+//         &self,
+//         mobject_presentation: &M::MobjectPresentation,
+//         encoder: &mut wgpu::CommandEncoder,
+//         target: &wgpu::TextureView,
+//     ) {
+//         mobject_presentation.render(encoder, target);
+//     }
+// }
+
+// impl<TM, M, U> Timeline<TM, M> for DynamicTimeline<U>
+// where
+//     TM: TimeMetric,
+//     M: Mobject,
+//     U: Update<TM, M>,
+// {
+//     fn prepare(
+//         &self,
+//         time_metric: TM,
+//         mobject: &M,
+//         mobject_presentation: &mut M::MobjectPresentation,
+//         device: &wgpu::Device,
+//         queue: &wgpu::Queue,
+//         format: wgpu::TextureFormat,
+//     ) {
+//         self.update.update_presentation(
+//             time_metric,
+//             mobject,
+//             mobject_presentation,
+//             device,
+//             queue,
+//             format,
+//         );
+//     }
+
+//     fn render(
+//         &self,
+//         mobject_presentation: &M::MobjectPresentation,
+//         encoder: &mut wgpu::CommandEncoder,
+//         target: &wgpu::TextureView,
+//     ) {
+//         mobject_presentation.render(encoder, target);
+//     }
+//     // fn prepare(
+//     //     &self,
+//     //     _time: f32,
+//     //     _time_interval: Range<f32>,
+//     //     key: &S::Key,
+//     //     storage: &mut S,
+//     //     device: &wgpu::Device,
+//     //     _queue: &wgpu::Queue,
+//     //     _format: wgpu::TextureFormat,
+//     // ) {
+//     //     storage.get_mut_or_insert(key, || self.mobject.presentation(device));
+//     // }
+
+//     // fn render(
+//     //     &self,
+//     //     key: &S::Key,
+//     //     storage: &S,
+//     //     encoder: &mut wgpu::CommandEncoder,
+//     //     target: &wgpu::TextureView,
+//     // ) {
+//     //     let presentation = storage.get_unwrap::<M::MobjectPresentation>(key);
+//     //     // let mut render_pass = new_render_pass(encoder, target, wgpu::LoadOp::Load);
+//     //     presentation.render(encoder, target);
+//     // }
+// }
+
+trait TimeEval:
+    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+{
+    type OutputTimeMetric: TimeMetric;
+
+    fn time_eval(&self, time: f32, time_interval: Range<f32>) -> Self::OutputTimeMetric;
+}
+
+trait IncreasingTimeEval: TimeEval {}
 
 // impl<M, TM, R, S> Timeline<S> for IndeterminedTimelineNode<M, TM, R>
 // where
@@ -167,215 +345,309 @@ where
 //     }
 // }
 
-impl<M, TM, R, U, S> Timeline<S> for DynamicTimeline<M, TM, R, U>
+// trait DynTimeEntry {
+//     fn prepare(
+//         &self,
+//         time: f32,
+//         storage: &mut dyn Storage,
+//         device: &wgpu::Device,
+//         queue: &wgpu::Queue,
+//         format: wgpu::TextureFormat,
+//     ) {
+//         self.update.update_presentation(
+//             self.time_transform.eval(time, time_interval),
+//             mobject,
+//             mobject_presentation,
+//             device,
+//             queue,
+//             format,
+//         );
+//     }
+
+//     fn render(
+//         &self,
+//         storage: &dyn Storage,
+//         encoder: &mut wgpu::CommandEncoder,
+//         target: &wgpu::TextureView,
+//     ) {
+//         mobject_presentation.render(encoder, target);
+//     }
+// }
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct TimelineEntry<S>
 where
-    M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
-    U: Update<M, TM>,
     S: Storage,
 {
-    fn prepare(
-        &self,
-        time: f32,
-        time_interval: Range<f32>,
-        key: &S::Key,
-        storage: &mut S,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) {
-        let mobject_presentation =
-            storage.get_mut_or_insert(key, || self.mobject.presentation(device));
-        self.update.update_presentation(
-            mobject_presentation,
-            &self.mobject,
-            self.time_metric.eval(&self.rate, time, time_interval),
-            device,
-            queue,
-            format,
-        );
+    time_interval: Range<f32>,
+    storage_key: S::Key,
+    timeline: serde_traitobject::Box<dyn Timeline<S>>,
+}
+
+impl<S> TimelineEntry<S>
+where
+    S: Storage,
+{
+    fn allocate_in<T>(time_interval: Range<f32>, timeline: T, storage: &S) -> Self
+    where
+        T: Timeline<S>,
+    {
+        Self {
+            time_interval,
+            storage_key: timeline.allocate(storage),
+            timeline: serde_traitobject::Box::new(timeline),
+        }
     }
 
-    fn render(
-        &self,
-        key: &S::Key,
-        storage: &S,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
-    ) {
-        let presentation = storage.get_unwrap::<M::MobjectPresentation>(key);
-        // let mut render_pass = new_render_pass(encoder, target, wgpu::LoadOp::Load);
-        presentation.render(encoder, target);
+    fn rescale_time_interval<TE>(
+        &mut self,
+        time_eval: &TE,
+        source_time_interval: &Range<f32>,
+        target_time_interval: &Range<f32>,
+    ) where
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+    {
+        self.time_interval = target_time_interval.start
+            + (target_time_interval.end - target_time_interval.start)
+                * *time_eval.time_eval(self.time_interval.start, source_time_interval.clone())
+            ..target_time_interval.start
+                + (target_time_interval.end - target_time_interval.start)
+                    * *time_eval.time_eval(self.time_interval.end, source_time_interval.clone());
     }
 }
 
-trait TimelineState<S>: 'static + Debug
+struct TimelineEntriesSink<'v, S>(Option<&'v mut Vec<TimelineEntry<S>>>)
+where
+    S: Storage;
+
+impl<S> Extend<TimelineEntry<S>> for TimelineEntriesSink<'_, S>
 where
     S: Storage,
 {
-    fn into_timelines(
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = TimelineEntry<S>>,
+    {
+        if let Some(timeline_entries) = self.0.as_mut() {
+            timeline_entries.extend(iter)
+        }
+    }
+}
+
+trait TimelineState<S>: 'static
+where
+    S: Storage,
+{
+    type OutputTimelineState: TimelineState<S>;
+
+    fn allocate_timeline_entries(
         self,
         time_interval: Range<f32>,
-        children_timelines: Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
-    ) -> Vec<(Range<f32>, Arc<dyn Timeline<S>>)>;
+        supervisor: &Supervisor<S>,
+        timeline_entries_sink: TimelineEntriesSink<S>,
+    ) -> Self::OutputTimelineState;
 }
 
-#[derive(Clone, Debug)]
 pub struct CollapsedTimelineState<M> {
     mobject: Arc<M>,
 }
 
-#[derive(Clone, Debug)]
-pub struct IndeterminedTimelineState<M, TM, R> {
+pub struct IndeterminedTimelineState<M, TE> {
     mobject: Arc<M>,
-    time_metric: TM,
-    rate: R,
+    time_eval: Arc<TE>,
 }
 
-#[derive(Clone, Debug)]
-pub struct ActionTimelineState<M, TM, R, U> {
+pub struct UpdateTimelineState<M, TE, U> {
     mobject: Arc<M>,
-    time_metric: TM,
-    rate: R,
-    update: U,
+    time_eval: Arc<TE>,
+    update: Arc<U>,
 }
 
-#[derive(Clone, Debug)]
-pub struct UpdateTimelineState<M, TM, R, U> {
+pub struct ConstructTimelineState<M, TE, C> {
     mobject: Arc<M>,
-    time_metric: TM,
-    rate: R,
-    update: U,
+    time_eval: Arc<TE>,
+    construct: C,
+    // children_time_interval: Range<f32>,
+    // children_timeline_entries: CTE,
 }
 
-#[derive(Clone, Debug)]
-pub struct ConstructTimelineState<M, R> {
-    mobject: Arc<M>,
-    time_metric: NormalizedTimeMetric,
-    rate: R,
-    time_interval: Range<f32>,
-    // timelines: Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
-}
+// #[derive(Clone, Debug)]
+// pub struct CollapsedTimelineState<M> {
+//     mobject: Arc<M>,
+// }
+
+// #[derive(Clone, Debug)]
+// pub struct IndeterminedTimelineState<M, TM, R> {
+//     mobject: Arc<M>,
+//     time_transform: TE,
+// }
+
+// #[derive(Clone, Debug)]
+// pub struct UpdateTimelineState<M, TM, R, U> {
+//     mobject: Arc<M>,
+//     time_transform: TE,
+//     update: U,
+// }
+
+// #[derive(Clone, Debug)]
+// pub struct ActionTimelineState<M, TM, R, U> {
+//     mobject: Arc<M>,
+//     time_transform: TE,
+//     update: U,
+// }
+
+// #[derive(Clone, Debug)]
+// pub struct ConstructTimelineState<M, R> {
+//     mobject: Arc<M>,
+//     time_transform: TimeTransform<NormalizedTimeMetric, R>,
+//     time_interval: Range<f32>,
+//     // timelines: Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
+// }
 
 impl<S, M> TimelineState<S> for CollapsedTimelineState<M>
 where
     S: Storage,
     M: Mobject,
 {
-    fn into_timelines(
+    type OutputTimelineState = CollapsedTimelineState<M>;
+
+    fn allocate_timeline_entries(
         self,
         time_interval: Range<f32>,
-        _children_timelines: Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
-    ) -> Vec<(Range<f32>, Arc<dyn Timeline<S>>)> {
-        Vec::from([(
+        supervisor: &Supervisor<S>,
+        mut timeline_entries_sink: TimelineEntriesSink<S>,
+    ) -> Self::OutputTimelineState {
+        timeline_entries_sink.extend_one(TimelineEntry::allocate_in(
             time_interval,
-            Arc::new(SteadyTimeline {
-                mobject: self.mobject,
-            }) as Arc<dyn Timeline<S>>,
-        )])
+            StaticTimeline {
+                mobject: self.mobject.clone(),
+            },
+            &supervisor.storage,
+        ));
+        self
     }
 }
 
-impl<S, M, TM, R> TimelineState<S> for IndeterminedTimelineState<M, TM, R>
+impl<S, M, TE> TimelineState<S> for IndeterminedTimelineState<M, TE>
 where
     S: Storage,
     M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
+    TE: TimeEval,
 {
-    fn into_timelines(
+    type OutputTimelineState = IndeterminedTimelineState<M, TE>;
+
+    fn allocate_timeline_entries(
         self,
         time_interval: Range<f32>,
-        _children_timelines: Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
-    ) -> Vec<(Range<f32>, Arc<dyn Timeline<S>>)> {
-        Vec::from([(
+        supervisor: &Supervisor<S>,
+        mut timeline_entries_sink: TimelineEntriesSink<S>,
+    ) -> Self::OutputTimelineState {
+        timeline_entries_sink.extend_one(TimelineEntry::allocate_in(
             time_interval,
-            Arc::new(SteadyTimeline {
-                mobject: self.mobject,
-            }) as Arc<dyn Timeline<S>>,
-        )])
+            StaticTimeline {
+                mobject: self.mobject.clone(),
+            },
+            &supervisor.storage,
+        ));
+        self
     }
 }
 
-impl<S, M, TM, R, U> TimelineState<S> for ActionTimelineState<M, TM, R, U>
+impl<S, M, TE, U> TimelineState<S> for UpdateTimelineState<M, TE, U>
 where
     S: Storage,
     M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
-    U: Update<M, TM>,
+    TE: TimeEval,
+    U: Update<TE::OutputTimeMetric, M>,
 {
-    fn into_timelines(
+    type OutputTimelineState = CollapsedTimelineState<M>;
+
+    fn allocate_timeline_entries(
         self,
         time_interval: Range<f32>,
-        _children_timelines: Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
-    ) -> Vec<(Range<f32>, Arc<dyn Timeline<S>>)> {
-        Vec::from([(
-            time_interval,
-            Arc::new(DynamicTimeline {
-                mobject: self.mobject,
-                time_metric: self.time_metric,
-                rate: self.rate,
-                update: self.update,
-            }) as Arc<dyn Timeline<S>>,
-        )])
+        supervisor: &Supervisor<S>,
+        mut timeline_entries_sink: TimelineEntriesSink<S>,
+    ) -> Self::OutputTimelineState {
+        timeline_entries_sink.extend_one(TimelineEntry::allocate_in(
+            time_interval.clone(),
+            DynamicTimeline {
+                mobject: self.mobject.clone(),
+                time_eval: self.time_eval.clone(),
+                update: self.update.clone(),
+            },
+            &supervisor.storage,
+        ));
+        let mut mobject = Arc::unwrap_or_clone(self.mobject);
+        self.update.update(
+            self.time_eval.time_eval(time_interval.end, time_interval),
+            &mut mobject,
+        );
+        CollapsedTimelineState {
+            mobject: Arc::new(mobject),
+        }
     }
 }
 
-impl<S, M, TM, R, U> TimelineState<S> for UpdateTimelineState<M, TM, R, U>
+impl<S, M, TE, C> TimelineState<S> for ConstructTimelineState<M, TE, C>
 where
     S: Storage,
     M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
-    U: Update<M, TM>,
+    TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+    C: Construct<M>,
 {
-    fn into_timelines(
-        self,
-        time_interval: Range<f32>,
-        _children_timelines: Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
-    ) -> Vec<(Range<f32>, Arc<dyn Timeline<S>>)> {
-        Vec::from([(
-            time_interval,
-            Arc::new(DynamicTimeline {
-                mobject: self.mobject,
-                time_metric: self.time_metric,
-                rate: self.rate,
-                update: self.update,
-            }) as Arc<dyn Timeline<S>>,
-        )])
-    }
-}
+    type OutputTimelineState = CollapsedTimelineState<C::OutputMobject>;
 
-impl<S, M, R> TimelineState<S> for ConstructTimelineState<M, R>
-where
-    S: Storage,
-    M: Mobject,
-    R: IncreasingRate<NormalizedTimeMetric>,
-{
-    fn into_timelines(
+    fn allocate_timeline_entries(
         self,
         time_interval: Range<f32>,
-        children_timelines: Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
-    ) -> Vec<(Range<f32>, Arc<dyn Timeline<S>>)> {
-        let rescale_time = |time| {
-            time_interval.start
-                + (time_interval.end - time_interval.start)
-                    * self
-                        .time_metric
-                        .eval(&self.rate, time, self.time_interval.clone())
-        };
-        children_timelines
-            .into_iter()
-            .map(|(child_time_interval, child_timeline)| {
-                (
-                    rescale_time(child_time_interval.start)..rescale_time(child_time_interval.end),
-                    child_timeline,
-                )
-            })
-            .collect()
+        supervisor: &Supervisor<S>,
+        mut timeline_entries_sink: TimelineEntriesSink<S>,
+    ) -> Self::OutputTimelineState {
+        let child_supervisor = Supervisor::new(supervisor.config, supervisor.storage);
+        let child_time_start = child_supervisor.time();
+        let timeline_state = self
+            .construct
+            .construct(
+                Alive::new(
+                    &child_supervisor,
+                    child_supervisor.arc_time(),
+                    CollapsedTimelineState {
+                        mobject: self.mobject,
+                    },
+                ),
+                &child_supervisor,
+            )
+            .archive(|_, _, timeline_state| timeline_state);
+        let children_time_interval = child_time_start..child_supervisor.time();
+        timeline_entries_sink.extend(child_supervisor.iter_timeline_entries().map(
+            |mut timeline_entry| {
+                timeline_entry.rescale_time_interval(
+                    self.time_eval.as_ref(),
+                    &children_time_interval,
+                    &time_interval,
+                );
+                timeline_entry
+            },
+        ));
+        timeline_state
     }
+
+    // fn allocate_timeline_entries(
+    //     self,
+    //     time_interval: Range<f32>,
+    //     _mobject: Arc<M>,
+    //     _storage: &S,
+    // ) -> Vec<TimelineEntry<S>> {
+    //     let mut timeline_entries = self.children_timeline_entries;
+    //     timeline_entries.iter_mut().for_each(|timeline_entry| {
+    //         timeline_entry.rescale_time_interval(
+    //             &self.time_eval,
+    //             &self.children_time_interval,
+    //             &time_interval,
+    //         )
+    //     });
+    //     timeline_entries
+    // }
 }
 
 // fn new_render_pass<'ce>(
@@ -400,46 +672,94 @@ where
 //     })
 // }
 
-pub trait TimeMetric:
-    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
-{
-    fn eval<R>(&self, rate: &R, time: f32, time_interval: Range<f32>) -> f32
-    where
-        R: Rate<Self>;
-}
+// impl TimeMetric for () {}
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct NormalizedTimeMetric;
+#[derive(Clone)]
+pub struct NormalizedTimeMetric(f32);
 
-impl TimeMetric for NormalizedTimeMetric {
-    fn eval<R>(&self, rate: &R, time: f32, time_interval: Range<f32>) -> f32
-    where
-        R: Rate<Self>,
-    {
-        rate.eval((time - time_interval.start) / (time_interval.end - time_interval.start))
+impl Deref for NormalizedTimeMetric {
+    type Target = f32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct DenormalizedTimeMetric;
+impl TimeMetric for NormalizedTimeMetric {}
 
-impl TimeMetric for DenormalizedTimeMetric {
-    fn eval<R>(&self, rate: &R, time: f32, time_interval: Range<f32>) -> f32
-    where
-        R: Rate<Self>,
-    {
-        rate.eval(time - time_interval.start)
+#[derive(Clone)]
+pub struct DenormalizedTimeMetric(f32);
+
+impl Deref for DenormalizedTimeMetric {
+    type Target = f32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
+
+impl TimeMetric for DenormalizedTimeMetric {}
+
+// impl TimeEval for () {
+//     type OutputTimeMetric = ();
+
+//     fn time_eval(&self, _time: f32, _time_interval: Range<f32>) -> Self::OutputTimeMetric {}
+// }
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct NormalizedTimeEval;
+
+impl TimeEval for NormalizedTimeEval {
+    type OutputTimeMetric = NormalizedTimeMetric;
+
+    fn time_eval(&self, time: f32, time_interval: Range<f32>) -> Self::OutputTimeMetric {
+        NormalizedTimeMetric(
+            (time_interval.end - time_interval.start != 0.0)
+                .then(|| (time - time_interval.start) / (time_interval.end - time_interval.start))
+                .unwrap_or_default(),
+        )
+    }
+}
+
+impl IncreasingTimeEval for NormalizedTimeEval {}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct DenormalizedTimeEval;
+
+impl TimeEval for DenormalizedTimeEval {
+    type OutputTimeMetric = DenormalizedTimeMetric;
+
+    fn time_eval(&self, time: f32, time_interval: Range<f32>) -> Self::OutputTimeMetric {
+        DenormalizedTimeMetric(time - time_interval.start)
+    }
+}
+
+impl IncreasingTimeEval for DenormalizedTimeEval {}
+
+// #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+// struct TimeTransform<TM, R> {
+//     time_metric: TM,
+//     rate: R,
+// }
+
+// impl<TM, R> TimeTransform<TM, R>
+// where
+//     TM: TimeMetric,
+//     R: Rate<TM>,
+// {
+//     fn eval(&self, time: f32, time_interval: Range<f32>) -> f32 {
+//         self.rate.eval(self.time_metric.eval(time, time_interval))
+//     }
+// }
 
 pub trait Quantize: Sized {
-    type Output<TM>
+    type Output<TE>
     where
-        TM: TimeMetric;
+        TE: TimeEval;
 
-    fn quantize<TM>(self, time_metric: TM) -> Self::Output<TM>
+    fn quantize<TE>(self, time_metric: TE) -> Self::Output<TE>
     where
-        TM: TimeMetric;
+        TE: TimeEval;
 }
 
 pub trait Collapse: Sized {
@@ -461,65 +781,69 @@ where
         R: Rate<TM>;
 }
 
-pub trait ApplyAct<M, TM>: Sized
+pub trait ApplyUpdate<TM, M>: Sized
 where
-    M: Mobject,
     TM: TimeMetric,
-{
-    type Output<A>
-    where
-        A: Act<M, TM>;
-
-    fn apply_act<A>(self, act: A) -> Self::Output<A>
-    where
-        A: Act<M, TM>;
-}
-
-pub trait ApplyUpdate<M, TM>: Sized
-where
     M: Mobject,
-    TM: TimeMetric,
 {
     type Output<U>
     where
-        U: Update<M, TM>;
+        U: Update<TM, M>;
 
     fn apply_update<U>(self, update: U) -> Self::Output<U>
     where
-        U: Update<M, TM>;
+        U: Update<TM, M>;
 }
 
-pub trait ApplyConstruct<S, M>: Sized
+// pub trait ApplyAct<TM, M>: Sized
+// where
+//     TM: TimeMetric,
+//     M: Mobject,
+// {
+//     type Output<A>
+//     where
+//         A: Act<TM, M>;
+
+//     fn apply_act<A>(self, act: A) -> Self::Output<A>
+//     where
+//         A: Act<TM, M>;
+// }
+
+pub trait ApplyConstruct<M>: Sized
 where
-    S: Storage,
     M: Mobject,
 {
     type Output<C>
     where
-        C: Construct<S, M>;
+        C: Construct<M>;
 
     fn apply_construct<C>(self, construct: C) -> Self::Output<C>
     where
-        C: Construct<S, M>;
+        C: Construct<M>;
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct TimelineEntry<S>
-where
-    S: Storage,
-{
-    key: S::Key,
-    time_interval: Range<f32>,
-    timeline: serde_traitobject::Arc<dyn Timeline<S>>,
-}
+// #[derive(Debug, serde::Deserialize, serde::Serialize)]
+// struct TimelineEntry<S>
+// where
+//     S: Storage,
+// {
+//     key: S::Key,
+//     time_interval: Range<f32>,
+//     timeline: serde_traitobject::Arc<dyn Timeline>,
+// }
 
-enum TimelineSlot<S> {
-    Unarchived(
-        Arc<dyn TimelineState<S>>,
-        Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
-    ),
-    Archived(Vec<(Range<f32>, Arc<dyn Timeline<S>>)>),
-}
+// struct UnarchivedTimeline<M, TS> {
+//     mobject: Arc<M>,
+//     timeline_state: TS,
+// }
+
+// enum TimelineSlot<S>
+// where
+//     S: Storage,
+// {
+//     Unarchived(Arc<dyn Any>),
+//     Archived(Vec<TimelineEntry<S>>),
+// }
 
 pub struct Supervisor<'c, 's, S>
 where
@@ -528,7 +852,7 @@ where
     config: &'c Config,
     storage: &'s S,
     time: RefCell<Arc<f32>>,
-    timeline_slots: RefCell<Vec<TimelineSlot<S>>>,
+    timeline_slots: RefCell<Vec<(Option<Arc<dyn Any>>, Vec<TimelineEntry<S>>)>>,
 }
 
 impl<'c, 's, S> Supervisor<'c, 's, S>
@@ -544,15 +868,14 @@ where
         }
     }
 
-    fn collect_timelines(self) -> Vec<(Range<f32>, Arc<dyn Timeline<S>>)> {
+    fn iter_timeline_entries(self) -> impl Iterator<Item = TimelineEntry<S>> {
         self.timeline_slots
             .into_inner()
             .into_iter()
-            .flat_map(|timeline_slot| match timeline_slot {
-                TimelineSlot::Unarchived(..) => unreachable!(),
-                TimelineSlot::Archived(timelines) => timelines,
+            .flat_map(|(timeline, timeline_entries)| {
+                assert!(timeline.is_none());
+                timeline_entries
             })
-            .collect()
     }
 
     // pub(crate) fn into_timeline_entries(self) -> Vec<TimelineEntry<S>> {
@@ -619,7 +942,7 @@ where
     pub fn spawn<'sv, MB>(
         &'sv self,
         mobject_builder: MB,
-    ) -> Alive<'sv, 'c, 's, S, CollapsedTimelineState<MB::Instantiation>>
+    ) -> Alive<'c, 's, 'sv, S, CollapsedTimelineState<MB::Instantiation>>
     where
         MB: MobjectBuilder,
         'sv: 'c,
@@ -630,7 +953,6 @@ where
             CollapsedTimelineState {
                 mobject: Arc::new(mobject_builder.instantiate(&self.config)),
             },
-            Vec::new(),
         )
     }
 
@@ -999,7 +1321,7 @@ where
 pub struct Alive<'c, 's, 'sv, S, TS>
 where
     S: Storage,
-    TS: Clone + TimelineState<S>,
+    TS: TimelineState<S>,
 {
     supervisor: &'sv Supervisor<'c, 's, S>,
     spawn_time: Arc<f32>,
@@ -1010,19 +1332,19 @@ where
 impl<'c, 's, 'sv, S, TS> Alive<'c, 's, 'sv, S, TS>
 where
     S: Storage,
-    TS: Clone + TimelineState<S>,
+    TS: TimelineState<S>,
 {
     fn new(
         supervisor: &'sv Supervisor<'c, 's, S>,
         spawn_time: Arc<f32>,
         timeline_state: TS,
-        children_timelines: Vec<(Range<f32>, Arc<dyn Timeline<S>>)>,
+        // children_timelines: Vec<(Range<f32>, Arc<dyn Timeline>)>,
     ) -> Self {
         let timeline_state = Arc::new(timeline_state);
         let weak_timeline_state = Arc::downgrade(&timeline_state);
         let mut timeline_slots = supervisor.timeline_slots.borrow_mut();
         let index = timeline_slots.len();
-        timeline_slots.push(TimelineSlot::Unarchived(timeline_state, children_timelines));
+        timeline_slots.push((Some(timeline_state), Vec::new()));
         Self {
             supervisor,
             spawn_time,
@@ -1033,27 +1355,50 @@ where
 
     fn archive<F, FO>(&mut self, f: F) -> FO
     where
-        F: FnOnce(&'sv Supervisor<'c, 's, S>, Arc<f32>, TS) -> FO,
+        F: FnOnce(&'sv Supervisor<'c, 's, S>, Arc<f32>, TS::OutputTimelineState) -> FO,
     {
         let supervisor = self.supervisor;
-        let timeline_slot = &mut supervisor.timeline_slots.borrow_mut()[self.index];
-        let TimelineSlot::Unarchived(_, children_timelines) =
-            std::mem::replace(timeline_slot, TimelineSlot::Archived(Vec::new()))
-        else {
-            unreachable!()
+        let (any_timeline_state, timeline_entries) =
+            &mut supervisor.timeline_slots.borrow_mut()[self.index];
+        let timeline_state = match Arc::try_unwrap(self.weak_timeline_state.upgrade().unwrap()) {
+            Ok(timeline_state) => timeline_state,
+            Err(_) => unreachable!(),
         };
+        assert!(any_timeline_state.take().is_some());
         let archive_time = supervisor.arc_time();
         let spawn_time = std::mem::replace(&mut self.spawn_time, archive_time.clone());
-        let timeline_state = Arc::try_unwrap(self.weak_timeline_state.upgrade().unwrap()).unwrap();
+        let timeline_entries_sink = TimelineEntriesSink(
+            (!Arc::ptr_eq(&spawn_time, &archive_time)).then_some(timeline_entries),
+        );
         // let timeline = Arc::new(self.timeline.take().unwrap());
-        *timeline_slot = TimelineSlot::Archived(if Arc::ptr_eq(&spawn_time, &archive_time) {
-            Vec::new()
-        } else {
-            timeline_state
-                .clone()
-                .into_timelines(*spawn_time..*archive_time, children_timelines)
-        });
-        f(supervisor, archive_time.clone(), timeline_state)
+        let output_timeline_state = timeline_state.allocate_timeline_entries(
+            *spawn_time..*archive_time,
+            supervisor,
+            timeline_entries_sink,
+        );
+        f(supervisor, archive_time, output_timeline_state)
+        // let (output, timelines) = if Arc::ptr_eq(&spawn_time, &archive_time) {
+        // } else {
+        //     (
+        //         f(
+        //             supervisor,
+        //             archive_time.clone(),
+        //             unarchived_timeline.mobject.clone(),
+        //             unarchived_timeline.time_eval.clone(),
+        //             &unarchived_timeline.timeline_state,
+        //         ),
+        //         unarchived_timeline
+        //             .timeline_state
+        //             .allocate_timeline_entries(
+        //                 *spawn_time..*archive_time,
+        //                 unarchived_timeline.mobject,
+        //                 unarchived_timeline.time_eval,
+        //                 &supervisor.storage,
+        //             ),
+        //     )
+        // };
+        // *timeline_slot = TimelineSlot::Archived(timelines);
+        // output
         // if Arc::ptr_eq(&spawn_time, &archive_time) {
         //     let _ = timeline.take();
         //     // let index = timeline_entries
@@ -1098,7 +1443,7 @@ where
 impl<S, TS> Drop for Alive<'_, '_, '_, S, TS>
 where
     S: Storage,
-    TS: Clone + TimelineState<S>,
+    TS: TimelineState<S>,
 {
     fn drop(&mut self) {
         if self.weak_timeline_state.strong_count() != 0 {
@@ -1107,435 +1452,266 @@ where
     }
 }
 
-impl<'sv, 'c, 's, S, M> Quantize for Alive<'sv, 'c, 's, S, CollapsedTimelineState<M>>
+impl<'c, 's, 'sv, S, M> Quantize for Alive<'c, 's, 'sv, S, CollapsedTimelineState<M>>
 where
     S: Storage,
     M: Mobject,
 {
-    type Output<TM> = Alive<'sv, 'c, 's, S, IndeterminedTimelineState<M, TM, IdentityRate>> where TM: TimeMetric;
+    type Output<TE> = Alive<'c, 's, 'sv, S, IndeterminedTimelineState<M, TE>> where TE: TimeEval;
 
     #[must_use]
-    fn quantize<TM>(mut self, time_metric: TM) -> Self::Output<TM>
+    fn quantize<TE>(mut self, time_eval: TE) -> Self::Output<TE>
     where
-        TM: TimeMetric,
+        TE: TimeEval,
     {
-        self.archive(|supervisor, archive_time, timeline_state| {
+        self.archive(|supervisor, archive_time, output_timeline_state| {
             Alive::new(
                 supervisor,
                 archive_time,
                 IndeterminedTimelineState {
-                    mobject: timeline_state.mobject.clone(),
-                    time_metric,
-                    rate: IdentityRate,
+                    mobject: output_timeline_state.mobject,
+                    time_eval: Arc::new(time_eval),
                 },
-                Vec::new(),
             )
         })
     }
 }
 
-impl<'sv, 'c, 's, S, M, TM, R, U> Collapse
-    for Alive<'sv, 'c, 's, S, ActionTimelineState<M, TM, R, U>>
+impl<'c, 's, 'sv, S, M, TE, U> Collapse for Alive<'c, 's, 'sv, S, UpdateTimelineState<M, TE, U>>
 where
     S: Storage,
     M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
-    U: Update<M, TM>,
+    TE: TimeEval,
+    U: Update<TE::OutputTimeMetric, M>,
 {
-    type Output = Alive<'sv, 'c, 's, S, CollapsedTimelineState<M>>;
+    type Output = Alive<'c, 's, 'sv, S, CollapsedTimelineState<M>>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        let spawn_time = self.spawn_time.clone();
-        self.archive(|supervisor, archive_time, timeline_state| {
-            let time_interval = *spawn_time..*archive_time;
-            let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
-            timeline_state.update.update(
-                &mut mobject,
-                timeline_state.time_metric.eval(
-                    &timeline_state.rate,
-                    time_interval.end - time_interval.start,
-                    time_interval,
-                ),
-            );
-            Alive::new(
-                supervisor,
-                archive_time,
-                CollapsedTimelineState {
-                    mobject: Arc::new(mobject),
-                },
-                Vec::new(),
-            )
+        self.archive(|supervisor, archive_time, output_timeline_state| {
+            Alive::new(supervisor, archive_time, output_timeline_state)
         })
     }
 }
 
-impl<'sv, 'c, 's, S, M, TM, R, U> Collapse
-    for Alive<'sv, 'c, 's, S, UpdateTimelineState<M, TM, R, U>>
+impl<'c, 's, 'sv, S, M, TE, C> Collapse for Alive<'c, 's, 'sv, S, ConstructTimelineState<M, TE, C>>
 where
     S: Storage,
     M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
-    U: Update<M, TM>,
+    TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+    C: Construct<M>,
 {
-    type Output = Alive<'sv, 'c, 's, S, CollapsedTimelineState<M>>;
+    type Output = Alive<'c, 's, 'sv, S, CollapsedTimelineState<C::OutputMobject>>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        let spawn_time = self.spawn_time.clone();
-        self.archive(|supervisor, archive_time, timeline_state| {
-            let time_interval = *spawn_time..*archive_time;
-            let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
-            timeline_state.update.update(
-                &mut mobject,
-                timeline_state.time_metric.eval(
-                    &timeline_state.rate,
-                    time_interval.end - time_interval.start,
-                    time_interval,
-                ),
-            );
-            Alive::new(
-                supervisor,
-                archive_time,
-                CollapsedTimelineState {
-                    mobject: Arc::new(mobject),
-                },
-                Vec::new(),
-            )
+        self.archive(|supervisor, archive_time, output_timeline_state| {
+            Alive::new(supervisor, archive_time, output_timeline_state)
         })
     }
 }
 
-impl<'sv, 'c, 's, S, M, R> Collapse for Alive<'sv, 'c, 's, S, ConstructTimelineState<M, R>>
+impl<'c, 's, 'sv, S, M, TE> ApplyRate<TE::OutputTimeMetric>
+    for Alive<'c, 's, 'sv, S, IndeterminedTimelineState<M, TE>>
 where
     S: Storage,
     M: Mobject,
-    R: IncreasingRate<NormalizedTimeMetric>,
+    TE: TimeEval,
 {
-    type Output = Alive<'sv, 'c, 's, S, CollapsedTimelineState<M>>;
-
-    #[must_use]
-    fn collapse(mut self) -> Self::Output {
-        self.archive(|supervisor, archive_time, timeline_state| {
-            Alive::new(
-                supervisor,
-                archive_time,
-                CollapsedTimelineState {
-                    mobject: timeline_state.mobject,
-                },
-                Vec::new(),
-            )
-        })
-    }
-}
-
-impl<'sv, 'c, 's, S, M, TM, R> ApplyRate<R::OutputMetric>
-    for Alive<'sv, 'c, 's, S, IndeterminedTimelineState<M, TM, R>>
-where
-    S: Storage,
-    M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
-{
-    type Output<RA> = Alive<'sv, 'c, 's, S, IndeterminedTimelineState<M, TM, ComposeRate<RA, R>>>
+    type Output<R> = Alive<'c, 's, 'sv, S, IndeterminedTimelineState<M, RateComposeTimeEval<R, TE>>>
     where
-        RA: Rate<R::OutputMetric>;
+        R: Rate<TE::OutputTimeMetric>;
 
     #[must_use]
-    fn apply_rate<RA>(mut self, rate: RA) -> Self::Output<RA>
+    fn apply_rate<R>(mut self, rate: R) -> Self::Output<R>
     where
-        RA: Rate<R::OutputMetric>,
+        R: Rate<TE::OutputTimeMetric>,
     {
-        self.archive(|supervisor, archive_time, timeline_state| {
+        self.archive(|supervisor, archive_time, output_timeline_state| {
             Alive::new(
                 supervisor,
                 archive_time,
                 IndeterminedTimelineState {
-                    mobject: timeline_state.mobject,
-                    time_metric: timeline_state.time_metric,
-                    rate: ComposeRate(rate, timeline_state.rate),
+                    mobject: output_timeline_state.mobject,
+                    time_eval: Arc::new(RateComposeTimeEval {
+                        rate,
+                        time_eval: Arc::unwrap_or_clone(output_timeline_state.time_eval),
+                    }),
                 },
-                Vec::new(),
             )
         })
     }
 }
 
-impl<'sv, 'c, 's, S, M> ApplyAct<M, NormalizedTimeMetric>
-    for Alive<'sv, 'c, 's, S, CollapsedTimelineState<M>>
+impl<'c, 's, 'sv, S, M, TE> ApplyUpdate<TE::OutputTimeMetric, M>
+    for Alive<'c, 's, 'sv, S, IndeterminedTimelineState<M, TE>>
 where
     S: Storage,
     M: Mobject,
+    TE: TimeEval,
 {
-    type Output<A> = Alive<'sv, 'c, 's, S, CollapsedTimelineState<M>> where A: Act<M, NormalizedTimeMetric>;
-
-    #[must_use]
-    fn apply_act<A>(mut self, act: A) -> Self::Output<A>
+    type Output<U> = Alive<'c, 's, 'sv, S, UpdateTimelineState<M, TE, U>>
     where
-        A: Act<M, NormalizedTimeMetric>,
-    {
-        self.archive(|supervisor, archive_time, timeline_state| {
-            let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
-            act.act(&mobject).update(&mut mobject, 1.0);
-            Alive::new(
-                supervisor,
-                archive_time,
-                CollapsedTimelineState {
-                    mobject: Arc::new(mobject),
-                },
-                Vec::new(),
-            )
-        })
-    }
-}
-
-impl<'sv, 'c, 's, S, M, TM, R> ApplyAct<M, TM>
-    for Alive<'sv, 'c, 's, S, IndeterminedTimelineState<M, TM, R>>
-where
-    S: Storage,
-    M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
-{
-    type Output<A> = Alive<'sv, 'c, 's, S, ActionTimelineState<M, TM, R, A::Update>>
-    where
-        A: Act<M, TM>;
-
-    #[must_use]
-    fn apply_act<A>(mut self, act: A) -> Self::Output<A>
-    where
-        A: Act<M, TM>,
-    {
-        self.archive(|supervisor, archive_time, timeline_state| {
-            let update = act.act(&timeline_state.mobject);
-            Alive::new(
-                supervisor,
-                archive_time,
-                ActionTimelineState {
-                    mobject: timeline_state.mobject,
-                    time_metric: timeline_state.time_metric,
-                    rate: timeline_state.rate,
-                    update,
-                },
-                Vec::new(),
-            )
-        })
-    }
-}
-
-impl<'sv, 'c, 's, S, M, TM, R, U> ApplyAct<M, TM>
-    for Alive<'sv, 'c, 's, S, ActionTimelineState<M, TM, R, U>>
-where
-    S: Storage,
-    M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
-    U: Update<M, TM>,
-{
-    type Output<A> = Alive<'sv, 'c, 's, S, ActionTimelineState<M, TM, R, ComposeUpdate<A::Update, U>>>
-    where
-        A: Act<M, TM>;
-
-    #[must_use]
-    fn apply_act<A>(mut self, act: A) -> Self::Output<A>
-    where
-        A: Act<M, TM>,
-    {
-        self.archive(|supervisor, archive_time, timeline_state| {
-            let update = ComposeUpdate(act.act(&timeline_state.mobject), timeline_state.update);
-            Alive::new(
-                supervisor,
-                archive_time,
-                ActionTimelineState {
-                    mobject: timeline_state.mobject,
-                    time_metric: timeline_state.time_metric,
-                    rate: timeline_state.rate,
-                    update,
-                },
-                Vec::new(),
-            )
-        })
-    }
-}
-
-impl<'sv, 'c, 's, S, M, TM, R> ApplyUpdate<M, TM>
-    for Alive<'sv, 'c, 's, S, IndeterminedTimelineState<M, TM, R>>
-where
-    S: Storage,
-    M: Mobject,
-    TM: TimeMetric,
-    R: Rate<TM>,
-{
-    type Output<U> = Alive<'sv, 'c, 's, S, UpdateTimelineState<M, TM, R, U>>
-    where
-        U: Update<M, TM>;
+        U: Update<TE::OutputTimeMetric, M>;
 
     #[must_use]
     fn apply_update<U>(mut self, update: U) -> Self::Output<U>
     where
-        U: Update<M, TM>,
+        U: Update<TE::OutputTimeMetric, M>,
     {
-        self.archive(|supervisor, archive_time, timeline_state| {
+        self.archive(|supervisor, archive_time, output_timeline_state| {
             Alive::new(
                 supervisor,
                 archive_time,
                 UpdateTimelineState {
-                    mobject: timeline_state.mobject,
-                    time_metric: timeline_state.time_metric,
-                    rate: timeline_state.rate,
-                    update,
+                    mobject: output_timeline_state.mobject,
+                    time_eval: output_timeline_state.time_eval,
+                    update: Arc::new(update),
                 },
-                Vec::new(),
             )
         })
     }
 }
 
-impl<'sv, 'c, 's, S, M, R> ApplyConstruct<S, M>
-    for Alive<'sv, 'c, 's, S, IndeterminedTimelineState<M, NormalizedTimeMetric, R>>
+impl<'c, 's, 'sv, S, M> ApplyUpdate<NormalizedTimeMetric, M>
+    for Alive<'c, 's, 'sv, S, CollapsedTimelineState<M>>
 where
     S: Storage,
     M: Mobject,
-    R: IncreasingRate<NormalizedTimeMetric>,
 {
-    type Output<C> = Alive<'sv, 'c, 's, S, ConstructTimelineState<C::Output, R>>
+    type Output<U> = Alive<'c, 's, 'sv, S, CollapsedTimelineState<M>> where U: Update<NormalizedTimeMetric, M>;
+
+    #[must_use]
+    fn apply_update<U>(mut self, update: U) -> Self::Output<U>
     where
-        C: Construct<S, M>;
+        U: Update<NormalizedTimeMetric, M>,
+    {
+        self.archive(|supervisor, archive_time, output_timeline_state| {
+            let mut mobject = Arc::unwrap_or_clone(output_timeline_state.mobject);
+            update.update(NormalizedTimeMetric(1.0), &mut mobject);
+            Alive::new(
+                supervisor,
+                archive_time,
+                CollapsedTimelineState {
+                    mobject: Arc::new(mobject),
+                },
+            )
+        })
+    }
+}
+
+// impl<'c, 's, 'sv, S, M, TM, R> ApplyAct<M, TM>
+//     for Alive<'c, 's, 'sv, S, IndeterminedTimelineState<M, TM, R>>
+// where
+//     M: Mobject,
+//     TM: TimeMetric,
+//     R: Rate<TM>,
+// {
+//     type Output<A> = Alive<'c, 's, 'sv, S, ActionTimelineState<M, TM, R, A::Update>>
+//     where
+//         A: Act<M, TM>;
+
+//     #[must_use]
+//     fn apply_act<A>(mut self, act: A) -> Self::Output<A>
+//     where
+//         A: Act<M, TM>,
+//     {
+//         self.archive(|supervisor, archive_time, output_timeline_state| {
+//             let update = act.act(&timeline_state.mobject);
+//             Alive::new(
+//                 supervisor,
+//                 archive_time,
+//                 ActionTimelineState {
+//                     mobject: timeline_state.mobject,
+//                     time_transform: timeline_state.time_transform,
+//                     update,
+//                 },
+//             )
+//         })
+//     }
+// }
+
+// impl<'c, 's, 'sv, S, M, TM, R, U> ApplyAct<M, TM>
+//     for Alive<'c, 's, 'sv, S, ActionTimelineState<M, TM, R, U>>
+// where
+//     M: Mobject,
+//     TM: TimeMetric,
+//     R: Rate<TM>,
+//     U: Update<M, TM>,
+// {
+//     type Output<A> = Alive<'c, 's, 'sv, S, ActionTimelineState<M, TM, R, ComposeUpdate<A::Update, U>>>
+//     where
+//         A: Act<M, TM>;
+
+//     #[must_use]
+//     fn apply_act<A>(mut self, act: A) -> Self::Output<A>
+//     where
+//         A: Act<M, TM>,
+//     {
+//         self.archive(|supervisor, archive_time, output_timeline_state| {
+//             let update = ComposeUpdate(act.act(&timeline_state.mobject), timeline_state.update);
+//             Alive::new(
+//                 supervisor,
+//                 archive_time,
+//                 ActionTimelineState {
+//                     mobject: timeline_state.mobject,
+//                     time_transform: timeline_state.time_transform,
+//                     update,
+//                 },
+//             )
+//         })
+//     }
+// }
+
+impl<'c, 's, 'sv, S, M, TE> ApplyConstruct<M>
+    for Alive<'c, 's, 'sv, S, IndeterminedTimelineState<M, TE>>
+where
+    S: Storage,
+    M: Mobject,
+    TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+{
+    type Output<C> = Alive<'c, 's, 'sv, S, ConstructTimelineState<M, TE, C>>
+    where
+        C: Construct<M>;
 
     #[must_use]
     fn apply_construct<C>(mut self, construct: C) -> Self::Output<C>
     where
-        C: Construct<S, M>,
+        C: Construct<M>,
     {
-        self.archive(|supervisor, archive_time, timeline_state| {
-            let child_supervisor = Supervisor::new(supervisor.config, supervisor.storage);
-            let child_time_start = child_supervisor.time();
-            let child_timeline_state = construct
-                .construct(
-                    Alive::new(
-                        &child_supervisor,
-                        child_supervisor.arc_time(),
-                        CollapsedTimelineState {
-                            mobject: timeline_state.mobject,
-                        },
-                        Vec::new(),
-                    ),
-                    &child_supervisor,
-                )
-                .archive(|_, _, child_timeline_state| child_timeline_state);
+        self.archive(|supervisor, archive_time, output_timeline_state| {
             Alive::new(
                 supervisor,
                 archive_time,
                 ConstructTimelineState {
-                    mobject: child_timeline_state.mobject,
-                    time_metric: timeline_state.time_metric,
-                    rate: timeline_state.rate,
-                    time_interval: child_time_start..child_supervisor.time(),
+                    mobject: output_timeline_state.mobject,
+                    time_eval: output_timeline_state.time_eval,
+                    construct,
                 },
-                child_supervisor.collect_timelines(), // DynamicTimeline {
-                                                      //     content: {
-                                                      //         let supervisor = Supervisor::new(&supervisor.config);
-                                                      //         let mobject = construct
-                                                      //             .construct(
-                                                      //                 Alive::new(
-                                                      //                     &supervisor,
-                                                      //                     supervisor.arc_time(),
-                                                      //                     SteadyTimeline {
-                                                      //                         mobject: dynamic_timeline.content.mobject,
-                                                      //                     },
-                                                      //                 ),
-                                                      //                 &supervisor,
-                                                      //             )
-                                                      //             .archive(|_, _, steady_timeline| steady_timeline.mobject);
-                                                      //         DiscreteTimelineContent {
-                                                      //             mobject,
-                                                      //             timeline_entries: supervisor.into_timeline_entries(),
-                                                      //         }
-                                                      //     },
-                                                      //     metric: dynamic_timeline.metric,
-                                                      //     rate: dynamic_timeline.rate,
-                                                      // },
             )
-            // Supervisor::visit(
-            //     supervisor.config(),
-            //     |supervisor| {
-            //         construct
-            //             .construct(
-            //                 Alive::new(
-            //                     supervisor,
-            //                     supervisor.time(),
-            //                     SteadyTimeline {
-            //                         mobject: dynamic_timeline.content.mobject,
-            //                     },
-            //                 ),
-            //                 supervisor,
-            //             )
-            //             .archive(|_, _, steady_timeline| steady_timeline.mobject)
-            //     },
-            //     |_, timeline_entries, mobject| {
-            //         Alive::new(
-            //             supervisor,
-            //             archive_time,
-            //             DynamicTimeline {
-            //                 content: DiscreteTimelineContent {
-            //                     mobject,
-            //                     timeline_entries,
-            //                 },
-            //                 metric: dynamic_timeline.metric,
-            //                 rate: dynamic_timeline.rate,
-            //             },
-            //         )
-            //     },
-            // )
-            // let child_supervisor = Supervisor::new(supervisor.world());
-            // let input_mobject = timeline.content.mobject;
-            // let output_mobject = construct
-            //     .construct(
-            //         Alive::new(
-            //             &child_supervisor,
-            //             SteadyTimeline {
-            //                 mobject: input_mobject,
-            //             },
-            //         ),
-            //         &child_supervisor,
-            //     )
-            //     .archive(|_, _, steady_timeline| steady_timeline.mobject);
-            // Alive::new(
-            //     supervisor,
-            //     DynamicTimeline {
-            //         content: DiscreteTimelineContent {
-            //             mobject: output_mobject,
-            //             timeline_entries: child_supervisor.into_timeline_entries(),
-            //         },
-            //         metric: timeline.metric,
-            //         rate: timeline.rate,
-            //     },
-            // )
         })
     }
 }
 
 trait QuantizeExt: Quantize {
-    fn animate(self) -> Self::Output<NormalizedTimeMetric>;
-    fn animating(self) -> Self::Output<DenormalizedTimeMetric>;
+    fn animate(self) -> Self::Output<NormalizedTimeEval>;
+    fn animating(self) -> Self::Output<DenormalizedTimeEval>;
 }
 
-impl<'sv, 'c, 's, S, TS> QuantizeExt for Alive<'sv, 'c, 's, S, TS>
+impl<'c, 's, 'sv, S, TS> QuantizeExt for Alive<'c, 's, 'sv, S, TS>
 where
     S: Storage,
-    TS: Clone + TimelineState<S>,
+    TS: TimelineState<S>,
     Self: Quantize,
 {
     #[must_use]
-    fn animate(self) -> Self::Output<NormalizedTimeMetric> {
-        self.quantize(NormalizedTimeMetric)
+    fn animate(self) -> Self::Output<NormalizedTimeEval> {
+        self.quantize(NormalizedTimeEval)
     }
 
     #[must_use]
-    fn animating(self) -> Self::Output<DenormalizedTimeMetric> {
-        self.quantize(DenormalizedTimeMetric)
+    fn animating(self) -> Self::Output<DenormalizedTimeEval> {
+        self.quantize(DenormalizedTimeEval)
     }
 }
 
@@ -1543,10 +1719,10 @@ trait CollapseExt: Collapse {
     fn play(self, delta_time: f32) -> Self::Output;
 }
 
-impl<'sv, 'c, 's, S, TS> CollapseExt for Alive<'sv, 'c, 's, S, TS>
+impl<'c, 's, 'sv, S, TS> CollapseExt for Alive<'c, 's, 'sv, S, TS>
 where
     S: Storage,
-    TS: Clone + TimelineState<S>,
+    TS: TimelineState<S>,
     Self: Collapse,
 {
     #[must_use]
@@ -1556,72 +1732,102 @@ where
     }
 }
 
+// #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+// pub struct IdentityRate;
+
+// impl<TM> Rate<TM> for IdentityRate
+// where
+//     TM: TimeMetric,
+// {
+//     type OutputMetric = TM;
+
+//     fn eval(&self, time_metric: f32) -> f32 {
+//         time_metric
+//     }
+// }
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct IdentityRate;
+pub struct RateComposeTimeEval<R, TE> {
+    rate: R,
+    time_eval: TE,
+}
 
-impl<TM> Rate<TM> for IdentityRate
+impl<R, TE> TimeEval for RateComposeTimeEval<R, TE>
 where
-    TM: TimeMetric,
+    R: Rate<TE::OutputTimeMetric>,
+    TE: TimeEval,
 {
-    type OutputMetric = TM;
+    type OutputTimeMetric = R::OutputTimeMetric;
 
-    fn eval(&self, t: f32) -> f32 {
-        t
+    fn time_eval(&self, time: f32, time_interval: Range<f32>) -> Self::OutputTimeMetric {
+        self.rate
+            .eval(self.time_eval.time_eval(time, time_interval))
     }
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct ComposeRate<R0, R1>(R0, R1);
-
-impl<R0, R1, TM> Rate<TM> for ComposeRate<R0, R1>
+impl<R, TE> IncreasingTimeEval for RateComposeTimeEval<R, TE>
 where
-    R0: Rate<R1::OutputMetric>,
-    R1: Rate<TM>,
-    TM: TimeMetric,
+    R: IncreasingRate<TE::OutputTimeMetric>,
+    TE: IncreasingTimeEval,
 {
-    type OutputMetric = R0::OutputMetric;
-
-    fn eval(&self, t: f32) -> f32 {
-        self.0.eval(self.1.eval(t))
-    }
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+// #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+// pub struct IdentityPrepare;
+
+// impl<TM, M> Prepare<TM, M> for IdentityPrepare
+// where
+//     TM: TimeMetric,
+//     M: Mobject,
+// {
+//     fn prepare(
+//         &self,
+//         _time_metric: TM,
+//         _mobject: &M,
+//         _mobject_presentation: &mut M::MobjectPresentation,
+//         _device: &wgpu::Device,
+//         _queue: &wgpu::Queue,
+//         _format: wgpu::TextureFormat,
+//     ) {
+//     }
+// }
+
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ComposeUpdate<U0, U1>(U0, U1);
 
-impl<M, U0, U1, TM> Update<M, TM> for ComposeUpdate<U0, U1>
+impl<M, TM, U0, U1> Update<TM, M> for ComposeUpdate<U0, U1>
 where
     M: Mobject,
-    U0: Update<M, TM>,
-    U1: Update<M, TM>,
     TM: TimeMetric,
+    U0: Update<TM, M>,
+    U1: Update<TM, M>,
 {
-    fn update(&self, mobject: &mut M, t: f32) {
-        self.1.update(mobject, t);
-        self.0.update(mobject, t);
+    fn update(&self, time_metric: TM, mobject: &mut M) {
+        self.1.update(time_metric.clone(), mobject);
+        self.0.update(time_metric, mobject);
     }
 
     fn update_presentation(
         &self,
+        time_metric: TM,
+        mobject: &M,
         mobject_presentation: &mut M::MobjectPresentation,
-        reference_mobject: &M,
-        t: f32,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) {
         self.1.update_presentation(
+            time_metric.clone(),
+            mobject,
             mobject_presentation,
-            reference_mobject,
-            t,
             device,
             queue,
             format,
         );
         self.0.update_presentation(
+            time_metric,
+            mobject,
             mobject_presentation,
-            reference_mobject,
-            t,
             device,
             queue,
             format,
