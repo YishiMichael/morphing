@@ -1,14 +1,17 @@
 use std::any::Any;
-use std::collections::hash_map::Entry;
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use super::config::Config;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
+use super::timeline::DynamicTimelineId;
+use super::timeline::StaticTimelineId;
 use super::timeline::Supervisor;
+use super::timeline::TimeMetric;
 
 pub trait Mobject:
-    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
     type MobjectPresentation: MobjectPresentation;
 
@@ -20,7 +23,7 @@ pub trait MobjectPresentation: Send + Sync + Any {
 }
 
 // pub trait MobjectDiff<M>:
-//     'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+//     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 // where
 //     M: Mobject,
 // {
@@ -40,10 +43,8 @@ pub trait MobjectBuilder {
     fn instantiate(self, config: &Config) -> Self::Instantiation;
 }
 
-pub trait TimeMetric: Clone {}
-
 pub trait Rate<TM>:
-    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+    'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     TM: TimeMetric,
 {
@@ -59,7 +60,7 @@ where
 }
 
 pub trait Update<TM, M>:
-    'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize
+    'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     TM: TimeMetric,
     M: Mobject,
@@ -119,24 +120,24 @@ where
 // }
 
 pub trait Storage: 'static {
-    type Key: 'static + Clone + Send + Sync + Debug + serde::de::DeserializeOwned + serde::Serialize;
-
-    fn static_allocate(&self, mobject: &dyn serde_traitobject::Serialize) -> Self::Key;
-    fn static_get(&self, storage_key: &Self::Key) -> Option<&dyn MobjectPresentation>; // TODO: operate closure?
-    fn static_entry(
-        &self,
-        storage_key: Self::Key,
-    ) -> Entry<'_, Self::Key, Box<dyn MobjectPresentation>>;
+    fn static_allocate(&self, mobject: &dyn serde_traitobject::Serialize) -> StaticTimelineId;
+    fn static_get(&self, id: &StaticTimelineId) -> Option<&Arc<dyn MobjectPresentation>>; // TODO: operate closure?
+    fn static_set(
+        &mut self,
+        id: &StaticTimelineId,
+        activate: Option<()>,
+    ) -> Option<&mut Option<Arc<dyn MobjectPresentation>>>;
     fn dynamic_allocate(
         &self,
         mobject: &dyn serde_traitobject::Serialize,
         update: &dyn serde_traitobject::Serialize,
-    ) -> Self::Key;
-    fn dynamic_get(&self, storage_key: &Self::Key) -> Option<&dyn MobjectPresentation>; // TODO: operate closure?
-    fn dynamic_entry(
-        &self,
-        storage_key: Self::Key,
-    ) -> Entry<'_, Self::Key, Box<dyn MobjectPresentation>>;
+    ) -> DynamicTimelineId;
+    fn dynamic_get(&self, id: &DynamicTimelineId) -> Option<&Box<dyn MobjectPresentation>>; // TODO: operate closure?
+    fn dynamic_set(
+        &mut self,
+        id: &DynamicTimelineId,
+        activate: Option<()>,
+    ) -> Option<&mut Option<Box<dyn MobjectPresentation>>>;
 }
 
 // TODO: alive container morphisms

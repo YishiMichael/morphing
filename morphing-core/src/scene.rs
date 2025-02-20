@@ -17,7 +17,7 @@ use super::traits::Storage;
 pub struct SceneModule {
     pub name: &'static str,
     pub config_content: Option<&'static str>,
-    pub scene_fn: fn(&Supervisor),
+    pub scene_fn: fn(&Supervisor<&dyn Storage>),
 }
 
 inventory::collect!(SceneModule);

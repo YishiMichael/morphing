@@ -8,7 +8,7 @@ macro_rules! rate {
     ($($vis:vis fn $name:ident($t:ident: $t_ty:ty$(, $rate_var:ident: $rate_var_ty:ty)*) -> $return_ty:ty $body:block)*) => {paste::paste! {$(
         $vis fn $name($t: $t_ty$(, $rate_var: $rate_var_ty)*) -> $return_ty $body
 
-        #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+        #[derive(Debug, serde::Deserialize, serde::Serialize)]
         $vis struct [<$name:camel Rate>] {
             $($rate_var: $rate_var_ty,)*
         }
