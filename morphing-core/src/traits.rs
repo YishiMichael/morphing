@@ -1,46 +1,34 @@
-use std::any::Any;
 use std::fmt::Debug;
-use std::sync::Arc;
 
-use super::config::Config;
-use super::timeline::Alive;
+use super::alive::Alive;
+use super::alive::AliveCollector;
+use super::alive::World;
+use super::storage::Storable;
 use super::timeline::CollapsedTimelineState;
-use super::timeline::DynamicTimelineId;
-use super::timeline::StaticTimelineId;
-use super::timeline::Supervisor;
+use super::timeline::Time;
 use super::timeline::TimeMetric;
 
 pub trait Mobject:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
-    type MobjectPresentation: MobjectPresentation;
+    // type Layer: Layer;
+    type MobjectPresentation: Storable;
 
+    // fn spawn(self, layer: &Self::Layer) -> Alive<'_, >
     fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
 }
 
-pub trait MobjectPresentation: Send + Sync + Any {
-    fn render(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView);
-}
-
-// pub trait MobjectDiff<M>:
-//     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
-// where
-//     M: Mobject,
-// {
-//     fn apply(&self, mobject: &mut M, t: f32);
-//     fn apply_presentation(
-//         &self,
-//         mobject_presentation: &mut M::MobjectPresentation,
-//         reference_mobject: &M,
-//         t: f32,
-//         queue: &wgpu::Queue,
-//     ); // mobject_presentation write-only
+// pub trait MobjectPresentation: Send + Sync + Any {
+//     fn render(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView);
 // }
 
-pub trait MobjectBuilder {
+pub trait MobjectBuilder<L>
+where
+    L: Layer,
+{
     type Instantiation: Mobject;
 
-    fn instantiate(self, config: &Config) -> Self::Instantiation;
+    fn instantiate(self, layer: &L) -> Self::Instantiation; // ?
 }
 
 pub trait Rate<TM>:
@@ -93,13 +81,11 @@ where
 {
     type OutputMobject: Mobject;
 
-    fn construct<'sv, 'c, 's, S>(
+    fn construct(
         self,
-        input: Alive<'sv, 'c, 's, S, CollapsedTimelineState<M>>,
-        supervisor: &'sv Supervisor<'c, 's, S>,
-    ) -> Alive<'sv, 'c, 's, S, CollapsedTimelineState<Self::OutputMobject>>
-    where
-        S: Storage;
+        input: Alive<CollapsedTimelineState<M>>,
+        layer: Alive, // supervisor: &'sv Supervisor<'c>,
+    ) -> Alive<CollapsedTimelineState<Self::OutputMobject>>;
 }
 
 // pub trait SerdeMobject: serde_traitobject::Deserialize + serde_traitobject::Serialize {}
@@ -119,25 +105,30 @@ where
 // {
 // }
 
-pub trait Storage: 'static {
-    fn static_allocate(&self, mobject: &dyn serde_traitobject::Serialize) -> StaticTimelineId;
-    fn static_get(&self, id: &StaticTimelineId) -> Option<&Arc<dyn MobjectPresentation>>; // TODO: operate closure?
-    fn static_set(
-        &mut self,
-        id: &StaticTimelineId,
-        activate: Option<()>,
-    ) -> Option<&mut Option<Arc<dyn MobjectPresentation>>>;
-    fn dynamic_allocate(
+pub trait Layer:
+    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+{
+    type LayerPresentation: Storable;
+
+    fn prepare(
         &self,
-        mobject: &dyn serde_traitobject::Serialize,
-        update: &dyn serde_traitobject::Serialize,
-    ) -> DynamicTimelineId;
-    fn dynamic_get(&self, id: &DynamicTimelineId) -> Option<&Box<dyn MobjectPresentation>>; // TODO: operate closure?
-    fn dynamic_set(
-        &mut self,
-        id: &DynamicTimelineId,
-        activate: Option<()>,
-    ) -> Option<&mut Option<Box<dyn MobjectPresentation>>>;
+        time: Time,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self::LayerPresentation;
+    fn render(
+        &self,
+        layer_presentation: &Self::LayerPresentation,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+    );
+}
+
+pub trait LayerBuilder {
+    type Instantiation: Layer;
+
+    fn instantiate(self, world: &World) -> Self::Instantiation;
 }
 
 // TODO: alive container morphisms

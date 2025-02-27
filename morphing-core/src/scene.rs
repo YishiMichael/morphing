@@ -36,7 +36,7 @@ impl<R> RedirectedOutput<R> {
     {
         let shh_stdout = BufReader::new(shh::stdout().unwrap());
         let shh_stderr = BufReader::new(shh::stderr().unwrap());
-        let result = std::panic::catch_unwind(f).map_err(|_| ());
+        let result = std::panic::catch_unwind(f).map_err(|_| {});
         Self {
             result,
             stdout_lines: Arc::new(shh_stdout.lines().map(Result::unwrap).collect()),

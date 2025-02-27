@@ -9,6 +9,7 @@ inventory = "0.3.17"
 morphing-macros = { path = "../morphing-macros" }
 ron = "0.8.1"
 serde = { version = "1.0.217", features = ["rc", "serde_derive"] }
+serde-hashkey = { version = "0.4.5", features = ["ordered-float"] }
 serde_traitobject = "0.2.8"
 shh = "1.0.1"
 toml = "0.8.20"

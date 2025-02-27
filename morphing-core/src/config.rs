@@ -85,7 +85,7 @@ pub trait ConfigField: 'static + Send + Sized + Sync + typemap_rev::TypeMapKey {
     const NAME: &'static str;
 
     fn parse(value: &toml::Value) -> Self::Value;
-}
+} // TODO: type per field
 
 // impl ConfigField for i64 {
 //     fn parse(value: &toml::Value) -> Self {
