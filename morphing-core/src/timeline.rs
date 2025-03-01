@@ -1,18 +1,18 @@
-// use std::cell::RefCell;
+use std::cell::RefCell;
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::ops::Range;
-// use std::rc::Rc;
 use std::sync::Arc;
 
 use super::alive::Alive;
-use super::alive::AliveCollector;
-use super::alive::Archive;
+use super::alive::AliveContext;
+use super::alive::AliveRootContext;
+use super::alive::ArchiveState;
+use super::alive::IntoArchiveState;
 use super::alive::Time;
-use super::config::Config;
-use super::traits::LayerBuilder;
-use super::traits::MobjectBuilder;
-// use super::config::Config;
+use super::renderable::AliveRenderable;
+use super::renderable::LayerRenderableState;
+use super::renderable::RenderableErased;
 use super::storage::Allocated;
 use super::storage::MapStorage;
 use super::storage::PresentationStorage;
@@ -25,6 +25,7 @@ use super::traits::Construct;
 use super::traits::IncreasingRate;
 use super::traits::Layer;
 use super::traits::Mobject;
+use super::traits::MobjectBuilder;
 use super::traits::Rate;
 use super::traits::Update;
 
@@ -82,104 +83,8 @@ use super::traits::Update;
 //     }
 // }
 
-pub(crate) trait TimeMetric: 'static {}
-
-pub struct NormalizedTimeMetric(f32);
-
-impl Deref for NormalizedTimeMetric {
-    type Target = f32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl TimeMetric for NormalizedTimeMetric {}
-
-pub struct DenormalizedTimeMetric(f32);
-
-impl Deref for DenormalizedTimeMetric {
-    type Target = f32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl TimeMetric for DenormalizedTimeMetric {}
-
-trait TimeEval: 'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize {
-    type OutputTimeMetric: TimeMetric;
-
-    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric;
-}
-
-trait IncreasingTimeEval: TimeEval {}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct NormalizedTimeEval;
-
-impl TimeEval for NormalizedTimeEval {
-    type OutputTimeMetric = NormalizedTimeMetric;
-
-    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric {
-        NormalizedTimeMetric(
-            (time_interval.end - time_interval.start != 0.0)
-                .then(|| (time - time_interval.start) / (time_interval.end - time_interval.start))
-                .unwrap_or_default(),
-        )
-    }
-}
-
-impl IncreasingTimeEval for NormalizedTimeEval {}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct DenormalizedTimeEval;
-
-impl TimeEval for DenormalizedTimeEval {
-    type OutputTimeMetric = DenormalizedTimeMetric;
-
-    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric {
-        DenormalizedTimeMetric(time - time_interval.start)
-    }
-}
-
-impl IncreasingTimeEval for DenormalizedTimeEval {}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct RateComposeTimeEval<RA, TE> {
-    rate: RA,
-    time_eval: Arc<TE>,
-}
-
-impl<RA, TE> TimeEval for RateComposeTimeEval<RA, TE>
-where
-    RA: Rate<TE::OutputTimeMetric>,
-    TE: TimeEval,
-{
-    type OutputTimeMetric = RA::OutputTimeMetric;
-
-    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric {
-        self.rate
-            .eval(self.time_eval.time_eval(time, time_interval))
-    }
-}
-
-impl<RA, TE> IncreasingTimeEval for RateComposeTimeEval<RA, TE>
-where
-    RA: IncreasingRate<TE::OutputTimeMetric>,
-    TE: IncreasingTimeEval,
-{
-}
-
 trait Timeline:
-    'static
-    + Debug
-    + Send
-    + Sync
-    + serde_traitobject::Deserialize
-    + serde_traitobject::Serialize
-    + StorablePrimitive
+    'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize + StorablePrimitive
 // + typemap_rev::TypeMapKey<Value = HashMap<Self::SerdeKey, Self::MobjectPresentationStorage>>
 {
     // type SerdeKey: 'static + Eq + Hash + Send + Sync;
@@ -460,7 +365,7 @@ where
 //     }
 // }
 
-trait TimelineErased {
+pub trait TimelineErased {
     fn allocate(self, storage_type_map: &mut StorageTypeMap) -> Box<dyn AllocatedTimelineErased>;
 }
 
@@ -535,9 +440,68 @@ pub struct CollapsedTimelineState<M> {
     mobject: Arc<M>,
 }
 
+impl<M> ArchiveState for CollapsedTimelineState<M>
+where
+    M: Mobject,
+{
+    type LocalArchive = ();
+    type GlobalArchive = RefCell<(
+        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    )>;
+
+    fn archive(
+        &mut self,
+        time_interval: Range<Time>,
+        _local_archive: Self::LocalArchive,
+        global_archive: &Self::GlobalArchive,
+    ) {
+        global_archive.borrow_mut().0.push((
+            time_interval,
+            Box::new(StaticTimeline {
+                mobject: self.mobject.clone(),
+            }),
+        ));
+    }
+}
+
 pub struct IndeterminedTimelineState<M, TE> {
     mobject: Arc<M>,
     time_eval: Arc<TE>,
+}
+
+impl<M, TE> ArchiveState for IndeterminedTimelineState<M, TE>
+where
+    M: Mobject,
+    TE: TimeEval,
+{
+    type LocalArchive = ();
+    type GlobalArchive = RefCell<(
+        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    )>;
+
+    fn archive(
+        &mut self,
+        time_interval: Range<Time>,
+        _local_archive: Self::LocalArchive,
+        global_archive: &Self::GlobalArchive,
+    ) {
+        global_archive.borrow_mut().0.push((
+            time_interval,
+            Box::new(StaticTimeline {
+                mobject: self.mobject.clone(),
+            }),
+        ));
+    }
 }
 
 pub struct UpdateTimelineState<M, TE, U> {
@@ -546,63 +510,36 @@ pub struct UpdateTimelineState<M, TE, U> {
     update: Arc<U>,
 }
 
-pub struct ConstructTimelineState<M> {
-    mobject: Arc<M>,
-    timelines: Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-    // time_eval: Arc<TE>,
-    // construct: C,
-}
-
-impl<M> Archive for CollapsedTimelineState<M>
-where
-    M: Mobject,
-{
-    type Archived = Vec<(Range<Time>, Box<dyn TimelineErased>)>;
-
-    fn archive(&mut self, time_interval: Range<f32>) -> Self::Archived {
-        Vec::from([(
-            time_interval,
-            Box::new(StaticTimeline {
-                mobject: self.mobject.clone(),
-            }),
-        )])
-    }
-}
-
-impl<M, TE> Archive for IndeterminedTimelineState<M, TE>
-where
-    M: Mobject,
-    TE: TimeEval,
-{
-    type Archived = Vec<(Range<Time>, Box<dyn TimelineErased>)>;
-
-    fn archive(&mut self, time_interval: Range<f32>) -> Self::Archived {
-        Vec::from([(
-            time_interval,
-            Box::new(StaticTimeline {
-                mobject: self.mobject.clone(),
-            }),
-        )])
-    }
-}
-
-impl<M, TE, U> Archive for UpdateTimelineState<M, TE, U>
+impl<M, TE, U> ArchiveState for UpdateTimelineState<M, TE, U>
 where
     M: Mobject,
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, M>,
 {
-    type Archived = Vec<(Range<Time>, Box<dyn TimelineErased>)>;
+    type LocalArchive = ();
+    type GlobalArchive = RefCell<(
+        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    )>;
 
-    fn archive(&mut self, time_interval: Range<f32>) -> Self::Archived {
-        Vec::from([(
+    fn archive(
+        &mut self,
+        time_interval: Range<Time>,
+        _local_archive: Self::LocalArchive,
+        global_archive: &Self::GlobalArchive,
+    ) {
+        global_archive.borrow_mut().0.push((
             time_interval,
             Box::new(DynamicTimeline {
                 mobject: self.mobject.clone(),
                 time_eval: self.time_eval.clone(),
                 update: self.update.clone(),
             }),
-        )])
+        ));
     }
 
     // type OutputTimelineState = CollapsedTimelineState<M>;
@@ -630,16 +567,63 @@ where
     // }
 }
 
-impl<M> Archive for ConstructTimelineState<M>
+pub struct ConstructTimelineState<M, TE> {
+    mobject: Arc<M>,
+    time_eval: Arc<TE>,
+    root_archive: (
+        Range<Time>,
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    ),
+    // time_eval: Arc<TE>,
+    // construct: C,
+}
+
+impl<M, TE> ArchiveState for ConstructTimelineState<M, TE>
 where
     M: Mobject,
-    // TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+    TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
     // C: Construct<M>,
 {
-    type Archived = Vec<(Range<Time>, Box<dyn TimelineErased>)>;
+    type LocalArchive = ();
+    type GlobalArchive = RefCell<(
+        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    )>;
 
-    fn archive(&mut self, _time_interval: Range<f32>) -> Self::Archived {
-        std::mem::take(&mut self.timelines)
+    fn archive(
+        &mut self,
+        time_interval: Range<Time>,
+        _local_archive: Self::LocalArchive,
+        global_archive: &Self::GlobalArchive,
+    ) {
+        let (child_time_interval, renderables) = &mut self.root_archive;
+        let rescale_time_interval = |entry_time_interval: &mut Range<Time>| {
+            *entry_time_interval = time_interval.start
+                + (time_interval.end - time_interval.start)
+                    * *self
+                        .time_eval
+                        .time_eval(entry_time_interval.start, child_time_interval.clone())
+                ..time_interval.start
+                    + (time_interval.end - time_interval.start)
+                        * *self
+                            .time_eval
+                            .time_eval(entry_time_interval.end, child_time_interval.clone())
+        };
+        for (renderable_time_interval, _, timelines) in renderables.as_mut_slice() {
+            rescale_time_interval(renderable_time_interval);
+            for (timeline_time_interval, _) in timelines.as_mut_slice() {
+                rescale_time_interval(timeline_time_interval);
+            }
+        }
+        global_archive.borrow_mut().1.extend(renderables.drain(..));
     }
 
     // type OutputTimelineState = CollapsedTimelineState<C::OutputMobject>;
@@ -723,20 +707,6 @@ where
 //     })
 // }
 
-impl<TC, A> TimeContext for Alive<'_, '_, TC, A>
-where
-    TC: TimeContext,
-    A: Archive,
-{
-    fn time(&self) -> Rc<Time> {
-        self.time_context().time()
-    }
-
-    fn time_interval(&self) -> Range<Time> {
-        self.time_context().time_interval()
-    }
-}
-
 // struct WithSpawnTime<D> {
 //     spawn_time: Rc<Time>,
 //     data: D,
@@ -792,44 +762,49 @@ where
 //     timeline_slots: RefCell<Vec<Result<Vec<Box<dyn AllocatedTimelineErased>>, Arc<dyn Any>>>>,
 // }
 
-pub type TimelineAliveCollector<'c, 'w> =
-    AliveCollector<'c, 'w, Vec<(Range<Time>, Box<dyn TimelineErased>)>>;
+// pub type TimelineStateArchive = Vec<(Range<Time>, Box<dyn TimelineErased>)>;
 
-impl TimelineAliveCollector<'_, '_>
+impl<L, MB> IntoArchiveState<AliveRenderable<'_, '_, '_, LayerRenderableState<L>>> for MB
 where
     L: Layer,
+    MB: MobjectBuilder<L>,
 {
-    #[must_use]
-    pub fn spawn<MB>(
-        &self,
-        mobject_builder: MB,
-    ) -> Alive<
-        '_,
-        Alive<'_, World<'_>, LayerRenderable<L>>,
-        CollapsedTimelineState<MB::Instantiation>,
-    >
-    where
-        MB: MobjectBuilder<L>,
-        // 'sv: 'c,
-    {
-        self.start(CollapsedTimelineState {
-            mobject: Arc::new(mobject_builder.instantiate(
-                &self.time_context().archive().layer,
-                &self.time_context().alive_manager().time_context().config,
+    type ArchiveState = CollapsedTimelineState<MB::Instantiation>;
+
+    fn into_archive_state(
+        self,
+        alive_context: &AliveRenderable<'_, '_, '_, LayerRenderableState<L>>,
+    ) -> Self::ArchiveState {
+        CollapsedTimelineState {
+            mobject: Arc::new(self.instantiate(
+                &alive_context.archive_state().layer,
+                alive_context.alive_context().alive_context().config(),
             )),
-        })
+        }
     }
 }
 
-// pub struct Alive<'am, TC, TS>
+pub type AliveTimeline<'a3, 'a2, 'a1, 'a0, RAS, TAS> =
+    Alive<'a3, AliveRenderable<'a2, 'a1, 'a0, RAS>, TAS>;
+
+// impl<L> Alive<'_, '_, '_, LayerRenderableState<L>>
 // where
-//     TS: TimelineState,
+//     L: Layer,
 // {
-//     supervisor: &'sv Supervisor<'c, 's>,
-//     weak: Weak<AliveContent<TS>>,
-//     // spawn_time: Arc<Time>,
-//     // weak_timeline_state: Weak<TS>,
-//     // index: usize,
+//     #[must_use]
+//     pub fn spawn<MB>(
+//         &self,
+//         mobject_builder: MB,
+//     ) -> Alive<'_, '_, '_, CollapsedTimelineState<MB::Instantiation>>
+//     where
+//         MB: MobjectBuilder<L>,
+//     {
+//         self.alive_recorder().start(CollapsedTimelineState {
+//             mobject: Arc::new(
+//                 mobject_builder.instantiate(&self.archive().layer, self.alive_recorder().config()),
+//             ),
+//         })
+//     }
 // }
 
 // impl<TS> Drop for Alive<'_, '_, '_, TS>
@@ -842,6 +817,94 @@ where
 //         }
 //     }
 // }
+
+pub(crate) trait TimeMetric: 'static {}
+
+pub struct NormalizedTimeMetric(f32);
+
+impl Deref for NormalizedTimeMetric {
+    type Target = f32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TimeMetric for NormalizedTimeMetric {}
+
+pub struct DenormalizedTimeMetric(f32);
+
+impl Deref for DenormalizedTimeMetric {
+    type Target = f32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TimeMetric for DenormalizedTimeMetric {}
+
+trait TimeEval: 'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize {
+    type OutputTimeMetric: TimeMetric;
+
+    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric;
+}
+
+trait IncreasingTimeEval: TimeEval {}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct NormalizedTimeEval;
+
+impl TimeEval for NormalizedTimeEval {
+    type OutputTimeMetric = NormalizedTimeMetric;
+
+    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric {
+        NormalizedTimeMetric(
+            (time - time_interval.start) / (time_interval.end - time_interval.start),
+        )
+    }
+}
+
+impl IncreasingTimeEval for NormalizedTimeEval {}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct DenormalizedTimeEval;
+
+impl TimeEval for DenormalizedTimeEval {
+    type OutputTimeMetric = DenormalizedTimeMetric;
+
+    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric {
+        DenormalizedTimeMetric(time - time_interval.start)
+    }
+}
+
+impl IncreasingTimeEval for DenormalizedTimeEval {}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct RateComposeTimeEval<RA, TE> {
+    rate: RA,
+    time_eval: Arc<TE>,
+}
+
+impl<RA, TE> TimeEval for RateComposeTimeEval<RA, TE>
+where
+    RA: Rate<TE::OutputTimeMetric>,
+    TE: TimeEval,
+{
+    type OutputTimeMetric = RA::OutputTimeMetric;
+
+    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric {
+        self.rate
+            .eval(self.time_eval.time_eval(time, time_interval))
+    }
+}
+
+impl<RA, TE> IncreasingTimeEval for RateComposeTimeEval<RA, TE>
+where
+    RA: IncreasingRate<TE::OutputTimeMetric>,
+    TE: IncreasingTimeEval,
+{
+}
 
 pub trait Quantize: Sized {
     type Output<TE>
@@ -886,83 +949,95 @@ where
         U: Update<TM, M>;
 }
 
-pub trait ApplyConstruct<M>: Sized
+pub trait ApplyConstruct<L, M>: Sized
 where
+    L: Layer,
     M: Mobject,
 {
     type Output<C>
     where
-        C: Construct<M>;
+        C: Construct<L, M>;
 
     fn apply_construct<C>(self, construct: C) -> Self::Output<C>
     where
-        C: Construct<M>;
+        C: Construct<L, M>;
 }
 
-impl<'am, TC, M> Quantize for Alive<'am, TC, CollapsedTimelineState<M>>
+impl<'a3, 'a2, 'a1, 'a0, L, M> Quantize
+    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>
 where
-    TC: TimeContext,
+    L: Layer,
     M: Mobject,
 {
-    type Output<TE> = Alive<'am, TC, IndeterminedTimelineState<M, TE>> where TE: TimeEval;
+    type Output<TE> =
+        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
+    where
+        TE: TimeEval;
 
     #[must_use]
     fn quantize<TE>(mut self, time_eval: TE) -> Self::Output<TE>
     where
         TE: TimeEval,
     {
-        let timeline_state = self.end();
-        self.alive_manager().start(IndeterminedTimelineState {
+        self.map(|_, timeline_state| IndeterminedTimelineState {
             mobject: timeline_state.mobject.clone(),
             time_eval: Arc::new(time_eval),
         })
+        // let timeline_state = self.end();
+        // self.alive_manager().start(IndeterminedTimelineState {
+        //     mobject: timeline_state.mobject.clone(),
+        //     time_eval: Arc::new(time_eval),
+        // })
     }
 }
 
-impl<'am, TC, M, TE, U> Collapse for Alive<'am, TC, UpdateTimelineState<M, TE, U>>
+impl<'a3, 'a2, 'a1, 'a0, L, M, TE, U> Collapse
+    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, UpdateTimelineState<M, TE, U>>
 where
-    TC: TimeContext,
+    L: Layer,
     M: Mobject,
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, M>,
 {
-    type Output = Alive<'am, TC, CollapsedTimelineState<M>>;
+    type Output =
+        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        let timeline_state = self.end();
-        self.alive_manager().start(CollapsedTimelineState {
+        self.map(|_, timeline_state| CollapsedTimelineState {
             mobject: timeline_state.mobject.clone(),
         })
     }
 }
 
-impl<'am, TC, M> Collapse for Alive<'am, TC, ConstructTimelineState<M>>
+impl<'a3, 'a2, 'a1, 'a0, L, M, TE> Collapse
+    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, ConstructTimelineState<M, TE>>
 where
-    TC: TimeContext,
+    L: Layer,
     M: Mobject,
-    // TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+    TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
     // C: Construct<M>,
 {
-    type Output = Alive<'am, TC, CollapsedTimelineState<M>>;
+    type Output =
+        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        let timeline_state = self.end();
-        self.alive_manager().start(CollapsedTimelineState {
+        self.map(|_, timeline_state| CollapsedTimelineState {
             mobject: timeline_state.mobject.clone(),
         })
     }
 }
 
-impl<'am, TC, M, TE> ApplyRate<TE::OutputTimeMetric>
-    for Alive<'am, TC, IndeterminedTimelineState<M, TE>>
+impl<'a3, 'a2, 'a1, 'a0, L, M, TE> ApplyRate<TE::OutputTimeMetric>
+    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
 where
-    TC: TimeContext,
+    L: Layer,
     M: Mobject,
     TE: TimeEval,
 {
-    type Output<RA> = Alive<'am, TC, IndeterminedTimelineState<M, RateComposeTimeEval<RA, TE>>>
+    type Output<RA> =
+        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, RateComposeTimeEval<RA, TE>>>
     where
         RA: Rate<TE::OutputTimeMetric>;
 
@@ -971,8 +1046,7 @@ where
     where
         RA: Rate<TE::OutputTimeMetric>,
     {
-        let timeline_state = self.end();
-        self.alive_manager().start(IndeterminedTimelineState {
+        self.map(|_, timeline_state| IndeterminedTimelineState {
             mobject: timeline_state.mobject.clone(),
             time_eval: Arc::new(RateComposeTimeEval {
                 rate,
@@ -982,14 +1056,15 @@ where
     }
 }
 
-impl<'am, TC, M, TE> ApplyUpdate<TE::OutputTimeMetric, M>
-    for Alive<'am, TC, IndeterminedTimelineState<M, TE>>
+impl<'a3, 'a2, 'a1, 'a0, L, M, TE> ApplyUpdate<TE::OutputTimeMetric, M>
+    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
 where
-    TC: TimeContext,
+    L: Layer,
     M: Mobject,
     TE: TimeEval,
 {
-    type Output<U> = Alive<'am, TC, UpdateTimelineState<M, TE, U>>
+    type Output<U> =
+        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, UpdateTimelineState<M, TE, U>>
     where
         U: Update<TE::OutputTimeMetric, M>;
 
@@ -998,8 +1073,7 @@ where
     where
         U: Update<TE::OutputTimeMetric, M>,
     {
-        let timeline_state = self.end();
-        self.alive_manager().start(UpdateTimelineState {
+        self.map(|_, timeline_state| UpdateTimelineState {
             mobject: timeline_state.mobject,
             time_eval: timeline_state.time_eval,
             update: Arc::new(update),
@@ -1007,74 +1081,99 @@ where
     }
 }
 
-impl<'am, TC, M> ApplyUpdate<NormalizedTimeMetric, M> for Alive<'am, TC, CollapsedTimelineState<M>>
+impl<'a3, 'a2, 'a1, 'a0, L, M> ApplyUpdate<NormalizedTimeMetric, M>
+    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>
 where
-    TC: TimeContext,
+    L: Layer,
     M: Mobject,
 {
-    type Output<U> = Alive<'am, TC, CollapsedTimelineState<M>> where U: Update<NormalizedTimeMetric, M>;
+    type Output<U> =
+        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>
+    where
+        U: Update<NormalizedTimeMetric, M>;
 
     #[must_use]
     fn apply_update<U>(mut self, update: U) -> Self::Output<U>
     where
         U: Update<NormalizedTimeMetric, M>,
     {
-        let timeline_state = self.end();
-        let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
-        update.update(NormalizedTimeMetric(1.0), &mut mobject);
-        self.alive_manager().start(CollapsedTimelineState {
-            mobject: Arc::new(mobject),
+        self.map(|_, timeline_state| {
+            let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
+            update.update(NormalizedTimeMetric(1.0), &mut mobject);
+            CollapsedTimelineState {
+                mobject: Arc::new(mobject),
+            }
         })
     }
 }
 
-impl<'am, TC, M, TE> ApplyConstruct<M> for Alive<'am, TC, IndeterminedTimelineState<M, TE>>
+impl<'a3, 'a2, 'a1, 'a0, L, M, TE> ApplyConstruct<L, M>
+    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
 where
-    TC: TimeContext,
+    L: Layer,
     M: Mobject,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
 {
-    type Output<C> = Alive<'am, TC, ConstructTimelineState<C::OutputMobject>>
+    type Output<C> =
+        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, ConstructTimelineState<C::OutputMobject, TE>>
     where
-        C: Construct<M>;
+        C: Construct<L, M>;
 
     #[must_use]
     fn apply_construct<C>(mut self, construct: C) -> Self::Output<C>
     where
-        C: Construct<M>,
+        C: Construct<L, M>,
     {
-        let timeline_state = self.end();
-        let child_supervisor = Supervisor::new(supervisor.config);
-        let output_timeline_state = child_supervisor
-            .end(&construct.construct(
-                child_supervisor.start(AliveContent {
-                    spawn_time: child_supervisor.time.borrow().clone(),
-                    timeline_state: CollapsedTimelineState {
-                        mobject: self.mobject,
-                    },
-                }),
-                &child_supervisor,
-            ))
-            .timeline_state;
-        let children_time_interval = child_supervisor.time_interval();
-        timeline_entries_sink.extend(child_supervisor.iter_timeline_entries().map(
-            |mut timeline_entry| {
-                timeline_entry.time_interval = time_interval.start
-                    + (time_interval.end - time_interval.start)
-                        * *self.time_eval.time_eval(
-                            timeline_entry.time_interval.start,
-                            children_time_interval.clone(),
-                        )
-                    ..time_interval.start
-                        + (time_interval.end - time_interval.start)
-                            * *self.time_eval.time_eval(
-                                timeline_entry.time_interval.end,
-                                children_time_interval.clone(),
-                            );
-                timeline_entry
-            },
-        ));
-        output_timeline_state
+        self.map(|alive_context, timeline_state| {
+            let child_root_context =
+                AliveRootContext::new(alive_context.alive_context().alive_context().config());
+            let child_root = child_root_context.start(());
+            let child_renderable = child_root.start(LayerRenderableState {
+                layer: alive_context.archive_state().layer.clone(),
+            });
+            let child_timeline = child_renderable.start(CollapsedTimelineState {
+                mobject: timeline_state.mobject.clone(),
+            });
+            let child_output_timeline =
+                construct.construct(&child_root, &child_renderable, child_timeline);
+            ConstructTimelineState {
+                mobject: child_output_timeline.archive_state().mobject.clone(),
+                time_eval: timeline_state.time_eval.clone(),
+                root_archive: child_root_context.into_archive(),
+            }
+        })
+        // let timeline_state = self.end();
+        // let child_supervisor = Supervisor::new(supervisor.config);
+        // let output_timeline_state = child_supervisor
+        //     .end(&construct.construct(
+        //         child_supervisor.start(AliveContent {
+        //             spawn_time: child_supervisor.time.borrow().clone(),
+        //             timeline_state: CollapsedTimelineState {
+        //                 mobject: self.mobject,
+        //             },
+        //         }),
+        //         &child_supervisor,
+        //     ))
+        //     .timeline_state;
+        // let children_time_interval = child_supervisor.time_interval();
+        // timeline_entries_sink.extend(child_supervisor.iter_timeline_entries().map(
+        //     |mut timeline_entry| {
+        //         timeline_entry.time_interval = time_interval.start
+        //             + (time_interval.end - time_interval.start)
+        //                 * *self.time_eval.time_eval(
+        //                     timeline_entry.time_interval.start,
+        //                     children_time_interval.clone(),
+        //                 )
+        //             ..time_interval.start
+        //                 + (time_interval.end - time_interval.start)
+        //                     * *self.time_eval.time_eval(
+        //                         timeline_entry.time_interval.end,
+        //                         children_time_interval.clone(),
+        //                     );
+        //         timeline_entry
+        //     },
+        // ));
+        // output_timeline_state
         // self.supervisor
         //     .start(
         //         self.supervisor

@@ -1,6 +1,9 @@
 use std::cell::RefCell;
 use std::ops::Range;
-use std::rc::Rc;
+
+use super::config::Config;
+use super::renderable::RenderableErased;
+use super::timeline::TimelineErased;
 
 // pub(crate) trait AliveContent<C>: 'static {
 //     type Next;
@@ -23,21 +26,36 @@ pub type Time = f32;
 //     content: C,
 // }
 
-pub(crate) trait TimeContext {
-    fn time(&self) -> Rc<Time>;
-    fn time_interval(&self) -> Range<Time>;
-}
+// pub(crate) struct Supervisor<'cf> {
+//     config: &'cf Config,
+//     time: Rc<Time>,
+//     // layers: RefCell<Vec<Rc<dyn LayerErased>>>,
+// }
 
-pub(crate) trait Archive {
-    type Archived;
+// impl<'cf> Supervisor<'cf> {
+//     pub(crate) fn new(config: &'cf Config) -> Self {
+//         Self {
+//             config,
+//             time: Rc::new(0.0),
+//             // layers: RefCell::new(Vec::new()),
+//         }
+//     }
 
-    fn archive(&mut self, time_interval: Range<f32>) -> Self::Archived;
-}
+//     fn time(&self) -> Rc<Time> {
+//         self.time.clone()
+//     }
 
-pub(crate) struct AliveRecorder<'tc, TC, AA> {
-    time_context: &'tc TC,
-    collector: RefCell<Vec<Result<Option<AA>, Rc<Time>>>>,
-}
+//     fn time_interval(&self) -> Range<Time> {
+//         0.0..*self.time
+//     }
+// }
+
+// pub(crate) struct AliveRecorder<V> {
+//     // context: &'ac AC,
+//     time: Time,
+//     range_map: RefCell<rangemap::RangeMap<Time, V>>,
+//     // recorder: RefCell<Vec<Result<Option<AA>, Rc<Time>>>>,
+// }
 
 // impl<A> AliveRecorder<'_, 'w, A>
 // where
@@ -46,103 +64,137 @@ pub(crate) struct AliveRecorder<'tc, TC, AA> {
 
 // }
 
-impl<TC, AA> AliveRecorder<'_, TC, AA>
+// impl<V> AliveRecorder<V> {
+//     // fn new_content(&self, input: AC::Input) -> AC {
+//     //     AC::new(input, &self.context)
+//     // }
+
+//     pub(crate) fn new() -> Self {
+//         AliveRecorder {
+//             // context,
+//             time: 0.0,
+//             range_map: RefCell::new(rangemap::RangeMap::new()),
+//         }
+//     }
+
+//     // pub fn inherit(&self) -> Self {
+//     //     Self::new(&self.supervisor)
+//     // }
+
+//     // pub fn config(&self) -> &'cf Config {
+//     //     self.supervisor.config
+//     // }
+
+//     // pub fn spawn<I>(&self, instantiator: I) -> Alive<'_, '_, '_, A>
+//     // where
+//     //     I: Instantiator<A>,
+//     // {
+//     //     self.start(instantiator.instantiate(&self.world))
+//     // }
+
+//     // pub(crate) fn supervisor(&self) -> &'sv Supervisor<'cf> {
+//     //     &self.supervisor
+//     // }
+
+//     pub(crate) fn start<A>(&self, archive: A) -> Alive<'_, V, A>
+//     where
+//         A: Archive<V>,
+//     {
+//         // let content = Rc::new(content);
+//         // let weak_content = Rc::downgrade(&content);
+//         // let mut recorder = self.recorder.borrow_mut();
+//         // let index = recorder.len();
+//         // recorder.push(Err(self.supervisor.time()));
+//         Alive {
+//             alive_recorder: self,
+//             spawn_time: self.time,
+//             archive: Some(archive),
+//         }
+//     }
+
+//     // pub(crate) fn world(&self) -> &World<'_> {
+//     //     &self.world
+//     // }
+
+//     pub(crate) fn collect(self) -> (Range<Time>, rangemap::RangeMap<Time, V>) {
+//         (0.0..self.time, self.range_map.into_inner())
+//     }
+// }
+
+pub(crate) trait ArchiveState {
+    type LocalArchive: Default;
+    type GlobalArchive;
+
+    fn archive(
+        &mut self,
+        time_interval: Range<Time>,
+        local_archive: Self::LocalArchive,
+        global_archive: &Self::GlobalArchive,
+    );
+}
+
+pub(crate) trait IntoArchiveState<AC>
 where
-    TC: TimeContext,
+    AC: AliveContext,
 {
-    // fn new_content(&self, input: AC::Input) -> AC {
-    //     AC::new(input, &self.context)
-    // }
+    type ArchiveState: ArchiveState;
 
-    pub fn new(time_context: &TC) -> Self {
-        AliveRecorder {
-            time_context,
-            collector: RefCell::new(Vec::new()),
-        }
-    }
+    fn into_archive_state(self, alive_context: &AC) -> Self::ArchiveState;
+}
 
-    // pub fn inherit(&self) -> Self {
-    //     Self::new(&self.world)
-    // }
+// impl<AC, AS> IntoArchiveState<AC> for AS
+// where
+//     AC: AliveContext,
+//     AS: ArchiveState,
+// {
+//     type ArchiveState = AS;
 
-    // pub fn spawn<I>(&self, instantiator: I) -> Alive<'_, '_, '_, A>
-    // where
-    //     I: Instantiator<A>,
-    // {
-    //     self.start(instantiator.instantiate(&self.world))
-    // }
+//     fn into_archive_state(self, _alive_context: &AC) -> Self::ArchiveState {
+//         self
+//     }
+// }
 
-    pub(crate) fn start<A>(&self, archive: A) -> Alive<'_, '_, TC, A>
+pub(crate) trait AliveContext: Sized {
+    type Archive;
+
+    fn time(&self) -> Time;
+    fn archive_ref(&self) -> &Self::Archive;
+
+    fn start<AS>(&self, archive_state: AS) -> Alive<'_, Self, AS>
     where
-        A: Archive<Archived = AA>,
+        AS: ArchiveState<GlobalArchive = Self::Archive>,
     {
-        // let content = Rc::new(content);
-        // let weak_content = Rc::downgrade(&content);
-        let mut collector = self.collector.borrow_mut();
-        let index = collector.len();
-        collector.push(Err(self.time_context.time()));
         Alive {
-            alive_recorder: self,
-            index,
-            archive: Some(archive),
+            alive_context: self,
+            // index: usize,
+            spawn_time: self.time(),
+            archive_state: Some(archive_state),
+            local_archive: AS::LocalArchive::default(),
         }
     }
 
-    // pub(crate) fn world(&self) -> &World<'_> {
-    //     &self.world
-    // }
-
-    pub(crate) fn collect(self) -> (Range<Time>, Vec<AA>) {
-        (
-            self.time_context.time_interval(),
-            self.collector
-                .into_inner()
-                .into_iter()
-                .filter_map(|item| item.unwrap())
-                .collect(),
-        )
-    }
-}
-
-pub(crate) struct Alive<'tc, 'ar, TC, A>
-where
-    TC: TimeContext,
-    A: Archive,
-{
-    alive_recorder: &'ar AliveRecorder<'tc, TC, A::Archived>,
-    index: usize,
-    // spawn_time: Rc<Time>,
-    archive: Option<A>,
-}
-
-impl<'tc, TC, A> Alive<'tc, '_, TC, A>
-where
-    TC: TimeContext,
-    A: Archive,
-{
-    pub(crate) fn time_context(&self) -> &'tc TC {
-        &self.alive_recorder.time_context
-    }
-
-    pub(crate) fn archive(&self) -> &A {
-        self.archive.as_ref().unwrap()
-    }
-
-    pub(crate) fn end(&mut self) -> A {
-        let mut collector = self.alive_recorder.collector.borrow_mut();
-        let entry = collector.get_mut(self.index).unwrap();
-        let spawn_time = match entry.as_mut() {
-            Ok(_) => unimplemented!(),
-            Err(spawn_time) => spawn_time.clone(),
-        };
-        let archive_time = self.alive_recorder.time_context.time();
-        let mut archive = self.archive.take().unwrap();
-        *entry = Ok((!Rc::ptr_eq(&spawn_time, &archive_time))
-            .then(|| archive.archive(*spawn_time..*archive_time)));
-        archive
+    fn end<AS>(&self, alive: &mut Alive<'_, Self, AS>) -> AS
+    where
+        AS: ArchiveState<GlobalArchive = Self::Archive>,
+    {
+        // let mut recorder = self.alive_recorder.recorder.borrow_mut();
+        // let entry = recorder.get_mut(self.index).unwrap();
+        let spawn_time = alive.spawn_time;
+        let archive_time = self.time();
+        let mut archive_state = alive.archive_state.take().unwrap();
+        if spawn_time < archive_time {
+            archive_state.archive(
+                spawn_time..archive_time,
+                std::mem::replace(&mut alive.local_archive, AS::LocalArchive::default()),
+                self.archive_ref(),
+            );
+        }
+        // *entry = Ok((!Rc::ptr_eq(spawn_time, archive_time))
+        //     .then(|| archive.archive(*spawn_time..*archive_time, self.alive_recorder.recorder.borrow_mut())));
+        archive_state
         // let content = self.weak_content.upgrade().unwrap();
         // let mut slots_ref = self.manager.slots.borrow_mut();
-        // let (archived, content_ref) = slots_ref
+        // let (archive, content_ref) = slots_ref
         //     .iter_mut()
         //     .rfind(|(_, content_ref)| {
         //         content_ref.as_ref().is_some_and(|content_ref| {
@@ -155,18 +207,202 @@ where
         //     Ok(content) => content,
         //     Err(_) => unreachable!(),
         // };
-        // f(archived, content, &self.manager.context)
+        // f(archive, content, &self.manager.context)
     }
 }
 
-impl<TC, A> Alive<'_, '_, TC, A>
+pub trait Spawn: AliveContext {
+    fn spawn<IAS>(&self, into_archive_state: IAS) -> Alive<'_, Self, IAS::ArchiveState>
+    where
+        IAS: IntoArchiveState<Self>,
+        IAS::ArchiveState: ArchiveState<GlobalArchive = Self::Archive>;
+}
+
+impl<AC> Spawn for AC
 where
-    TC: TimeContext,
-    A: Archive,
+    AC: AliveContext,
+{
+    #[must_use]
+    fn spawn<IAS>(&self, into_archive_state: IAS) -> Alive<'_, Self, IAS::ArchiveState>
+    where
+        IAS: IntoArchiveState<Self>,
+        IAS::ArchiveState: ArchiveState<GlobalArchive = Self::Archive>,
+    {
+        self.start(into_archive_state.into_archive_state(self))
+    }
+}
+
+// pub(crate) trait ChildRangeMap: Default {}
+
+// impl<V> ChildRangeMap for RefCell<rangemap::RangeMap<Time, V>> {}
+
+// impl ChildRangeMap for () {}
+
+// struct AliveRootContextState;
+
+impl ArchiveState for () {
+    type LocalArchive = RefCell<
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    >;
+    type GlobalArchive = RefCell<(
+        Range<Time>,
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    )>;
+
+    fn archive(
+        &mut self,
+        time_interval: Range<Time>,
+        local_archive: Self::LocalArchive,
+        global_archive: &Self::GlobalArchive,
+    ) {
+        *global_archive.borrow_mut() = (time_interval, local_archive.into_inner())
+    }
+}
+
+pub(crate) struct AliveRootContext<'c> {
+    config: &'c Config,
+    time: Time,
+    archive: RefCell<(
+        Range<Time>,
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    )>,
+}
+
+impl<'c> AliveRootContext<'c> {
+    pub(crate) fn new(config: &'c Config) -> Self {
+        Self {
+            config,
+            time: 0.0,
+            archive: RefCell::default(),
+        }
+    }
+
+    pub(crate) fn config(&self) -> &'c Config {
+        &self.config
+    }
+
+    pub(crate) fn into_archive(
+        self,
+    ) -> (
+        Range<Time>,
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    ) {
+        self.archive.into_inner()
+    }
+
+    pub fn wait(&mut self, delta_time: Time) {
+        assert!(
+            delta_time.is_sign_positive(),
+            "`AliveRootContext::wait` expects a positive-signed `delta_time`, got {delta_time}",
+        );
+        self.time += delta_time;
+    }
+}
+
+impl AliveContext for AliveRootContext<'_> {
+    type Archive = RefCell<(
+        Range<Time>,
+        Vec<(
+            Range<Time>,
+            Box<dyn RenderableErased>,
+            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+        )>,
+    )>;
+
+    fn time(&self) -> Time {
+        self.time
+    }
+
+    fn archive_ref(&self) -> &Self::Archive {
+        &self.archive
+    }
+}
+
+impl IntoArchiveState<AliveRootContext<'_>> for () {
+    type ArchiveState = ();
+
+    fn into_archive_state(self, _alive_context: &AliveRootContext<'_>) -> Self::ArchiveState {
+        ()
+    }
+}
+
+pub(crate) struct Alive<'ac, AC, AS>
+where
+    AC: AliveContext<Archive = AS::GlobalArchive>,
+    AS: ArchiveState,
+{
+    alive_context: &'ac AC,
+    // index: usize,
+    spawn_time: Time,
+    archive_state: Option<AS>,
+    local_archive: AS::LocalArchive,
+}
+
+impl<'ac, AC, AS> Alive<'ac, AC, AS>
+where
+    AC: AliveContext<Archive = AS::GlobalArchive>,
+    AS: ArchiveState,
+{
+    pub(crate) fn alive_context(&self) -> &'ac AC {
+        &self.alive_context
+    }
+
+    pub(crate) fn archive_state(&self) -> &AS {
+        self.archive_state.as_ref().unwrap()
+    }
+
+    pub(crate) fn map<F, FO>(&mut self, f: F) -> Alive<'ac, AC, FO>
+    where
+        F: FnOnce(&AC, AS) -> FO,
+        FO: ArchiveState<GlobalArchive = AC::Archive>,
+    {
+        self.alive_context
+            .start(f(self.alive_context, self.alive_context.end(self)))
+    }
+}
+
+impl<AC, AS> Drop for Alive<'_, AC, AS>
+where
+    AC: AliveContext<Archive = AS::GlobalArchive>,
+    AS: ArchiveState,
 {
     fn drop(&mut self) {
-        if self.archive.is_some() {
-            self.end();
+        if self.archive_state.is_some() {
+            self.alive_context.end(self);
         }
     }
 }
+
+impl<AC, AS> AliveContext for Alive<'_, AC, AS>
+where
+    AC: AliveContext<Archive = AS::GlobalArchive>,
+    AS: ArchiveState,
+{
+    type Archive = AS::LocalArchive;
+
+    fn time(&self) -> Time {
+        self.alive_context.time()
+    }
+
+    fn archive_ref(&self) -> &Self::Archive {
+        &self.local_archive
+    }
+}
+
+pub type AliveRoot<'a1, 'a0> = Alive<'a1, AliveRootContext<'a0>, ()>;

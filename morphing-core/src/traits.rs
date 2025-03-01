@@ -1,20 +1,20 @@
 use std::fmt::Debug;
 
-use super::alive::Alive;
-use super::alive::AliveCollector;
-use super::alive::World;
+use super::alive::AliveRoot;
+use super::alive::Time;
+use super::config::Config;
+use super::renderable::AliveRenderable;
+use super::renderable::LayerRenderableState;
 use super::storage::Storable;
+use super::timeline::AliveTimeline;
 use super::timeline::CollapsedTimelineState;
-use super::timeline::Time;
 use super::timeline::TimeMetric;
 
 pub trait Mobject:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
-    // type Layer: Layer;
     type MobjectPresentation: Storable;
 
-    // fn spawn(self, layer: &Self::Layer) -> Alive<'_, >
     fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
 }
 
@@ -28,7 +28,7 @@ where
 {
     type Instantiation: Mobject;
 
-    fn instantiate(self, layer: &L) -> Self::Instantiation; // ?
+    fn instantiate(self, layer: &L, config: &Config) -> Self::Instantiation; // ?
 }
 
 pub trait Rate<TM>:
@@ -75,17 +75,33 @@ where
 //     fn act(self, mobject: &M) -> Self::Update;
 // }
 
-pub trait Construct<M>: 'static + Clone
+pub trait Construct<L, M>: 'static
 where
+    L: Layer,
     M: Mobject,
 {
     type OutputMobject: Mobject;
 
-    fn construct(
+    fn construct<'a3, 'a2, 'a1, 'a0>(
         self,
-        input: Alive<CollapsedTimelineState<M>>,
-        layer: Alive, // supervisor: &'sv Supervisor<'c>,
-    ) -> Alive<CollapsedTimelineState<Self::OutputMobject>>;
+        root: &AliveRoot<'a1, 'a0>,
+        renderable: &AliveRenderable<'a2, 'a1, 'a0, LayerRenderableState<L>>,
+        timeline: AliveTimeline<
+            '_,
+            'a2,
+            'a1,
+            'a0,
+            LayerRenderableState<L>,
+            CollapsedTimelineState<M>,
+        >,
+    ) -> AliveTimeline<
+        'a3,
+        'a2,
+        'a1,
+        'a0,
+        LayerRenderableState<L>,
+        CollapsedTimelineState<Self::OutputMobject>,
+    >;
 }
 
 // pub trait SerdeMobject: serde_traitobject::Deserialize + serde_traitobject::Serialize {}
@@ -128,7 +144,7 @@ pub trait Layer:
 pub trait LayerBuilder {
     type Instantiation: Layer;
 
-    fn instantiate(self, world: &World) -> Self::Instantiation;
+    fn instantiate(self, config: &Config) -> Self::Instantiation;
 }
 
 // TODO: alive container morphisms
