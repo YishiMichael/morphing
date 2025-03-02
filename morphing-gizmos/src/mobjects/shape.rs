@@ -10,7 +10,6 @@ use lyon::tessellation::{
 use morphing_core::config::Config;
 use morphing_core::traits::Mobject;
 use morphing_core::traits::MobjectBuilder;
-use morphing_core::traits::MobjectPresentation;
 
 use super::super::components::camera::{Camera, CameraShaderTypes};
 use super::super::components::color::Palette;

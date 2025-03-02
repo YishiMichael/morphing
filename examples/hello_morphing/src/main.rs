@@ -9,7 +9,7 @@ fn demo_scene(sv: &Supervisor<'_>) {
     sv.wait(1.0);
     let mobject = sv.spawn(Rect(nalgebra::Vector2::new(1.0, 1.0)));
     sv.wait(6.0);
-    std::mem::drop(mobject);
+    drop(mobject);
     sv.wait(12.0);
 }
 
@@ -18,7 +18,7 @@ fn another_demo_scene(sv: &Supervisor<'_>) {
     sv.wait(1.0);
     let mobject = sv.spawn(Rect(nalgebra::Vector2::new(1.0, 1.0)));
     sv.wait(6.0);
-    std::mem::drop(mobject);
+    drop(mobject);
     sv.wait(10.0);
 }
 

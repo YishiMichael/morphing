@@ -16,76 +16,87 @@ impl Deref for ConfigFallbackContent {
 inventory::collect!(ConfigFallbackContent);
 
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-pub struct ConfigValues(Vec<Arc<toml::Value>>);
+pub struct ConfigParsedContents(Vec<Arc<toml::Value>>);
 
-impl ConfigValues {
-    pub(crate) fn overwrite(&mut self, content: &str) {
+impl ConfigParsedContents {
+    pub fn parse_and_push(&mut self, content: &'static str) {
         self.0.push(Arc::new(toml::from_str(content).unwrap()));
     }
 
-    fn read_value(&self, path: &'static str) -> &toml::Value {
-        self.0
-            .iter()
-            .rev()
-            .filter_map(|toml_config| {
-                let mut option_value = Some(toml_config.as_ref());
-                for key in path.split('.') {
-                    option_value = option_value
-                        .and_then(|value| value.as_table().and_then(|table| table.get(key)));
-                }
-                option_value
-            })
-            .next()
-            .unwrap()
+    fn read_value<CF>(&self) -> CF
+    where
+        CF: ConfigField,
+    {
+        CF::parse(
+            self.0
+                .iter()
+                .rev()
+                .filter_map(|toml_config| {
+                    let mut option_value = Some(toml_config.as_ref());
+                    for key in CF::PATH.split('.') {
+                        option_value = option_value
+                            .and_then(|value| value.as_table().and_then(|table| table.get(key)));
+                    }
+                    option_value
+                })
+                .next()
+                .unwrap(),
+        )
     }
 }
 
 #[derive(Debug, Default)]
 pub struct Config {
-    values: ConfigValues,
+    parsed_contents: ConfigParsedContents,
     storage: RefCell<typemap_rev::TypeMap<dyn typemap_rev::DebuggableStorage>>,
 }
 
 impl Config {
-    pub fn new(values: ConfigValues) -> Self {
+    pub fn new(parsed_contents: ConfigParsedContents) -> Self {
         Self {
-            values,
+            parsed_contents,
             storage: RefCell::new(typemap_rev::TypeMap::custom()),
         }
     }
 
-    pub fn operate<CF, F, FO>(&self, path: &'static str, f: F) -> FO
+    pub fn operate<CF, F, FO>(&self, f: F) -> FO
     where
         CF: ConfigField,
-        CF::Value: Debug,
-        F: FnOnce(&CF::Value) -> FO,
+        F: FnOnce(&CF) -> FO,
     {
-        if let Some(value) = self.storage.borrow().get::<CF>() {
+        if let Some(value) = self.storage.borrow().get::<ConfigFieldWrapper<CF>>() {
             f(value)
         } else {
             f(self
                 .storage
                 .borrow_mut()
-                .entry::<CF>()
-                .or_insert(CF::parse(self.values.read_value(path))))
+                .entry::<ConfigFieldWrapper<CF>>()
+                .or_insert(self.parsed_contents.read_value()))
         }
     }
 
-    pub fn get_cloned<CF>(&self, path: &'static str) -> CF::Value
+    pub fn get_cloned<CF>(&self) -> CF
     where
-        CF: ConfigField,
-        CF::Value: Debug,
-        CF::Value: Clone,
+        CF: Clone + ConfigField,
     {
-        self.operate::<CF, _, _>(path, CF::Value::clone)
+        self.operate::<CF, _, _>(CF::clone)
     }
 }
 
-pub trait ConfigField: 'static + Send + Sized + Sync + typemap_rev::TypeMapKey {
-    const NAME: &'static str;
+pub trait ConfigField: 'static + Debug + Send + Sized + Sync {
+    const PATH: &'static str;
 
-    fn parse(value: &toml::Value) -> Self::Value;
-} // TODO: type per field
+    fn parse(value: &toml::Value) -> Self;
+}
+
+struct ConfigFieldWrapper<CF>(CF);
+
+impl<CF> typemap_rev::TypeMapKey for ConfigFieldWrapper<CF>
+where
+    CF: ConfigField,
+{
+    type Value = CF;
+}
 
 // impl ConfigField for i64 {
 //     fn parse(value: &toml::Value) -> Self {

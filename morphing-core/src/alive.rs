@@ -121,7 +121,7 @@ pub type Time = f32;
 //     }
 // }
 
-pub(crate) trait ArchiveState {
+pub trait ArchiveState {
     type LocalArchive: Default;
     type GlobalArchive;
 
@@ -133,7 +133,7 @@ pub(crate) trait ArchiveState {
     );
 }
 
-pub(crate) trait IntoArchiveState<AC>
+pub trait IntoArchiveState<AC>
 where
     AC: AliveContext,
 {
@@ -142,19 +142,7 @@ where
     fn into_archive_state(self, alive_context: &AC) -> Self::ArchiveState;
 }
 
-// impl<AC, AS> IntoArchiveState<AC> for AS
-// where
-//     AC: AliveContext,
-//     AS: ArchiveState,
-// {
-//     type ArchiveState = AS;
-
-//     fn into_archive_state(self, _alive_context: &AC) -> Self::ArchiveState {
-//         self
-//     }
-// }
-
-pub(crate) trait AliveContext: Sized {
+pub trait AliveContext: Sized {
     type Archive;
 
     fn time(&self) -> Time;
@@ -232,59 +220,23 @@ where
     }
 }
 
-// pub(crate) trait ChildRangeMap: Default {}
-
-// impl<V> ChildRangeMap for RefCell<rangemap::RangeMap<Time, V>> {}
-
-// impl ChildRangeMap for () {}
-
-// struct AliveRootContextState;
-
-impl ArchiveState for () {
-    type LocalArchive = RefCell<
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    >;
-    type GlobalArchive = RefCell<(
-        Range<Time>,
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    )>;
-
-    fn archive(
-        &mut self,
-        time_interval: Range<Time>,
-        local_archive: Self::LocalArchive,
-        global_archive: &Self::GlobalArchive,
-    ) {
-        *global_archive.borrow_mut() = (time_interval, local_archive.into_inner())
-    }
-}
-
-pub(crate) struct AliveRootContext<'c> {
+pub struct AliveRoot<'c> {
     config: &'c Config,
-    time: Time,
-    archive: RefCell<(
-        Range<Time>,
+    time: RefCell<Time>,
+    archive: RefCell<
         Vec<(
             Range<Time>,
             Box<dyn RenderableErased>,
             Vec<(Range<Time>, Box<dyn TimelineErased>)>,
         )>,
-    )>,
+    >,
 }
 
-impl<'c> AliveRootContext<'c> {
+impl<'c> AliveRoot<'c> {
     pub(crate) fn new(config: &'c Config) -> Self {
         Self {
             config,
-            time: 0.0,
+            time: RefCell::new(0.0),
             archive: RefCell::default(),
         }
     }
@@ -303,30 +255,29 @@ impl<'c> AliveRootContext<'c> {
             Vec<(Range<Time>, Box<dyn TimelineErased>)>,
         )>,
     ) {
-        self.archive.into_inner()
+        (0.0..self.time.into_inner(), self.archive.into_inner())
     }
 
-    pub fn wait(&mut self, delta_time: Time) {
+    pub fn wait(&self, delta_time: Time) {
         assert!(
             delta_time.is_sign_positive(),
-            "`AliveRootContext::wait` expects a positive-signed `delta_time`, got {delta_time}",
+            "`AliveRoot::wait` expects a positive-signed `delta_time`, got {delta_time}",
         );
-        self.time += delta_time;
+        self.time.replace_with(|&mut time| time + delta_time);
     }
 }
 
-impl AliveContext for AliveRootContext<'_> {
-    type Archive = RefCell<(
-        Range<Time>,
+impl AliveContext for AliveRoot<'_> {
+    type Archive = RefCell<
         Vec<(
             Range<Time>,
             Box<dyn RenderableErased>,
             Vec<(Range<Time>, Box<dyn TimelineErased>)>,
         )>,
-    )>;
+    >;
 
     fn time(&self) -> Time {
-        self.time
+        *self.time.borrow()
     }
 
     fn archive_ref(&self) -> &Self::Archive {
@@ -334,21 +285,12 @@ impl AliveContext for AliveRootContext<'_> {
     }
 }
 
-impl IntoArchiveState<AliveRootContext<'_>> for () {
-    type ArchiveState = ();
-
-    fn into_archive_state(self, _alive_context: &AliveRootContext<'_>) -> Self::ArchiveState {
-        ()
-    }
-}
-
-pub(crate) struct Alive<'ac, AC, AS>
+pub struct Alive<'ac, AC, AS>
 where
     AC: AliveContext<Archive = AS::GlobalArchive>,
     AS: ArchiveState,
 {
     alive_context: &'ac AC,
-    // index: usize,
     spawn_time: Time,
     archive_state: Option<AS>,
     local_archive: AS::LocalArchive,
@@ -405,4 +347,18 @@ where
     }
 }
 
-pub type AliveRoot<'a1, 'a0> = Alive<'a1, AliveRootContext<'a0>, ()>;
+pub fn execute(
+    scene_fn: fn(&AliveRoot),
+    config: &Config,
+) -> (
+    Range<Time>,
+    Vec<(
+        Range<Time>,
+        Box<dyn RenderableErased>,
+        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
+    )>,
+) {
+    let alive_root = AliveRoot::new(config);
+    scene_fn(&alive_root);
+    alive_root.into_archive()
+}

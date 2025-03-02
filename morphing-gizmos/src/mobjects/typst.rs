@@ -169,6 +169,8 @@ impl typst::World for TypstWorld {
 }
 
 impl ConfigField for TypstWorld {
+    const PATH: &'static str = "typst";
+
     fn parse(value: &toml::Value) -> Self {
         Self::new(value.clone().try_into().unwrap())
     }
@@ -209,7 +211,7 @@ impl TypstMobject {
     fn instantiate(text: String, config: &Config) -> Self {
         Self {
             text: text.clone(),
-            tokens: config.operate("typst", |typst_world: &TypstWorld| {
+            tokens: config.operate(|typst_world: &TypstWorld| {
                 let source = typst_world.source(text);
                 let document = typst_world.document(&source);
                 Self::from_typst_document(&document, &source)

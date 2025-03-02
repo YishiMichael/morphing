@@ -66,7 +66,7 @@ where
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) {
-        prepare_ref.insert(self.layer.prepare(time, device, queue, format));
+        let _ = prepare_ref.insert(self.layer.prepare(time, device, queue, format));
     }
 
     fn render(
@@ -93,7 +93,7 @@ where
     }
 }
 
-trait AllocatedRenderableErased {
+pub trait AllocatedRenderableErased {
     fn prepare(
         &self,
         time: Time,
@@ -191,7 +191,7 @@ where
     }
 }
 
-impl<LB> IntoArchiveState<AliveRoot<'_, '_>> for LB
+impl<LB> IntoArchiveState<AliveRoot<'_>> for LB
 where
     LB: LayerBuilder,
 {
@@ -199,12 +199,12 @@ where
 
     fn into_archive_state(self, alive_context: &AliveRoot) -> Self::ArchiveState {
         LayerRenderableState {
-            layer: Arc::new(self.instantiate(alive_context.alive_context().config())),
+            layer: Arc::new(self.instantiate(alive_context.config())),
         }
     }
 }
 
-pub type AliveRenderable<'a2, 'a1, 'a0, RAS> = Alive<'a2, AliveRoot<'a1, 'a0>, RAS>;
+pub type AliveRenderable<'a1, 'a0, RAS> = Alive<'a1, AliveRoot<'a0>, RAS>;
 
 // impl AliveRecorder<'_, '_, RenderableStateArchive> {
 // fn new_static_timeline_entry<M>(

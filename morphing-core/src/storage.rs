@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
-pub(crate) trait Storable: 'static + Send + Sync {}
+pub trait Storable: 'static + Send + Sync {}
 
 impl<T> Storable for T where T: 'static + Send + Sync {}
 
@@ -11,7 +12,7 @@ impl<T> Storable for T where T: 'static + Send + Sync {}
 
 // impl<T> SerdeKey for T where T: 'static + Clone + Eq + Hash + Send + Sync {}
 
-pub(crate) trait PresentationStorage: Storable {
+pub trait PresentationStorage: Storable {
     type Presentation: Storable;
     type StorageIdInput;
     type StorageId;
@@ -136,7 +137,7 @@ where
     }
 
     fn expire(&mut self) {
-        std::mem::replace(
+        let _ = std::mem::replace(
             &mut self.inactive,
             std::mem::replace(&mut self.active, PS::new()),
         );
@@ -187,7 +188,7 @@ where
     }
 }
 
-pub(crate) trait StorablePrimitive: 'static {
+pub trait StorablePrimitive: 'static {
     type PresentationStorage: PresentationStorage;
 
     fn storage_id_input(
@@ -195,7 +196,7 @@ pub(crate) trait StorablePrimitive: 'static {
     ) -> <Self::PresentationStorage as PresentationStorage>::StorageIdInput;
 }
 
-pub(crate) struct Allocated<SP>
+pub struct Allocated<SP>
 where
     SP: StorablePrimitive,
 {
@@ -232,7 +233,7 @@ where
     }
 }
 
-struct PresentationStorageWrapper<PS>(PS);
+pub struct PresentationStorageWrapper<PS>(PS);
 
 impl<PS> Deref for PresentationStorageWrapper<PS> {
     type Target = PS;
@@ -257,10 +258,10 @@ where
     }
 }
 
-pub(crate) struct StorageTypeMap(typemap_rev::TypeMap<dyn Expire>);
+pub struct StorageTypeMap(typemap_rev::TypeMap<dyn Expire>);
 
 impl StorageTypeMap {
-    pub(crate) fn allocate<SP>(&mut self, storable_primitive: SP) -> Allocated<SP>
+    pub fn allocate<SP>(&mut self, storable_primitive: SP) -> Allocated<SP>
     where
         SP: StorablePrimitive,
     {
@@ -274,7 +275,7 @@ impl StorageTypeMap {
         }
     }
 
-    pub(crate) fn get_mut<SP>(
+    pub fn get_mut<SP>(
         &mut self,
         allocated: &Allocated<SP>,
     ) -> &mut Option<<SP::PresentationStorage as PresentationStorage>::Target>
@@ -287,7 +288,7 @@ impl StorageTypeMap {
             .get_mut(&allocated.storage_id)
     }
 
-    pub(crate) fn get_ref<SP>(
+    pub fn get_ref<SP>(
         &self,
         allocated: &Allocated<SP>,
     ) -> &Option<<SP::PresentationStorage as PresentationStorage>::Target>
@@ -300,7 +301,7 @@ impl StorageTypeMap {
             .get_ref(&allocated.storage_id)
     }
 
-    pub(crate) fn expire(&mut self) {
+    pub fn expire(&mut self) {
         self.0 = std::mem::replace(&mut self.0, typemap_rev::TypeMap::custom())
             .into_iter()
             .map(|(type_id, mut presentation_storage)| {

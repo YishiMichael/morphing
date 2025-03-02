@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::alive::Alive;
 use super::alive::AliveContext;
-use super::alive::AliveRootContext;
+use super::alive::AliveRoot;
 use super::alive::ArchiveState;
 use super::alive::IntoArchiveState;
 use super::alive::Time;
@@ -378,7 +378,7 @@ where
     }
 }
 
-trait AllocatedTimelineErased {
+pub trait AllocatedTimelineErased {
     fn prepare(
         &self,
         time: Time,
@@ -753,8 +753,6 @@ where
 // {
 // }
 
-// impl<'_> AliveConte
-
 // pub struct Supervisor<'c> {
 //     config: &'c Config,
 //     // storage: &'s Storage,
@@ -764,7 +762,7 @@ where
 
 // pub type TimelineStateArchive = Vec<(Range<Time>, Box<dyn TimelineErased>)>;
 
-impl<L, MB> IntoArchiveState<AliveRenderable<'_, '_, '_, LayerRenderableState<L>>> for MB
+impl<L, MB> IntoArchiveState<AliveRenderable<'_, '_, LayerRenderableState<L>>> for MB
 where
     L: Layer,
     MB: MobjectBuilder<L>,
@@ -773,52 +771,20 @@ where
 
     fn into_archive_state(
         self,
-        alive_context: &AliveRenderable<'_, '_, '_, LayerRenderableState<L>>,
+        alive_context: &AliveRenderable<'_, '_, LayerRenderableState<L>>,
     ) -> Self::ArchiveState {
         CollapsedTimelineState {
             mobject: Arc::new(self.instantiate(
                 &alive_context.archive_state().layer,
-                alive_context.alive_context().alive_context().config(),
+                alive_context.alive_context().config(),
             )),
         }
     }
 }
 
-pub type AliveTimeline<'a3, 'a2, 'a1, 'a0, RAS, TAS> =
-    Alive<'a3, AliveRenderable<'a2, 'a1, 'a0, RAS>, TAS>;
+pub type AliveTimeline<'a2, 'a1, 'a0, RAS, TAS> = Alive<'a2, AliveRenderable<'a1, 'a0, RAS>, TAS>;
 
-// impl<L> Alive<'_, '_, '_, LayerRenderableState<L>>
-// where
-//     L: Layer,
-// {
-//     #[must_use]
-//     pub fn spawn<MB>(
-//         &self,
-//         mobject_builder: MB,
-//     ) -> Alive<'_, '_, '_, CollapsedTimelineState<MB::Instantiation>>
-//     where
-//         MB: MobjectBuilder<L>,
-//     {
-//         self.alive_recorder().start(CollapsedTimelineState {
-//             mobject: Arc::new(
-//                 mobject_builder.instantiate(&self.archive().layer, self.alive_recorder().config()),
-//             ),
-//         })
-//     }
-// }
-
-// impl<TS> Drop for Alive<'_, '_, '_, TS>
-// where
-//     TS: TimelineState,
-// {
-//     fn drop(&mut self) {
-//         if self.weak.strong_count() != 0 {
-//             self.supervisor.end(self);
-//         }
-//     }
-// }
-
-pub(crate) trait TimeMetric: 'static {}
+pub trait TimeMetric: 'static {}
 
 pub struct NormalizedTimeMetric(f32);
 
@@ -844,7 +810,9 @@ impl Deref for DenormalizedTimeMetric {
 
 impl TimeMetric for DenormalizedTimeMetric {}
 
-trait TimeEval: 'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize {
+pub trait TimeEval:
+    'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+{
     type OutputTimeMetric: TimeMetric;
 
     fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric;
@@ -963,14 +931,14 @@ where
         C: Construct<L, M>;
 }
 
-impl<'a3, 'a2, 'a1, 'a0, L, M> Quantize
-    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>
+impl<'a2, 'a1, 'a0, L, M> Quantize
+    for AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>
 where
     L: Layer,
     M: Mobject,
 {
     type Output<TE> =
-        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
+        AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
     where
         TE: TimeEval;
 
@@ -983,24 +951,18 @@ where
             mobject: timeline_state.mobject.clone(),
             time_eval: Arc::new(time_eval),
         })
-        // let timeline_state = self.end();
-        // self.alive_manager().start(IndeterminedTimelineState {
-        //     mobject: timeline_state.mobject.clone(),
-        //     time_eval: Arc::new(time_eval),
-        // })
     }
 }
 
-impl<'a3, 'a2, 'a1, 'a0, L, M, TE, U> Collapse
-    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, UpdateTimelineState<M, TE, U>>
+impl<'a2, 'a1, 'a0, L, M, TE, U> Collapse
+    for AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, UpdateTimelineState<M, TE, U>>
 where
     L: Layer,
     M: Mobject,
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, M>,
 {
-    type Output =
-        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>;
+    type Output = AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
@@ -1010,16 +972,14 @@ where
     }
 }
 
-impl<'a3, 'a2, 'a1, 'a0, L, M, TE> Collapse
-    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, ConstructTimelineState<M, TE>>
+impl<'a2, 'a1, 'a0, L, M, TE> Collapse
+    for AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, ConstructTimelineState<M, TE>>
 where
     L: Layer,
     M: Mobject,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-    // C: Construct<M>,
 {
-    type Output =
-        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>;
+    type Output = AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
@@ -1029,15 +989,15 @@ where
     }
 }
 
-impl<'a3, 'a2, 'a1, 'a0, L, M, TE> ApplyRate<TE::OutputTimeMetric>
-    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
+impl<'a2, 'a1, 'a0, L, M, TE> ApplyRate<TE::OutputTimeMetric>
+    for AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
 where
     L: Layer,
     M: Mobject,
     TE: TimeEval,
 {
     type Output<RA> =
-        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, RateComposeTimeEval<RA, TE>>>
+        AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, RateComposeTimeEval<RA, TE>>>
     where
         RA: Rate<TE::OutputTimeMetric>;
 
@@ -1056,15 +1016,15 @@ where
     }
 }
 
-impl<'a3, 'a2, 'a1, 'a0, L, M, TE> ApplyUpdate<TE::OutputTimeMetric, M>
-    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
+impl<'a2, 'a1, 'a0, L, M, TE> ApplyUpdate<TE::OutputTimeMetric, M>
+    for AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
 where
     L: Layer,
     M: Mobject,
     TE: TimeEval,
 {
     type Output<U> =
-        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, UpdateTimelineState<M, TE, U>>
+        AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, UpdateTimelineState<M, TE, U>>
     where
         U: Update<TE::OutputTimeMetric, M>;
 
@@ -1081,14 +1041,14 @@ where
     }
 }
 
-impl<'a3, 'a2, 'a1, 'a0, L, M> ApplyUpdate<NormalizedTimeMetric, M>
-    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>
+impl<'a2, 'a1, 'a0, L, M> ApplyUpdate<NormalizedTimeMetric, M>
+    for AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>
 where
     L: Layer,
     M: Mobject,
 {
     type Output<U> =
-        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>
+        AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>
     where
         U: Update<NormalizedTimeMetric, M>;
 
@@ -1107,15 +1067,15 @@ where
     }
 }
 
-impl<'a3, 'a2, 'a1, 'a0, L, M, TE> ApplyConstruct<L, M>
-    for AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
+impl<'a2, 'a1, 'a0, L, M, TE> ApplyConstruct<L, M>
+    for AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, IndeterminedTimelineState<M, TE>>
 where
     L: Layer,
     M: Mobject,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
 {
     type Output<C> =
-        AliveTimeline<'a3, 'a2, 'a1, 'a0, LayerRenderableState<L>, ConstructTimelineState<C::OutputMobject, TE>>
+        AliveTimeline<'a2, 'a1, 'a0, LayerRenderableState<L>, ConstructTimelineState<C::OutputMobject, TE>>
     where
         C: Construct<L, M>;
 
@@ -1125,69 +1085,29 @@ where
         C: Construct<L, M>,
     {
         self.map(|alive_context, timeline_state| {
-            let child_root_context =
-                AliveRootContext::new(alive_context.alive_context().alive_context().config());
-            let child_root = child_root_context.start(());
+            let child_root = AliveRoot::new(alive_context.alive_context().config());
             let child_renderable = child_root.start(LayerRenderableState {
                 layer: alive_context.archive_state().layer.clone(),
             });
             let child_timeline = child_renderable.start(CollapsedTimelineState {
                 mobject: timeline_state.mobject.clone(),
             });
-            let child_output_timeline =
-                construct.construct(&child_root, &child_renderable, child_timeline);
+            let mobject = construct
+                .construct(&child_root, &child_renderable, child_timeline)
+                .archive_state()
+                .mobject
+                .clone();
+            drop(child_renderable);
             ConstructTimelineState {
-                mobject: child_output_timeline.archive_state().mobject.clone(),
+                mobject,
                 time_eval: timeline_state.time_eval.clone(),
-                root_archive: child_root_context.into_archive(),
+                root_archive: child_root.into_archive(),
             }
         })
-        // let timeline_state = self.end();
-        // let child_supervisor = Supervisor::new(supervisor.config);
-        // let output_timeline_state = child_supervisor
-        //     .end(&construct.construct(
-        //         child_supervisor.start(AliveContent {
-        //             spawn_time: child_supervisor.time.borrow().clone(),
-        //             timeline_state: CollapsedTimelineState {
-        //                 mobject: self.mobject,
-        //             },
-        //         }),
-        //         &child_supervisor,
-        //     ))
-        //     .timeline_state;
-        // let children_time_interval = child_supervisor.time_interval();
-        // timeline_entries_sink.extend(child_supervisor.iter_timeline_entries().map(
-        //     |mut timeline_entry| {
-        //         timeline_entry.time_interval = time_interval.start
-        //             + (time_interval.end - time_interval.start)
-        //                 * *self.time_eval.time_eval(
-        //                     timeline_entry.time_interval.start,
-        //                     children_time_interval.clone(),
-        //                 )
-        //             ..time_interval.start
-        //                 + (time_interval.end - time_interval.start)
-        //                     * *self.time_eval.time_eval(
-        //                         timeline_entry.time_interval.end,
-        //                         children_time_interval.clone(),
-        //                     );
-        //         timeline_entry
-        //     },
-        // ));
-        // output_timeline_state
-        // self.supervisor
-        //     .start(
-        //         self.supervisor
-        //             .end(&self)
-        //             .map(|output_timeline_state| ConstructTimelineState {
-        //                 mobject: output_timeline_state.mobject,
-        //                 time_eval: output_timeline_state.time_eval,
-        //                 construct,
-        //             }),
-        //     )
     }
 }
 
-trait QuantizeExt: Quantize {
+pub trait QuantizeExt: Quantize {
     fn animate(self) -> Self::Output<NormalizedTimeEval>;
     fn animating(self) -> Self::Output<DenormalizedTimeEval>;
 }
@@ -1204,21 +1124,6 @@ where
     #[must_use]
     fn animating(self) -> Self::Output<DenormalizedTimeEval> {
         self.quantize(DenormalizedTimeEval)
-    }
-}
-
-trait CollapseExt: Collapse {
-    fn play(self, delta_time: Time) -> Self::Output;
-}
-
-impl<TS> CollapseExt for TS
-where
-    TS: Collapse,
-{
-    #[must_use]
-    fn play(self, delta_time: Time) -> Self::Output {
-        self.supervisor.wait(delta_time);
-        self.collapse()
     }
 }
 

@@ -82,20 +82,12 @@ where
 {
     type OutputMobject: Mobject;
 
-    fn construct<'a3, 'a2, 'a1, 'a0>(
+    fn construct<'a2, 'a1, 'a0>(
         self,
-        root: &AliveRoot<'a1, 'a0>,
-        renderable: &AliveRenderable<'a2, 'a1, 'a0, LayerRenderableState<L>>,
-        timeline: AliveTimeline<
-            '_,
-            'a2,
-            'a1,
-            'a0,
-            LayerRenderableState<L>,
-            CollapsedTimelineState<M>,
-        >,
+        root: &AliveRoot<'a0>,
+        renderable: &AliveRenderable<'a1, 'a0, LayerRenderableState<L>>,
+        timeline: AliveTimeline<'_, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>,
     ) -> AliveTimeline<
-        'a3,
         'a2,
         'a1,
         'a0,

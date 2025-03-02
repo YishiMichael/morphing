@@ -1,4 +1,3 @@
-use geometric_algebra::ppga3d as pga;
 use geometric_algebra::One;
 
 use super::component::Component;
@@ -16,7 +15,7 @@ pub struct TransformShaderTypes {
 }
 
 pub struct TransformBuffers {
-    transform_uniform: iced::widget::shader::wgpu::Buffer,
+    transform_uniform: wgpu::Buffer,
 }
 
 #[derive(encase::ShaderType)]
@@ -38,88 +37,73 @@ impl Component for Transform {
     }
 }
 
-static TRANSFORM_BIND_GROUP_LAYOUT: ::std::sync::OnceLock<
-    iced::widget::shader::wgpu::BindGroupLayout,
-> = ::std::sync::OnceLock::new();
+static TRANSFORM_BIND_GROUP_LAYOUT: ::std::sync::OnceLock<wgpu::BindGroupLayout> =
+    ::std::sync::OnceLock::new();
 
 impl ComponentShaderTypes for TransformShaderTypes {
     type Buffers = TransformBuffers;
 
-    fn bind_group_layout(
-        device: &iced::widget::shader::wgpu::Device,
-    ) -> &'static iced::widget::shader::wgpu::BindGroupLayout {
+    fn bind_group_layout(device: &wgpu::Device) -> &'static wgpu::BindGroupLayout {
         TRANSFORM_BIND_GROUP_LAYOUT.get_or_init(|| {
-            device.create_bind_group_layout(
-                &iced::widget::shader::wgpu::BindGroupLayoutDescriptor {
-                    label: None,
-                    entries: &[
-                        // pub(VERTEX) @binding(0) var<uniform> u_transform: TransformUniform;
-                        iced::widget::shader::wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: iced::widget::shader::wgpu::ShaderStages::VERTEX,
-                            ty: iced::widget::shader::wgpu::BindingType::Buffer {
-                                ty: iced::widget::shader::wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: Some(
-                                    <TransformUniform as encase::ShaderType>::min_size(),
-                                ),
-                            },
-                            count: None,
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[
+                    // pub(VERTEX) @binding(0) var<uniform> u_transform: TransformUniform;
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: Some(
+                                <TransformUniform as encase::ShaderType>::min_size(),
+                            ),
                         },
-                    ],
-                },
-            )
+                        count: None,
+                    },
+                ],
+            })
         })
     }
 
-    fn bind_group_from_buffers(
-        device: &iced::widget::shader::wgpu::Device,
-        buffers: &Self::Buffers,
-    ) -> iced::widget::shader::wgpu::BindGroup {
-        device.create_bind_group(&iced::widget::shader::wgpu::BindGroupDescriptor {
+    fn bind_group_from_buffers(device: &wgpu::Device, buffers: &Self::Buffers) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: TransformShaderTypes::bind_group_layout(device),
-            entries: &[iced::widget::shader::wgpu::BindGroupEntry {
+            entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: buffers.transform_uniform.as_entire_binding(),
             }],
         })
     }
 
-    fn new_buffers(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Buffers {
+    fn new_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
         TransformBuffers {
-            transform_uniform: device.create_buffer(
-                &iced::widget::shader::wgpu::BufferDescriptor {
-                    label: None,
-                    size: encase::ShaderType::size(&self.transform_uniform).get(),
-                    usage: iced::widget::shader::wgpu::BufferUsages::UNIFORM
-                        | iced::widget::shader::wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                },
-            ),
+            transform_uniform: device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: encase::ShaderType::size(&self.transform_uniform).get(),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
         }
     }
 
-    fn initialize_buffers(&self, device: &iced::widget::shader::wgpu::Device) -> Self::Buffers {
-        use iced::widget::shader::wgpu::util::DeviceExt;
+    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
+        use wgpu::util::DeviceExt;
         TransformBuffers {
             transform_uniform: {
                 let mut buffer = encase::UniformBuffer::new(Vec::<u8>::new());
                 buffer.write(&self.transform_uniform).unwrap();
-                device.create_buffer_init(&iced::widget::shader::wgpu::util::BufferInitDescriptor {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: None,
                     contents: buffer.as_ref(),
-                    usage: iced::widget::shader::wgpu::BufferUsages::UNIFORM,
+                    usage: wgpu::BufferUsages::UNIFORM,
                 })
             },
         }
     }
 
-    fn write_buffers(
-        &self,
-        queue: &iced::widget::shader::wgpu::Queue,
-        buffers: &mut Self::Buffers,
-    ) {
+    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers) {
         encase::internal::WriteInto::write_into(
             &self.transform_uniform,
             &mut encase::internal::Writer::new(
@@ -141,7 +125,7 @@ impl ComponentShaderTypes for TransformShaderTypes {
 impl Default for Transform {
     fn default() -> Self {
         Self {
-            motor: Motor(pga::Motor::one()),
+            motor: Motor(geometric_algebra::ppga3d::Motor::one()),
             scale: 1.0,
         }
     }
