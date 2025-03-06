@@ -1,14 +1,15 @@
 use std::fmt::Debug;
 
 use super::alive::AliveRoot;
-use super::alive::Time;
 use super::config::Config;
 use super::renderable::AliveRenderable;
 use super::renderable::LayerRenderableState;
 use super::storage::Storable;
 use super::timeline::AliveTimeline;
 use super::timeline::CollapsedTimelineState;
+use super::timeline::Time;
 use super::timeline::TimeMetric;
+use super::timeline::Timer;
 
 pub trait Mobject:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
@@ -54,7 +55,7 @@ where
     M: Mobject,
 {
     fn update(&self, time_metric: TM, mobject: &mut M);
-    fn update_presentation(
+    fn prepare(
         &self,
         time_metric: TM,
         mobject: &M,
@@ -113,31 +114,15 @@ where
 // {
 // }
 
-pub trait Layer:
-    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
-{
-    type LayerPresentation: Storable;
-
-    fn prepare(
-        &self,
-        time: Time,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Self::LayerPresentation;
-    fn render(
-        &self,
-        layer_presentation: &Self::LayerPresentation,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
-    );
+pub trait Render {
+    fn render(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView);
 }
 
-pub trait LayerBuilder {
-    type Instantiation: Layer;
+// pub trait LayerBuilder {
+//     type Instantiation: Layer;
 
-    fn instantiate(self, config: &Config) -> Self::Instantiation;
-}
+//     fn instantiate(self, config: &Config) -> Self::Instantiation;
+// }
 
 // TODO: alive container morphisms
 

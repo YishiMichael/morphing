@@ -3,19 +3,121 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::timeline::Timeline;
+
 use super::alive::Alive;
 use super::alive::AliveRoot;
 use super::alive::ArchiveState;
 use super::alive::IntoArchiveState;
-use super::alive::Time;
+use super::config::Config;
 use super::storage::Allocated;
 use super::storage::PresentationStorage;
 use super::storage::ReadWriteStorage;
+use super::storage::Storable;
 use super::storage::StorablePrimitive;
 use super::storage::StorageTypeMap;
-use super::timeline::TimelineErased;
-use super::traits::Layer;
-use super::traits::LayerBuilder;
+use super::timeline::IncreasingTimeEval;
+use super::timeline::NormalizedTimeMetric;
+use super::timeline::PreallocatedTimeline;
+use super::timeline::TimelineEntry;
+use super::timer::Time;
+use super::timer::Timer;
+
+pub struct LayerField<'lf, MP> {
+    config: &'lf Config,
+    timer: &'lf Timer,
+    timeline_entries:
+        RefCell<Vec<TimelineEntry<Box<dyn PreallocatedTimeline<MobjectPresentation = MP>>>>>,
+}
+
+impl<MP> LayerField<'_, MP> {
+    pub fn new(config: &Config, timer: &Timer) -> Self {
+        Self {
+            config,
+            timer,
+            timeline_entries: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub fn inherit(&self, timer: &Timer) -> Self {
+        Self::new(&self.config, timer)
+    }
+
+    pub fn reclaim<TE>(&self, time_interval: Range<Time>, child: Self, time_eval: &TE)
+    where
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+    {
+        self.timeline_entries.borrow_mut().extend(
+            child
+                .timeline_entries
+                .into_inner()
+                .into_iter()
+                .map(|timeline_entry| TimelineEntry {
+                    time_interval: time_interval.start
+                        + (time_interval.end - time_interval.start)
+                            * *time_eval.time_eval(
+                                timeline_entry.time_interval.start,
+                                0.0..child.timer.time,
+                            )
+                        ..time_interval.start
+                            + (time_interval.end - time_interval.start)
+                                * *time_eval.time_eval(
+                                    timeline_entry.time_interval.end,
+                                    0.0..child.timer.time,
+                                ),
+                    timeline: timeline_entry.timeline,
+                }),
+        );
+    }
+
+    pub fn collect(
+        self,
+    ) -> Vec<TimelineEntry<Box<dyn PreallocatedTimeline<MobjectPresentation = MP>>>> {
+        self.timeline_entries.into_inner()
+    }
+
+    pub(crate) fn push_timeline<T>(&self, time_interval: Range<Time>, timeline: T)
+    where
+        T: Timeline<MobjectPresentation = MP>,
+    {
+        self.timeline_entries.borrow_mut().push(TimelineEntry {
+            time_interval,
+            timeline: Box::new(timeline),
+        });
+    }
+}
+
+pub trait Layer:
+    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+{
+    type Preallocated: PreallocatedLayer;
+
+    fn new(config: &Config, timer: &Timer) -> Self;
+    fn inherit(&self, timer: &Timer) -> Self;
+    fn reclaim<TE>(&self, time_interval: Range<Time>, child: Self, time_eval: &TE)
+    where
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
+    fn collect(self) -> Self::Preallocated;
+}
+
+pub trait PreallocatedLayer {
+    fn allocate(
+        self: Box<Self>,
+        storage_type_map: &mut StorageTypeMap,
+    ) -> Box<dyn AllocatedLayer>;
+}
+
+pub trait AllocatedLayer {
+    fn prepare(
+        &self,
+        time: Time,
+        storage_type_map: &mut StorageTypeMap,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    );
+    fn render()
+}
 
 trait Renderable:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize + StorablePrimitive
@@ -142,6 +244,12 @@ where
     }
 }
 
+pub struct RenderableEntry {
+    time_interval: Range<Time>,
+    renderable: Box<dyn RenderableErased>,
+    timeline_entries: Vec<TimelineEntry>,
+}
+
 pub struct LayerRenderableState<L> {
     pub(crate) layer: Arc<L>,
 }
@@ -150,21 +258,8 @@ impl<L> ArchiveState for LayerRenderableState<L>
 where
     L: Layer,
 {
-    type LocalArchive = RefCell<(
-        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    )>;
-    type GlobalArchive = RefCell<
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    >;
+    type LocalArchive = RefCell<(Vec<TimelineEntry>, Vec<RenderableEntry>)>;
+    type GlobalArchive = RefCell<Vec<RenderableEntry>>;
 
     fn archive(
         &mut self,
@@ -172,16 +267,16 @@ where
         local_archive: Self::LocalArchive,
         global_archive: &Self::GlobalArchive,
     ) {
-        let (timelines, renderables) = local_archive.into_inner();
+        let (timeline_entries, renderable_entries) = local_archive.into_inner();
         let mut global_archive_mut = global_archive.borrow_mut();
-        global_archive_mut.push((
+        global_archive_mut.push(RenderableEntry {
             time_interval,
-            Box::new(LayerRenderable {
+            renderable: Box::new(LayerRenderable {
                 layer: self.layer.clone(),
             }),
-            timelines,
-        ));
-        global_archive_mut.extend(renderables);
+            timeline_entries,
+        });
+        global_archive_mut.extend(renderable_entries);
         // (
         //     time_interval,
         //     Box::new(LayerRenderable {

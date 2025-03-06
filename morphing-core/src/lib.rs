@@ -1,6 +1,6 @@
-pub mod alive;
 pub mod config;
-pub mod renderable;
-pub mod storage;
+pub mod layer;
+pub mod storable;
 pub mod timeline;
+pub mod timer;
 pub mod traits;

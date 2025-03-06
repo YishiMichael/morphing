@@ -1,3 +1,4 @@
+// TODO: proc macro instead
 macro_rules! wgpu_struct_field_type {
     (vec2<$type:ty>) => {
         nalgebra::Vector2<$type>
@@ -81,6 +82,7 @@ macro_rules! wgpu_shader_types_buffer_usages {
     };
 }
 
+// TODO: proc macro instead
 #[macro_export]
 macro_rules! wgpu_shader_types {
     ($(

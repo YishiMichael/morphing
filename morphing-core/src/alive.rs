@@ -2,8 +2,7 @@ use std::cell::RefCell;
 use std::ops::Range;
 
 use super::config::Config;
-use super::renderable::RenderableErased;
-use super::timeline::TimelineErased;
+use super::renderable::RenderableEntry;
 
 // pub(crate) trait AliveContent<C>: 'static {
 //     type Next;
@@ -13,8 +12,6 @@ use super::timeline::TimelineErased;
 //     // fn new(input: Self::Input, context: &C) -> Self;
 //     fn iterate(self, context: &C) -> (Self::Output, Self::Next);
 // }
-
-pub type Time = f32;
 
 // pub struct WithSpawnTime<C> {
 //     spawn_time: Rc<Time>,
@@ -223,13 +220,7 @@ where
 pub struct AliveRoot<'c> {
     config: &'c Config,
     time: RefCell<Time>,
-    archive: RefCell<
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    >,
+    archive: RefCell<Vec<RenderableEntry>>,
 }
 
 impl<'c> AliveRoot<'c> {
@@ -245,16 +236,7 @@ impl<'c> AliveRoot<'c> {
         &self.config
     }
 
-    pub(crate) fn into_archive(
-        self,
-    ) -> (
-        Range<Time>,
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    ) {
+    pub(crate) fn into_archive(self) -> (Range<Time>, Vec<RenderableEntry>) {
         (0.0..self.time.into_inner(), self.archive.into_inner())
     }
 
@@ -268,13 +250,7 @@ impl<'c> AliveRoot<'c> {
 }
 
 impl AliveContext for AliveRoot<'_> {
-    type Archive = RefCell<
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    >;
+    type Archive = RefCell<Vec<RenderableEntry>>;
 
     fn time(&self) -> Time {
         *self.time.borrow()
@@ -347,17 +323,7 @@ where
     }
 }
 
-pub fn execute(
-    scene_fn: fn(&AliveRoot),
-    config: &Config,
-) -> (
-    Range<Time>,
-    Vec<(
-        Range<Time>,
-        Box<dyn RenderableErased>,
-        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-    )>,
-) {
+pub fn execute(scene_fn: fn(&AliveRoot), config: &Config) -> (Range<Time>, Vec<RenderableEntry>) {
     let alive_root = AliveRoot::new(config);
     scene_fn(&alive_root);
     alive_root.into_archive()

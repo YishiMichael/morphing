@@ -1,15 +1,19 @@
+use crate::timer::Time;
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::config::Config;
+use crate::renderable::RenderableEntry;
+use crate::storage::Storable;
+
 use super::alive::Alive;
 use super::alive::AliveContext;
 use super::alive::AliveRoot;
 use super::alive::ArchiveState;
 use super::alive::IntoArchiveState;
-use super::alive::Time;
 use super::renderable::AliveRenderable;
 use super::renderable::LayerRenderableState;
 use super::renderable::RenderableErased;
@@ -83,10 +87,10 @@ use super::traits::Update;
 //     }
 // }
 
-trait Timeline:
+pub(crate) trait Timeline:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize + StorablePrimitive
-// + typemap_rev::TypeMapKey<Value = HashMap<Self::SerdeKey, Self::MobjectPresentationStorage>>
 {
+    type MobjectPresentation;
     // type SerdeKey: 'static + Eq + Hash + Send + Sync;
     // type MobjectPresentationStorage: PresentationStorage;
 
@@ -95,11 +99,15 @@ trait Timeline:
         &self,
         device: &wgpu::Device,
     ) -> <Self::PresentationStorage as PresentationStorage>::Target;
+    fn ref_presentation<'mp>(
+        &'mp self,
+        mobject_presentation: &'mp <Self::PresentationStorage as PresentationStorage>::Target,
+    ) -> &'mp Self::MobjectPresentation;
     fn prepare(
         &self,
         time: Time,
         time_interval: Range<Time>,
-        prepare_ref: &mut <Self::PresentationStorage as PresentationStorage>::Target,
+        mobject_presentation: &mut <Self::PresentationStorage as PresentationStorage>::Target,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -164,6 +172,8 @@ where
     //     serde_hashkey::to_key_with_ordered_float(self.mobject.as_ref()).unwrap()
     // }
 
+    type MobjectPresentation = M::MobjectPresentation;
+
     fn init_presentation(
         &self,
         device: &wgpu::Device,
@@ -171,11 +181,18 @@ where
         Arc::new(self.mobject.presentation(device))
     }
 
+    fn ref_presentation<'mp>(
+        &'mp self,
+        mobject_presentation: &'mp <Self::PresentationStorage as PresentationStorage>::Target,
+    ) -> &'mp Self::MobjectPresentation {
+        mobject_presentation
+    }
+
     fn prepare(
         &self,
         _time: Time,
         _time_interval: Range<Time>,
-        _prepare_ref: &mut <Self::PresentationStorage as PresentationStorage>::Target,
+        _mobject_presentation: &mut <Self::PresentationStorage as PresentationStorage>::Target,
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
@@ -273,6 +290,8 @@ where
     //     )
     // }
 
+    type MobjectPresentation = M::MobjectPresentation;
+
     fn init_presentation(
         &self,
         device: &wgpu::Device,
@@ -280,19 +299,26 @@ where
         self.mobject.presentation(device)
     }
 
+    fn ref_presentation<'mp>(
+        &'mp self,
+        mobject_presentation: &'mp <Self::PresentationStorage as PresentationStorage>::Target,
+    ) -> &'mp Self::MobjectPresentation {
+        mobject_presentation
+    }
+
     fn prepare(
         &self,
         time: Time,
         time_interval: Range<Time>,
-        prepare_ref: &mut <Self::PresentationStorage as PresentationStorage>::Target,
+        mobject_presentation: &mut <Self::PresentationStorage as PresentationStorage>::Target,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) {
-        self.update.update_presentation(
+        self.update.prepare(
             self.time_eval.time_eval(time, time_interval),
             &self.mobject,
-            prepare_ref,
+            mobject_presentation,
             device,
             queue,
             format,
@@ -365,20 +391,36 @@ where
 //     }
 // }
 
-pub trait TimelineErased {
-    fn allocate(self, storage_type_map: &mut StorageTypeMap) -> Box<dyn AllocatedTimelineErased>;
+pub trait PreallocatedTimeline {
+    type MobjectPresentation;
+
+    fn allocate(
+        self: Box<Self>,
+        storage_type_map: &mut StorageTypeMap,
+    ) -> Box<dyn AllocatedTimeline<MobjectPresentation = Self::MobjectPresentation>>;
 }
 
-impl<T> TimelineErased for T
+impl<T> PreallocatedTimeline for T
 where
     T: Timeline,
 {
-    fn allocate(self, storage_type_map: &mut StorageTypeMap) -> Box<dyn AllocatedTimelineErased> {
+    type MobjectPresentation = T::MobjectPresentation;
+
+    fn allocate(
+        self: Box<Self>,
+        storage_type_map: &mut StorageTypeMap,
+    ) -> Box<dyn AllocatedTimeline<MobjectPresentation = Self::MobjectPresentation>> {
         Box::new(storage_type_map.allocate(self))
     }
 }
 
-pub trait AllocatedTimelineErased {
+pub trait AllocatedTimeline {
+    type MobjectPresentation;
+
+    fn ref_presentation<'mp>(
+        &'mp self,
+        storage_type_map: &'mp mut StorageTypeMap,
+    ) -> &'mp Self::MobjectPresentation;
     fn prepare(
         &self,
         time: Time,
@@ -390,10 +432,20 @@ pub trait AllocatedTimelineErased {
     );
 }
 
-impl<T> AllocatedTimelineErased for Allocated<T>
+impl<T> AllocatedTimeline for Allocated<T>
 where
     T: Timeline,
 {
+    type MobjectPresentation = T::MobjectPresentation;
+
+    fn ref_presentation<'mp>(
+        &'mp self,
+        storage_type_map: &'mp mut StorageTypeMap,
+    ) -> &'mp Self::MobjectPresentation {
+        self.storable_primitive()
+            .ref_presentation(storage_type_map.get_ref(self).as_ref().unwrap())
+    }
+
     fn prepare(
         &self,
         time: Time,
@@ -416,12 +468,29 @@ where
     }
 }
 
+pub struct TimelineEntry<T> {
+    time_interval: Range<Time>,
+    timeline: T,
+}
+
+impl<MP> TimelineEntry<Box<dyn PreallocatedTimeline<MobjectPresentation = MP>>> {
+    fn allocate(
+        self,
+        storage_type_map: &mut StorageTypeMap,
+    ) -> TimelineEntry<Box<dyn AllocatedTimeline<MobjectPresentation = MP>>> {
+        TimelineEntry {
+            time_interval: self.time_interval,
+            timeline: self.timeline.allocate(storage_type_map),
+        }
+    }
+}
+
 // struct TimelineEntriesSink<'v>(Option<&'v mut Vec<WithTimeInterval<Box<dyn AllocatedTimeline>>>>);
 
-// impl Extend<Box<dyn AllocatedTimelineErased>> for TimelineEntriesSink<'_> {
+// impl Extend<Box<dyn AllocatedTimeline>> for TimelineEntriesSink<'_> {
 //     fn extend<I>(&mut self, iter: I)
 //     where
-//         I: IntoIterator<Item = Box<dyn AllocatedTimelineErased>>,
+//         I: IntoIterator<Item = Box<dyn AllocatedTimeline>>,
 //     {
 //         if let Some(timeline_entries) = self.0.as_mut() {
 //             timeline_entries.extend(iter)
@@ -445,14 +514,7 @@ where
     M: Mobject,
 {
     type LocalArchive = ();
-    type GlobalArchive = RefCell<(
-        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    )>;
+    type GlobalArchive = RefCell<(Vec<TimelineEntry>, Vec<RenderableEntry>)>;
 
     fn archive(
         &mut self,
@@ -460,12 +522,12 @@ where
         _local_archive: Self::LocalArchive,
         global_archive: &Self::GlobalArchive,
     ) {
-        global_archive.borrow_mut().0.push((
+        global_archive.borrow_mut().0.push(TimelineEntry {
             time_interval,
-            Box::new(StaticTimeline {
+            timeline: Box::new(StaticTimeline {
                 mobject: self.mobject.clone(),
             }),
-        ));
+        });
     }
 }
 
@@ -480,14 +542,7 @@ where
     TE: TimeEval,
 {
     type LocalArchive = ();
-    type GlobalArchive = RefCell<(
-        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    )>;
+    type GlobalArchive = RefCell<(Vec<TimelineEntry>, Vec<RenderableEntry>)>;
 
     fn archive(
         &mut self,
@@ -495,12 +550,12 @@ where
         _local_archive: Self::LocalArchive,
         global_archive: &Self::GlobalArchive,
     ) {
-        global_archive.borrow_mut().0.push((
+        global_archive.borrow_mut().0.push(TimelineEntry {
             time_interval,
-            Box::new(StaticTimeline {
+            timeline: Box::new(StaticTimeline {
                 mobject: self.mobject.clone(),
             }),
-        ));
+        });
     }
 }
 
@@ -517,14 +572,7 @@ where
     U: Update<TE::OutputTimeMetric, M>,
 {
     type LocalArchive = ();
-    type GlobalArchive = RefCell<(
-        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    )>;
+    type GlobalArchive = RefCell<(Vec<TimelineEntry>, Vec<RenderableEntry>)>;
 
     fn archive(
         &mut self,
@@ -532,14 +580,14 @@ where
         _local_archive: Self::LocalArchive,
         global_archive: &Self::GlobalArchive,
     ) {
-        global_archive.borrow_mut().0.push((
+        global_archive.borrow_mut().0.push(TimelineEntry {
             time_interval,
-            Box::new(DynamicTimeline {
+            timeline: Box::new(DynamicTimeline {
                 mobject: self.mobject.clone(),
                 time_eval: self.time_eval.clone(),
                 update: self.update.clone(),
             }),
-        ));
+        });
     }
 
     // type OutputTimelineState = CollapsedTimelineState<M>;
@@ -570,14 +618,7 @@ where
 pub struct ConstructTimelineState<M, TE> {
     mobject: Arc<M>,
     time_eval: Arc<TE>,
-    root_archive: (
-        Range<Time>,
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    ),
+    root_archive: (Range<Time>, Vec<RenderableEntry>),
     // time_eval: Arc<TE>,
     // construct: C,
 }
@@ -589,14 +630,7 @@ where
     // C: Construct<M>,
 {
     type LocalArchive = ();
-    type GlobalArchive = RefCell<(
-        Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        Vec<(
-            Range<Time>,
-            Box<dyn RenderableErased>,
-            Vec<(Range<Time>, Box<dyn TimelineErased>)>,
-        )>,
-    )>;
+    type GlobalArchive = RefCell<(Vec<TimelineEntry>, Vec<RenderableEntry>)>;
 
     fn archive(
         &mut self,
@@ -617,10 +651,15 @@ where
                             .time_eval
                             .time_eval(entry_time_interval.end, child_time_interval.clone())
         };
-        for (renderable_time_interval, _, timelines) in renderables.as_mut_slice() {
-            rescale_time_interval(renderable_time_interval);
-            for (timeline_time_interval, _) in timelines.as_mut_slice() {
-                rescale_time_interval(timeline_time_interval);
+        for RenderableEntry {
+            time_interval,
+            timeline_entries,
+            ..
+        } in renderables.as_mut_slice()
+        {
+            rescale_time_interval(time_interval);
+            for TimelineEntry { time_interval, .. } in timeline_entries.as_mut_slice() {
+                rescale_time_interval(time_interval);
             }
         }
         global_archive.borrow_mut().1.extend(renderables.drain(..));
@@ -757,10 +796,8 @@ where
 //     config: &'c Config,
 //     // storage: &'s Storage,
 //     time: RefCell<Arc<Time>>,
-//     timeline_slots: RefCell<Vec<Result<Vec<Box<dyn AllocatedTimelineErased>>, Arc<dyn Any>>>>,
+//     timeline_slots: RefCell<Vec<Result<Vec<Box<dyn AllocatedTimeline>>, Arc<dyn Any>>>>,
 // }
-
-// pub type TimelineStateArchive = Vec<(Range<Time>, Box<dyn TimelineErased>)>;
 
 impl<L, MB> IntoArchiveState<AliveRenderable<'_, '_, LayerRenderableState<L>>> for MB
 where
@@ -818,7 +855,7 @@ pub trait TimeEval:
     fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric;
 }
 
-trait IncreasingTimeEval: TimeEval {}
+pub trait IncreasingTimeEval: TimeEval {}
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct NormalizedTimeEval;
