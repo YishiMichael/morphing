@@ -1,130 +1,284 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 // trait SerdeKey: 'static + Clone + Eq + Hash + Send + Sync {}
 
 // impl<T> SerdeKey for T where T: 'static + Clone + Eq + Hash + Send + Sync {}
 
-pub trait KeyFn: 'static + Default + Send + Sync {
-    type Input: 'static;
-    type Output: 'static;
+// pub(crate) trait KeyFn: 'static + Default + Send + Sync {
+//     type Input: 'static;
+//     type Output: 'static;
 
-    fn eval(&self, input: &Self::Input) -> Self::Output;
+//     fn eval_key(&self, input: &Self::Input) -> Self::Output;
+// }
+
+trait SlotKeyGenerator: 'static + Send + Sync {
+    type SlotKey: 'static;
+
+    fn new() -> Self;
+    fn generate_slot_key(&mut self) -> Self::SlotKey;
 }
 
-trait KeyGenerator: 'static + Default + Send + Sync {
-    type Input: 'static;
-    type Output: 'static;
+pub(crate) struct SharableSlotKeyGenerator;
 
-    fn generate_key(&mut self, input: &Self::Input) -> Self::Output;
-}
+impl SlotKeyGenerator for SharableSlotKeyGenerator {
+    type SlotKey = ();
 
-#[derive(Default)]
-struct UnitKeyGenerator;
+    fn new() -> Self {
+        Self
+    }
 
-impl KeyGenerator for UnitKeyGenerator {
-    type Input = ();
-    type Output = ();
-
-    fn generate_key(&mut self, _input: &Self::Input) -> Self::Output {
+    fn generate_slot_key(&mut self) -> Self::SlotKey {
         ()
     }
 }
 
-#[derive(Default)]
-struct UniqueKeyGenerator(usize);
+pub(crate) struct MutexSlotKeyGenerator(usize);
 
-impl KeyGenerator for UniqueKeyGenerator {
-    type Input = ();
-    type Output = usize;
+impl SlotKeyGenerator for MutexSlotKeyGenerator {
+    type SlotKey = usize;
 
-    fn generate_key(&mut self, _input: &Self::Input) -> Self::Output {
+    fn new() -> Self {
+        Self(0)
+    }
+
+    fn generate_slot_key(&mut self) -> Self::SlotKey {
         let key = self.0;
         self.0 += 1;
         key
     }
 }
 
-#[derive(Default)]
-struct FnKeyGenerator<KF, KG> {
-    key_fn: KF,
-    key_generator: KG,
-}
-
-impl<KF, KG> KeyGenerator for FnKeyGenerator<KF, KG>
-where
-    KF: KeyFn,
-    KG: KeyGenerator<Input = ()>,
-{
-    type Input = KF::Input;
-    type Output = (KF::Output, KG::Output);
-
-    fn generate_key(&mut self, input: &Self::Input) -> Self::Output {
-        (self.key_fn.eval(input), self.key_generator.generate_key(()))
-    }
-}
-
-pub trait StorableMap: 'static + Send + Sync {
-    // type Presentation: Storable;
-    // type StorageIdInput;
-    // type KeyGenerator: KeyGenerator;
-    // type StorageId;
-    // type Value;
-    // type PrepareRef<'s>;
-    // type RenderRef<'s>;
-    type Key: 'static + Clone + Send + Sync;
-    type Value: 'static + Send + Sync;
+pub(crate) trait Slot: 'static + Send + Sync {
+    type Value;
+    type SlotKeyGenerator: SlotKeyGenerator;
 
     fn new() -> Self;
-    fn get(&self, key: &Self::Key) -> Option<&Self::Value>;
-    fn entry(&mut self, key: Self::Key) -> Entry<Self::Key, Self::Value>;
-    // where
-    //     F: FnOnce() -> Self::Presentation;
-    // fn get(&self, storage_id: &Self::StorageId) -> Option<&Self::Target>;
-    // fn allocate(&mut self, key: K, presentation: Self::Target) -> Self::StorageId;
+    // fn get(
+    //     &self,
+    //     slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+    // ) -> Option<&Self::Value>;
+    fn get_or_insert_with<F>(
+        &mut self,
+        slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        f: F,
+    ) -> &mut Self::Value
+    where
+        F: FnOnce() -> Self::Value;
     fn expire(&mut self);
 }
 
-pub(crate) struct MapStorage<K, V>(HashMap<K, V>);
+pub(crate) struct SharableSlot<V>(Option<Arc<V>>);
 
-impl<K, V> StorableMap for MapStorage<K, V>
+impl<V> Slot for SharableSlot<V>
 where
-    K: 'static + Clone + Eq + Hash + Send + Sync,
     V: 'static + Send + Sync,
 {
-    // type Presentation = P;
-    // type StorageIdInput = ();
-    // type KeyGenerator = ReadKeyGenerator;
-    // type Value = V;
-    // type PrepareRef<'s> = &'s mut Arc<P>;
-    // type RenderRef<'s> = &'s Arc<P>;
-
-    type Key = K;
-    type Value = V;
+    type Value = Arc<V>;
+    type SlotKeyGenerator = SharableSlotKeyGenerator;
 
     fn new() -> Self {
-        Self(HashMap::new())
+        Self(None)
     }
 
-    fn get(&self, key: &Self::Key) -> Option<&Self::Value> {
-        self.0.get(key)
-    }
-
-    fn entry(&mut self, key: Self::Key) -> Entry<Self::Key, Self::Value> {
-        self.0.entry(key)
-    }
-
-    // fn allocate(&mut self, _key: (), presentation: Self::Target) -> Self::StorageId {
-    //     self.0.insert(presentation);
-    //     ()
+    // fn get(
+    //     &self,
+    //     _slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+    // ) -> Option<&Self::Value> {
+    //     self.0.as_ref()
     // }
 
+    fn get_or_insert_with<F>(
+        &mut self,
+        _slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        f: F,
+    ) -> &mut Self::Value
+    where
+        F: FnOnce() -> Self::Value,
+    {
+        self.0.get_or_insert_with(f)
+    }
+
     fn expire(&mut self) {
-        self.0.clear();
-        // std::mem::replace(&mut self.inactive, std::mem::take(&mut self.active));
+        self.0.take();
     }
 }
+
+pub(crate) struct MutexSlot<V>(Vec<Option<Arc<Mutex<V>>>>);
+
+impl<V> Slot for MutexSlot<V>
+where
+    V: 'static + Send,
+{
+    type Value = Arc<Mutex<V>>;
+    type SlotKeyGenerator = MutexSlotKeyGenerator;
+
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    // fn get(
+    //     &self,
+    //     slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+    // ) -> Option<&Self::Value> {
+    //     self.0.get(slot_key).map(Option::as_ref).flatten()
+    // }
+
+    fn get_or_insert_with<F>(
+        &mut self,
+        slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        f: F,
+    ) -> &mut Self::Value
+    where
+        F: FnOnce() -> Self::Value,
+    {
+        if self.0.len() <= *slot_key {
+            self.0.resize(slot_key + 1, None);
+        }
+        self.0.get_mut(*slot_key).unwrap().get_or_insert_with(f)
+    }
+
+    fn expire(&mut self) {
+        self.0.clear()
+    }
+}
+
+pub(crate) struct SwapSlot<S> {
+    active: S,
+    inactive: S,
+}
+
+impl<S> Slot for SwapSlot<S>
+where
+    S: Slot,
+{
+    // type Presentation = PS::Presentation;
+    // type StorageIdInput = PS::StorageIdInput;
+    // type KeyGenerator = PS::KeyGenerator;
+    // type Value = PS::Value;
+    // type PrepareRef<'s> = PS::PrepareRef<'s>;
+    // type RenderRef<'s> = PS::RenderRef<'s>;
+
+    type Value = S::Value;
+    type SlotKeyGenerator = S::SlotKeyGenerator;
+
+    fn new() -> Self {
+        Self {
+            active: S::new(),
+            inactive: S::new(),
+        }
+    }
+
+    // fn get(
+    //     &self,
+    //     slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+    // ) -> Option<&Self::Value> {
+    //     self.active.get(slot_key)
+    // }
+
+    fn get_or_insert_with<F>(
+        &mut self,
+        slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        f: F,
+    ) -> &mut Self::Value
+    where
+        F: FnOnce() -> Self::Value,
+    {
+        self.active.get_or_insert_with(slot_key, f)
+    }
+
+    fn expire(&mut self) {
+        let _ = std::mem::replace(
+            &mut self.inactive,
+            std::mem::replace(&mut self.active, S::new()),
+        );
+    }
+}
+
+// #[derive(Default)]
+// pub(crate) struct FnKeyGenerator<KF, KG> {
+//     key_fn: KF,
+//     key_generator: KG,
+// }
+
+// impl<KF, KG> KeyGenerator for FnKeyGenerator<KF, KG>
+// where
+//     KF: KeyFn,
+//     KG: KeyGenerator<Input = ()>,
+// {
+//     type Input = KF::Input;
+//     type Output = (KF::Output, KG::Output);
+
+//     fn generate_key(&mut self, input: &Self::Input) -> Self::Output {
+//         (
+//             self.key_fn.eval_key(input),
+//             self.key_generator.generate_key(()),
+//         )
+//     }
+// }
+
+// pub trait StorableMap: 'static + Send + Sync {
+//     // type Presentation: Storable;
+//     // type StorageIdInput;
+//     // type KeyGenerator: KeyGenerator;
+//     // type StorageId;
+//     // type Value;
+//     // type PrepareRef<'s>;
+//     // type RenderRef<'s>;
+//     type Key: 'static + Clone + Send + Sync;
+//     type Value: 'static + Send + Sync;
+
+//     fn new() -> Self;
+//     fn get(&self, key: &Self::Key) -> Option<&Self::Value>;
+//     fn entry(&mut self, key: Self::Key) -> Entry<Self::Key, Self::Value>;
+//     // where
+//     //     F: FnOnce() -> Self::Presentation;
+//     // fn get(&self, storage_id: &Self::StorageId) -> Option<&Self::Target>;
+//     // fn allocate(&mut self, key: K, presentation: Self::Target) -> Self::StorageId;
+//     fn expire(&mut self);
+// }
+
+// pub(crate) struct MapStorage<K, V>(HashMap<K, V>);
+
+// impl<K, V> StorableMap for MapStorage<K, V>
+// where
+//     K: 'static + Clone + Eq + Hash + Send + Sync,
+//     V: 'static + Send + Sync,
+// {
+//     // type Presentation = P;
+//     // type StorageIdInput = ();
+//     // type KeyGenerator = ReadKeyGenerator;
+//     // type Value = V;
+//     // type PrepareRef<'s> = &'s mut Arc<P>;
+//     // type RenderRef<'s> = &'s Arc<P>;
+
+//     type Key = K;
+//     type Value = V;
+
+//     fn new() -> Self {
+//         Self(HashMap::new())
+//     }
+
+//     fn get(&self, key: &Self::Key) -> Option<&Self::Value> {
+//         self.0.get(key)
+//     }
+
+//     fn entry(&mut self, key: Self::Key) -> Entry<Self::Key, Self::Value> {
+//         self.0.entry(key)
+//     }
+
+//     // fn allocate(&mut self, _key: (), presentation: Self::Target) -> Self::StorageId {
+//     //     self.0.insert(presentation);
+//     //     ()
+//     // }
+
+//     fn expire(&mut self) {
+//         self.0.clear();
+//         // std::mem::replace(&mut self.inactive, std::mem::take(&mut self.active));
+//     }
+// }
 
 // pub(crate) struct ReadWriteStorage<K, P>(HashMap<K, Arc<RwLock<P>>>);
 
@@ -166,52 +320,6 @@ where
 //         // std::mem::replace(&mut self.inactive, std::mem::take(&mut self.active));
 //     }
 // }
-
-pub(crate) struct SwapStorage<SM> {
-    active: SM,
-    inactive: SM,
-}
-
-impl<SM> StorableMap for SwapStorage<SM>
-where
-    SM: StorableMap,
-{
-    // type Presentation = PS::Presentation;
-    // type StorageIdInput = PS::StorageIdInput;
-    // type KeyGenerator = PS::KeyGenerator;
-    // type Value = PS::Value;
-    // type PrepareRef<'s> = PS::PrepareRef<'s>;
-    // type RenderRef<'s> = PS::RenderRef<'s>;
-
-    type Key = SM::Key;
-    type Value = SM::Value;
-
-    fn new() -> Self {
-        Self {
-            active: SM::new(),
-            inactive: SM::new(),
-        }
-    }
-
-    fn get(&self, key: &Self::Key) -> Option<&Self::Value> {
-        self.active.get(key)
-    }
-
-    fn entry(&mut self, key: Self::Key) -> Entry<Self::Key, Self::Value> {
-        self.active.entry(key)
-    }
-
-    // fn allocate(&mut self, key: K, presentation: Self::Target) -> Self::StorageId {
-    //     self.active.allocate(key, presentation)
-    // }
-
-    fn expire(&mut self) {
-        let _ = std::mem::replace(
-            &mut self.inactive,
-            std::mem::replace(&mut self.active, SM::new()),
-        );
-    }
-}
 
 // pub(crate) struct MapStorage<K, PS>(HashMap<K, PS>);
 
@@ -258,10 +366,11 @@ where
 // }
 
 pub trait Storable: 'static + Send + Sync {
-    type KeyGenerator: KeyGenerator<Input = Self, Output = <Self::StorableMap as StorableMap>::Key>;
-    type StorableMap: StorableMap;
+    type StorableKey: Clone + Eq + Hash + Send + Sync;
+    type Slot: Slot;
 
-    // fn storage_id_input(&self) -> Self::Key;
+    fn key(&self) -> Self::StorableKey;
+    // fn store(&self) -> <Self::Slot as Slot>::Value;
 }
 
 // impl<PS> PresentationStoragePrimitive for Box<dyn PresentationStoragePrimitive<PresentationStorage = PS>>
@@ -279,7 +388,8 @@ pub struct Allocated<S>
 where
     S: Storable,
 {
-    key: <S::StorableMap as StorableMap>::Key,
+    storable_key: S::StorableKey,
+    slot_key: <<S::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
     storable: S,
 }
 
@@ -300,39 +410,15 @@ where
     }
 }
 
-struct KeyGeneratorWrapper<KG>(KG)
+struct SlotKeyGeneratorWrapper<S>(S)
 where
-    KG: KeyGenerator;
+    S: Storable;
 
-struct StorableMapWrapper<SM>(SM)
+impl<S> typemap_rev::TypeMapKey for SlotKeyGeneratorWrapper<S>
 where
-    SM: StorableMap;
-
-impl<KG> typemap_rev::TypeMapKey for KeyGeneratorWrapper<KG>
-where
-    KG: KeyGenerator,
+    S: Storable,
 {
-    type Value = Self;
-}
-
-impl<SM> typemap_rev::TypeMapKey for StorableMapWrapper<SM>
-where
-    SM: StorableMap,
-{
-    type Value = Self;
-}
-
-trait Expire: Send + Sync {
-    fn expire(&mut self);
-}
-
-impl<SM> Expire for StorableMapWrapper<SM>
-where
-    SM: StorableMap,
-{
-    fn expire(&mut self) {
-        self.expire();
-    }
+    type Value = HashMap<S::StorableKey, <S::Slot as Slot>::SlotKeyGenerator>;
 }
 
 // pub struct PresentationStorageWrapper<K, PS>(PS)
@@ -359,61 +445,106 @@ where
 //     }
 // }
 
-impl<S> typemap_rev::IntoBox<dyn Expire> for Allocated<S>
+pub struct SlotKeyGeneratorTypeMap(typemap_rev::TypeMap);
+
+impl SlotKeyGeneratorTypeMap {
+    pub fn new() -> Self {
+        Self(typemap_rev::TypeMap::new())
+    }
+
+    pub fn allocate<S>(&mut self, storable: S) -> Allocated<S>
+    where
+        S: Storable,
+    {
+        Allocated {
+            storable_key: storable.key(),
+            slot_key: self
+                .0
+                .entry::<SlotKeyGeneratorWrapper<S>>()
+                .or_insert_with(HashMap::new)
+                .entry(storable.key())
+                .or_insert_with(<S::Slot as Slot>::SlotKeyGenerator::new)
+                .generate_slot_key(),
+            storable,
+        }
+    }
+
+    pub fn expire(&mut self) {
+        self.0.clear();
+    }
+}
+
+struct StorageWrapper<S>(S)
+where
+    S: Storable;
+
+impl<S> typemap_rev::TypeMapKey for StorageWrapper<S>
 where
     S: Storable,
 {
+    type Value = HashMap<S::StorableKey, S::Slot>;
+}
+
+trait Expire: Send + Sync {
+    fn expire(&mut self);
+}
+
+impl<K, V> Expire for HashMap<K, V>
+where
+    V: Slot,
+    Self: Send + Sync,
+{
+    fn expire(&mut self) {
+        self.values_mut().map(Slot::expire);
+    }
+}
+
+impl<K, V> typemap_rev::IntoBox<dyn Expire> for HashMap<K, V>
+where
+    V: Slot,
+    Self: 'static + Send + Sync,
+{
     fn into_box(self) -> Box<dyn Expire> {
-        Box::new(self.0)
+        Box::new(self)
     }
 }
 
 pub struct StorageTypeMap(typemap_rev::TypeMap<dyn Expire>);
 
 impl StorageTypeMap {
-    pub fn allocate<S>(&mut self, storable: S) -> Allocated<S>
-    where
-        S: Storable,
-    {
-        Allocated {
-            key: self
-                .0
-                .entry::<KeyGeneratorWrapper<S::KeyGenerator>>()
-                .or_insert_with(|| KeyGeneratorWrapper(S::KeyGenerator::new()))
-                .0
-                .generate_key(&storable),
-            storable,
-        }
+    pub fn new() -> Self {
+        Self(typemap_rev::TypeMap::custom())
     }
 
     pub fn get_or_insert_with<S, F>(
         &mut self,
         allocated: &Allocated<S>,
         f: F,
-    ) -> &<S::StorableMap as StorableMap>::Value
+    ) -> &mut <S::Slot as Slot>::Value
     where
         S: Storable,
-        F: FnOnce(&S) -> <S::StorableMap as StorableMap>::Value,
+        F: FnOnce(&S) -> <S::Slot as Slot>::Value,
     {
         self.0
-            .entry::<StorableMapWrapper<S::StorableMap>>()
-            .or_insert_with(|| StorableMapWrapper(S::StorableMap::new()))
-            .0
-            .entry(allocated.key.clone())
-            .get_or_insert(f(&allocated.storable))
+            .entry::<StorageWrapper<S>>()
+            .or_insert_with(HashMap::new)
+            .entry(allocated.storable_key.clone())
+            .or_insert_with(S::Slot::new)
+            .get_or_insert_with(&allocated.slot_key, || f(&allocated.storable))
     }
 
-    pub fn get<S>(&self, allocated: &Allocated<S>) -> &<S::StorableMap as StorableMap>::Value
-    where
-        S: Storable,
-    {
-        self.0
-            .entry::<StorableMapWrapper<S::StorableMap>>()
-            .or_insert_with(|| StorableMapWrapper(S::StorableMap::new()))
-            .0
-            .get(&allocated.key)
-            .unwrap()
-    }
+    // pub fn get<S>(&self, allocated: &Allocated<S>) -> &<S::Slot as Slot>::Value
+    // where
+    //     S: Storable,
+    // {
+    //     self.0
+    //         .entry::<StorageWrapper<S::Storage>>()
+    //         .or_insert_with(|| HashMap::new)
+    //         .get(&allocated.storable_key)
+    //         .unwrap()
+    //         .get(&allocated.slot_key)
+    //         .unwrap()
+    // }
 
     pub fn expire(&mut self) {
         self.0 = std::mem::replace(&mut self.0, typemap_rev::TypeMap::custom())

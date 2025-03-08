@@ -3,25 +3,18 @@ use std::fmt::Debug;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::timeline::Timeline;
-
-use super::alive::Alive;
-use super::alive::AliveRoot;
-use super::alive::ArchiveState;
-use super::alive::IntoArchiveState;
 use super::config::Config;
-use super::storage::Allocated;
-use super::storage::PresentationStorage;
-use super::storage::ReadWriteStorage;
-use super::storage::Storable;
-use super::storage::StorablePrimitive;
-use super::storage::StorageTypeMap;
+use super::storable::Allocated;
+use super::storable::Storable;
+use super::storable::StorageTypeMap;
 use super::timeline::IncreasingTimeEval;
 use super::timeline::NormalizedTimeMetric;
 use super::timeline::PreallocatedTimeline;
+use super::timeline::Timeline;
 use super::timeline::TimelineEntry;
 use super::timer::Time;
 use super::timer::Timer;
+use super::traits::Render;
 
 pub struct LayerField<'lf, MP> {
     config: &'lf Config,
@@ -90,33 +83,37 @@ impl<MP> LayerField<'_, MP> {
 pub trait Layer:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
-    type Preallocated: PreallocatedLayer;
+    type LayerPreallocated: LayerPreallocated;
 
     fn new(config: &Config, timer: &Timer) -> Self;
     fn inherit(&self, timer: &Timer) -> Self;
     fn reclaim<TE>(&self, time_interval: Range<Time>, child: Self, time_eval: &TE)
     where
         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-    fn collect(self) -> Self::Preallocated;
+    fn collect(self) -> Self::LayerPreallocated;
 }
 
-pub trait PreallocatedLayer {
+pub trait LayerPreallocated {
+    type LayerAllocated: LayerAllocated;
+
     fn allocate(
-        self: Box<Self>,
-        storage_type_map: &mut StorageTypeMap,
-    ) -> Box<dyn AllocatedLayer>;
+        self,
+        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::LayerAllocated;
 }
 
-pub trait AllocatedLayer {
+pub trait LayerAllocated {
+    type LayerRender: Render;
+
     fn prepare(
         &self,
         time: Time,
-        storage_type_map: &mut StorageTypeMap,
+        // storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    );
-    fn render()
+    ) -> Self::LayerRender;
+    // fn render()
 }
 
 trait Renderable:

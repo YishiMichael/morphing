@@ -1,21 +1,19 @@
 use std::fmt::Debug;
+use std::hash::Hash;
 
-use super::alive::AliveRoot;
 use super::config::Config;
-use super::renderable::AliveRenderable;
-use super::renderable::LayerRenderableState;
-use super::storage::Storable;
-use super::timeline::AliveTimeline;
+use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
-use super::timeline::Time;
+use super::timeline::Layer;
 use super::timeline::TimeMetric;
-use super::timeline::Timer;
+use super::timeline::World;
 
 pub trait Mobject:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
-    type MobjectPresentation: Storable;
+    type MobjectPresentation: 'static + Send + Sync;
 
+    // fn spawn(self, layer: &L) -> Alive<CollapsedTimelineState<Self>>;
     fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
 }
 
@@ -29,7 +27,13 @@ where
 {
     type Instantiation: Mobject;
 
-    fn instantiate(self, layer: &L, config: &Config) -> Self::Instantiation; // ?
+    fn instantiate<'a, W>(
+        self,
+        layer: &'a L,
+        config: &'a Config,
+    ) -> Alive<'a, W, CollapsedTimelineState<Self::Instantiation>>
+    where
+        W: World;
 }
 
 pub trait Rate<TM>:
@@ -55,7 +59,7 @@ where
     M: Mobject,
 {
     fn update(&self, time_metric: TM, mobject: &mut M);
-    fn prepare(
+    fn prepare_presentation(
         &self,
         time_metric: TM,
         mobject: &M,
@@ -76,25 +80,19 @@ where
 //     fn act(self, mobject: &M) -> Self::Update;
 // }
 
-pub trait Construct<L, M>: 'static
+pub trait Construct<M>: 'static
 where
-    L: Layer,
     M: Mobject,
 {
     type OutputMobject: Mobject;
 
-    fn construct<'a2, 'a1, 'a0>(
+    fn construct<'a, W>(
         self,
-        root: &AliveRoot<'a0>,
-        renderable: &AliveRenderable<'a1, 'a0, LayerRenderableState<L>>,
-        timeline: AliveTimeline<'_, 'a1, 'a0, LayerRenderableState<L>, CollapsedTimelineState<M>>,
-    ) -> AliveTimeline<
-        'a2,
-        'a1,
-        'a0,
-        LayerRenderableState<L>,
-        CollapsedTimelineState<Self::OutputMobject>,
-    >;
+        world: &'a W,
+        mobject: Alive<'a, W, CollapsedTimelineState<M>>,
+    ) -> Alive<'a, W, CollapsedTimelineState<Self::OutputMobject>>
+    where
+        W: World;
 }
 
 // pub trait SerdeMobject: serde_traitobject::Deserialize + serde_traitobject::Serialize {}
@@ -116,6 +114,14 @@ where
 
 pub trait Render {
     fn render(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView);
+}
+
+pub trait SerializableKeyFn: 'static + Debug + Send + Sync {
+    type Output: Clone + Eq + Hash + Send + Sync;
+
+    fn eval_key<S>(serializable: &S) -> Self::Output
+    where
+        S: serde::Serialize;
 }
 
 // pub trait LayerBuilder {
