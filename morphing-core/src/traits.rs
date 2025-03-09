@@ -1,6 +1,8 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 
+use crate::storable::StorageTypeMap;
+
 use super::config::Config;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
@@ -113,7 +115,12 @@ where
 // }
 
 pub trait Render {
-    fn render(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView);
+    fn render(
+        &self,
+        storage_type_map: &StorageTypeMap,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+    );
 }
 
 pub trait SerializableKeyFn: 'static + Debug + Send + Sync {

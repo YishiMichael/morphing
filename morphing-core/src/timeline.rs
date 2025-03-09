@@ -1,4 +1,5 @@
-use std::borrow::Borrow;
+use std::any::Any;
+use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -7,21 +8,20 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::rc::Weak;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::RwLock;
 
 use serde::Deserialize;
 use serde::Serialize;
 
 use super::config::Config;
-use super::storable::Allocated;
-use super::storable::MutexSlot;
 use super::storable::SharableSlot;
 use super::storable::Slot;
+use super::storable::SlotKeyGenerator;
 use super::storable::SlotKeyGeneratorTypeMap;
 use super::storable::Storable;
+use super::storable::StorageKey;
 use super::storable::StorageTypeMap;
 use super::storable::SwapSlot;
+use super::storable::VecSlot;
 use super::traits::Construct;
 use super::traits::IncreasingRate;
 use super::traits::Mobject;
@@ -87,42 +87,68 @@ use super::traits::Update;
 
 pub type Time = f32;
 
-pub enum PresentationCell<P> {
-    Sharable(Arc<P>),
-    Mutex(Arc<Mutex<P>>),
+pub enum PresentationKey<MP, SKF>
+where
+    MP: 'static + Send + Sync,
+    SKF: SerializableKeyFn,
+{
+    Static(
+        Arc<StorageKey<
+            (TypeId, SKF::Output),
+            <<SwapSlot<SharableSlot<MP>> as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        >>,
+    ),
+    Dynamic(
+        Arc<StorageKey<
+            (TypeId, SKF::Output, TypeId, SKF::Output),
+            <<SwapSlot<VecSlot<MP>> as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        >>,
+    ),
 }
 
-impl<P> AsRef<P> for PresentationCell<P> {
-    fn as_ref(&self) -> &P {
+impl<MP, SKF> PresentationKey<MP, SKF>
+where
+    MP: 'static + Send + Sync,
+    SKF: SerializableKeyFn,
+{
+    fn read<'mp>(&self, storage_type_map: &'mp StorageTypeMap) -> &'mp MP {
         match self {
-            Self::Sharable(presentation) => &presentation,
-            Self::Mutex(presentation) => &presentation.lock().unwrap(),
+            Self::Static(key) => storage_type_map
+                .get::<_, SwapSlot<SharableSlot<MP>>>(key)
+                .as_ref()
+                .unwrap(),
+            Self::Dynamic(key) => storage_type_map
+                .get::<_, SwapSlot<VecSlot<MP>>>(key)
+                .as_ref()
+                .unwrap(),
         }
     }
-} // TODO
+}
 
-trait Timeline: 'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
-where
-    Box<Self>: Storable,
+trait Timeline:
+    'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize + Storable
 {
-    type MobjectPresentation;
+    type MobjectPresentation: Send + Sync;
+    type SerializableKeyFn: SerializableKeyFn;
     // type SerdeKey: 'static + Eq + Hash + Send + Sync;
     // type MobjectPresentationStorage: PresentationStorage;
 
     // fn serde_key(&self) -> Self::SerdeKey;
-    fn init_presentation(
+    fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value;
+    fn erase_presentation_key(
         &self,
-        device: &wgpu::Device,
-    ) -> <<Box<Self> as Storable>::Slot as Slot>::Value;
-    fn fetch_presentation(
-        &self,
-        mobject_presentation: &<<Box<Self> as Storable>::Slot as Slot>::Value,
-    ) -> PresentationCell<Self::MobjectPresentation>;
+        mobject_presentation_key: Arc<
+            StorageKey<
+                Self::StorableKey,
+                <<Self::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+            >,
+        >,
+    ) -> PresentationKey<Self::MobjectPresentation, Self::SerializableKeyFn>;
     fn prepare_presentation(
         &self,
         time: Time,
         time_interval: Range<Time>,
-        mobject_presentation: &mut <<Box<Self> as Storable>::Slot as Slot>::Value,
+        mobject_presentation: &mut <Self::Slot as Slot>::Value,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -179,16 +205,16 @@ struct StaticTimeline<M, SKF> {
     phantom: PhantomData<SKF>,
 }
 
-impl<M, SKF> Storable for Box<StaticTimeline<M, SKF>>
+impl<M, SKF> Storable for StaticTimeline<M, SKF>
 where
     M: Mobject,
     SKF: SerializableKeyFn,
 {
-    type StorableKey = SKF::Output;
+    type StorableKey = (TypeId, SKF::Output);
     type Slot = SwapSlot<SharableSlot<M::MobjectPresentation>>;
 
     fn key(&self) -> Self::StorableKey {
-        SKF::eval_key(&self.mobject)
+        (self.mobject.type_id(), SKF::eval_key(&self.mobject))
     }
 
     // type PresentationStorage = MapStorage<
@@ -211,34 +237,35 @@ where
     M: Mobject,
     SKF: SerializableKeyFn,
 {
+    type MobjectPresentation = M::MobjectPresentation;
+    type SerializableKeyFn = SKF;
     // type SerdeKey = serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>;
     // type MobjectPresentationStorage = ;
 
     // fn serde_key(&self) -> Self::SerdeKey {
     //     serde_hashkey::to_key_with_ordered_float(self.mobject.as_ref()).unwrap()
     // }
-
-    type MobjectPresentation = M::MobjectPresentation;
-
-    fn init_presentation(
-        &self,
-        device: &wgpu::Device,
-    ) -> <<Box<Self> as Storable>::Slot as Slot>::Value {
+    fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value {
         Arc::new(self.mobject.presentation(device))
     }
 
-    fn fetch_presentation(
+    fn erase_presentation_key(
         &self,
-        mobject_presentation: &<<Box<Self> as Storable>::Slot as Slot>::Value,
-    ) -> PresentationCell<Self::MobjectPresentation> {
-        PresentationCell::Sharable(mobject_presentation.clone())
+        mobject_presentation_key: Arc<
+            StorageKey<
+                Self::StorableKey,
+                <<Self::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+            >,
+        >,
+    ) -> PresentationKey<Self::MobjectPresentation, Self::SerializableKeyFn> {
+        PresentationKey::Static(mobject_presentation_key)
     }
 
     fn prepare_presentation(
         &self,
         _time: Time,
         _time_interval: Range<Time>,
-        _mobject_presentation: &mut <<Box<Self> as Storable>::Slot as Slot>::Value,
+        _mobject_presentation: &mut <Self::Slot as Slot>::Value,
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
@@ -309,18 +336,23 @@ struct DynamicTimeline<M, TE, U, SKF> {
     phantom: PhantomData<SKF>,
 }
 
-impl<M, TE, U, SKF> Storable for Box<DynamicTimeline<M, TE, U, SKF>>
+impl<M, TE, U, SKF> Storable for DynamicTimeline<M, TE, U, SKF>
 where
     M: Mobject,
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, M>,
     SKF: SerializableKeyFn,
 {
-    type StorableKey = (SKF::Output, SKF::Output);
-    type Slot = SwapSlot<MutexSlot<M::MobjectPresentation>>;
+    type StorableKey = (TypeId, SKF::Output, TypeId, SKF::Output);
+    type Slot = SwapSlot<VecSlot<M::MobjectPresentation>>;
 
     fn key(&self) -> Self::StorableKey {
-        (SKF::eval_key(&self.mobject), SKF::eval_key(&self.update))
+        (
+            self.mobject.type_id(),
+            SKF::eval_key(&self.mobject),
+            self.update.type_id(),
+            SKF::eval_key(&self.update),
+        )
     }
 
     // type PresentationStorage = MapStorage<
@@ -369,28 +401,30 @@ where
     //         serde_hashkey::to_key_with_ordered_float(self.update.as_ref()).unwrap(),
     //     )
     // }
-
     type MobjectPresentation = M::MobjectPresentation;
+    type SerializableKeyFn = SKF;
 
-    fn init_presentation(
-        &self,
-        device: &wgpu::Device,
-    ) -> <<Box<Self> as Storable>::Slot as Slot>::Value {
-        Arc::new(Mutex::new(self.mobject.presentation(device)))
+    fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value {
+        self.mobject.presentation(device)
     }
 
-    fn fetch_presentation(
+    fn erase_presentation_key(
         &self,
-        mobject_presentation: &<<Box<Self> as Storable>::Slot as Slot>::Value,
-    ) -> PresentationCell<Self::MobjectPresentation> {
-        PresentationCell::Mutex(mobject_presentation.clone())
+        mobject_presentation_key: Arc<
+            StorageKey<
+                Self::StorableKey,
+                <<Self::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+            >,
+        >,
+    ) -> PresentationKey<Self::MobjectPresentation, Self::SerializableKeyFn> {
+        PresentationKey::Dynamic(mobject_presentation_key)
     }
 
     fn prepare_presentation(
         &self,
         time: Time,
         time_interval: Range<Time>,
-        mobject_presentation: &mut <<Box<Self> as Storable>::Slot as Slot>::Value,
+        mobject_presentation: &mut <Self::Slot as Slot>::Value,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -398,7 +432,7 @@ where
         self.update.prepare_presentation(
             self.time_eval.time_eval(time, time_interval),
             &self.mobject,
-            mobject_presentation.as_ref().lock().as_mut().unwrap(),
+            mobject_presentation,
             device,
             queue,
             format,
@@ -471,39 +505,33 @@ where
 //     }
 // }
 
-pub trait PreallocatedTimeline:
-    serde_traitobject::Deserialize + serde_traitobject::Serialize
-{
+// #[derive(Deserialize, Serialize)]
+// struct Preallocated<T>
+// where
+//     T: Timeline,
+// {
+//     timeline: T,
+// }
+
+pub trait TimelineErasure: serde_traitobject::Deserialize + serde_traitobject::Serialize {
     type MobjectPresentation;
+    type SerializableKeyFn;
 
     fn allocate(
         self: Box<Self>,
         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Box<dyn AllocatedTimeline<MobjectPresentation = Self::MobjectPresentation>>;
+    ) -> Box<
+        dyn TimelineAllocatedErasure<
+            MobjectPresentation = Self::MobjectPresentation,
+            SerializableKeyFn = Self::SerializableKeyFn,
+        >,
+    >;
 }
 
-impl<T> PreallocatedTimeline for T
-where
-    T: Timeline,
-    Box<T>: Storable,
-{
-    type MobjectPresentation = T::MobjectPresentation;
-
-    fn allocate(
-        self: Box<Self>,
-        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Box<dyn AllocatedTimeline<MobjectPresentation = Self::MobjectPresentation>> {
-        Box::new(slot_key_generator_type_map.allocate(self))
-    }
-}
-
-pub trait AllocatedTimeline {
+pub trait TimelineAllocatedErasure {
     type MobjectPresentation;
+    type SerializableKeyFn;
 
-    // fn fetch_presentation(
-    //     &self,
-    //     storage_type_map: &StorageTypeMap,
-    // ) -> PresentationCell<Self::MobjectPresentation>;
     fn prepare(
         &self,
         time: Time,
@@ -512,13 +540,48 @@ pub trait AllocatedTimeline {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> PresentationCell<Self::MobjectPresentation>;
+    ) -> Option<Arc<PresentationKey<Self::MobjectPresentation, Self::SerializableKeyFn>>>;
 }
 
-impl<T> AllocatedTimeline for Allocated<Box<T>>
+struct TimelineAllocated<T>
 where
     T: Timeline,
-    Box<T>: Storable,
+{
+    storage_key: Arc<
+        StorageKey<
+            T::StorableKey,
+            <<T::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        >,
+    >,
+    timeline: T,
+}
+
+impl<T> TimelineErasure for T
+where
+    T: Timeline,
+{
+    type MobjectPresentation = T::MobjectPresentation;
+    type SerializableKeyFn = T::SerializableKeyFn;
+
+    fn allocate(
+        self: Box<Self>,
+        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Box<
+        dyn TimelineAllocatedErasure<
+            MobjectPresentation = Self::MobjectPresentation,
+            SerializableKeyFn = Self::SerializableKeyFn,
+        >,
+    > {
+        Box::new(TimelineAllocated {
+            storage_key: Arc::new(slot_key_generator_type_map.allocate(&self)),
+            timeline: self.timeline,
+        })
+    }
+}
+
+impl<T> TimelineAllocatedErasure for TimelineAllocated<T>
+where
+    T: Timeline,
 {
     // fn fetch_presentation(
     //     &self,
@@ -529,6 +592,7 @@ where
     // }
 
     type MobjectPresentation = T::MobjectPresentation;
+    type SerializableKeyFn = T::SerializableKeyFn;
 
     fn prepare(
         &self,
@@ -538,10 +602,12 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> PresentationCell<Self::MobjectPresentation> {
+    ) -> Arc<PresentationKey<Self::MobjectPresentation, Self::SerializableKeyFn>> {
         let mobject_presentation = storage_type_map
-            .get_or_insert_with(self, |storable| storable.init_presentation(device));
-        self.storable().prepare_presentation(
+            .get_or_insert_with::<_, T::Slot, _>(self.storage_key, || {
+                self.timeline.init_presentation(device)
+            });
+        self.timeline.prepare_presentation(
             time,
             time_interval,
             mobject_presentation,
@@ -549,38 +615,216 @@ where
             queue,
             format,
         );
-        self.storable().fetch_presentation(mobject_presentation)
+        self.timeline
+            .erase_presentation_key(self.storage_key.clone())
     }
 }
 
-#[derive(Deserialize, Serialize)]
-pub struct PreallocatedTimelineEntry<MP>
-where
-    MP: 'static,
-{
-    time_interval: Range<Time>,
-    timeline: serde_traitobject::Box<dyn PreallocatedTimeline<MobjectPresentation = MP>>,
+pub trait Node {
+    // type SerializableKeyFn: SerializableKeyFn;
+    type Attachment<'s, W>
+    where
+        Self: 's;
+
+    fn new() -> Self;
+    fn merge<TE>(
+        &mut self,
+        child: Self,
+        time_interval: &Range<Time>,
+        time_eval: &TE,
+        child_time_interval: &Range<Time>,
+    ) where
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
+    fn attachment<W>(&self, context: &Context<W>) -> Self::Attachment<'_, W>;
 }
 
-pub struct AllocatedTimelineEntry<MP> {
-    time_interval: Range<Time>,
-    timeline: Box<dyn AllocatedTimeline<MobjectPresentation = MP>>,
-}
+pub trait ChannelErasure: Node {
+    type MobjectPresentation;
+    type SerializableKeyFn;
 
-impl<MP> PreallocatedTimelineEntry<MP> {
     fn allocate(
-        self,
+        self: Self,
         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> AllocatedTimelineEntry<MP> {
-        AllocatedTimelineEntry {
-            time_interval: self.time_interval,
-            timeline: self
-                .timeline
-                .into_box()
-                .allocate(slot_key_generator_type_map),
+    ) -> ChannelAllocated<Self::MobjectPresentation, Self::SerializableKeyFn>;
+}
+
+pub trait ChannelAllocatedErasure {
+    type MobjectPresentation;
+    type SerializableKeyFn;
+
+    fn prepare(
+        &self,
+        time: Time,
+        storage_type_map: &mut StorageTypeMap,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Vec<Arc<PresentationKey<Self::MobjectPresentation, Self::SerializableKeyFn>>>;
+}
+
+pub trait LayerErasure: Node {
+    type SerializableKeyFn;
+}
+pub trait WorldErasure: Node {
+    type SerializableKeyFn;
+}
+
+struct Channel<MP, SKF>(
+    Vec<(
+        Range<Time>,
+        Box<dyn TimelineErasure<MobjectPresentation = MP, SerializableKeyFn = SKF>>,
+    )>,
+);
+
+struct ChannelAttachment<'c, W, MP>
+where
+    W: WorldErasure,
+{
+    context: &'c Context<'c, W>,
+    channel: &'c Channel<MP, W::SerializableKeyFn>,
+}
+
+impl<MP, SKF> Node for Channel<MP, SKF> {
+    type Attachment<'c, W> = ChannelAttachment<'c, W, MP, SKF>
+    where
+        Self: 'c;
+
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    fn merge<TE>(
+        &mut self,
+        child: Self,
+        time_interval: &Range<Time>,
+        time_eval: &TE,
+        child_time_interval: &Range<Time>,
+    ) where
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+    {
+        self.0
+            .extend(child.0.into_iter().map(|(entry_time_interval, timeline)| {
+                (
+                    time_interval.start
+                        + (time_interval.end - time_interval.start)
+                            * *time_eval
+                                .time_eval(entry_time_interval.start, child_time_interval.clone())
+                        ..time_interval.start
+                            + (time_interval.end - time_interval.start)
+                                * *time_eval.time_eval(
+                                    entry_time_interval.end,
+                                    child_time_interval.clone(),
+                                ),
+                    timeline,
+                )
+            }));
+    }
+
+    fn attachment<W>(&self, context: &Context<W>) -> Self::Attachment<'_, W> {
+        ChannelAttachment {
+            context,
+            channel: self,
         }
     }
 }
+
+impl<MP, SKF> ChannelErasure for Channel<MP, SKF> {
+    type MobjectPresentation = MP;
+    type SerializableKeyFn = SKF;
+
+    fn allocate(
+        self: Self,
+        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> ChannelAllocated<Self::MobjectPresentation, Self::SerializableKeyFn> {
+        ChannelAllocated(
+            self.0
+                .into_iter()
+                .map(|timeline| timeline.allocate(slot_key_generator_type_map)),
+        )
+    }
+}
+
+struct ChannelAllocated<MP, SKF>(
+    Vec<(
+        Range<Time>,
+        Box<dyn TimelineAllocatedErasure<MobjectPresentation = MP, SerializableKeyFn = SKF>>,
+    )>,
+);
+
+impl<MP, SKF> ChannelAllocatedErasure for ChannelAllocated<MP, SKF> {
+    type MobjectPresentation = MP;
+    type SerializableKeyFn = SKF;
+
+    fn prepare(
+        &self,
+        time: Time,
+        storage_type_map: &mut StorageTypeMap,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Vec<Arc<PresentationKey<Self::MobjectPresentation, Self::SerializableKeyFn>>> {
+        self.0
+            .iter()
+            .filter_map(|timeline| timeline.prepare(time, storage_type_map, device, queue, format))
+            .collect()
+    }
+}
+
+impl<W, MP, SKF> ChannelAttachment<'_, W, MP, SKF> {
+    fn start<TS>(&self, timeline_state: TS) -> Alive<W, TS>
+    where
+        TS: TimelineState<MobjectPresentation = MP>,
+    {
+        Alive {
+            channel_attachment: self,
+            // index: usize,
+            spawn_time: self.context.timer.time(),
+            timeline_state: Some(timeline_state),
+        }
+    }
+
+    #[must_use]
+    pub fn spawn<M>(&self, mobject: M) -> Alive<W, CollapsedTimelineState<M>>
+    where
+        M: Mobject<MobjectPresentation = MP>,
+    {
+        self.start(CollapsedTimelineState {
+            mobject: Arc::new(mobject),
+        })
+    }
+}
+
+// #[derive(Deserialize, Serialize)]
+// pub struct PreallocatedTimelineEntry<MP, SKF>
+// where
+//     MP: 'static,
+//     SKF: 'static,
+// {
+//     time_interval: Range<Time>,
+//     timeline: serde_traitobject::Box<
+//         dyn PreallocatedTimeline<MobjectPresentation = MP, SerializableKeyFn = SKF>,
+//     >,
+// }
+
+// pub struct AllocatedTimelineEntry<MP, SKF> {
+//     time_interval: Range<Time>,
+//     timeline: Box<dyn AllocatedTimeline<MobjectPresentation = MP, SerializableKeyFn = SKF>>,
+// }
+
+// impl<MP, SKF> PreallocatedTimelineEntry<MP, SKF> {
+//     fn allocate(
+//         self,
+//         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+//     ) -> AllocatedTimelineEntry<MP, SKF> {
+//         AllocatedTimelineEntry {
+//             time_interval: self.time_interval,
+//             timeline: self
+//                 .timeline
+//                 .into_box()
+//                 .allocate(slot_key_generator_type_map),
+//         }
+//     }
+// }
 
 // struct TimelineEntriesSink<'v>(Option<&'v mut Vec<WithTimeInterval<Box<dyn AllocatedTimeline>>>>);
 
@@ -599,42 +843,106 @@ impl<MP> PreallocatedTimelineEntry<MP> {
 //     fn flush_timelines(
 //         &mut self,
 //         time_interval: Range<Time>,
-//     ) -> Vec<WithTimeInterval<Box<dyn TimelineErased>>>;
+//     ) -> Vec<WithTimeInterval<Box<dyn TimelineErasure>>>;
 // }
 
-#[derive(Default)]
 pub struct Timer {
-    time: RefCell<Time>,
+    time: RefCell<Rc<Time>>,
 }
 
 impl Timer {
-    fn time(&self) -> Time {
-        *self.time.borrow()
+    fn new() -> Self {
+        Self {
+            time: RefCell::new(Rc::new(0.0)),
+        }
+    }
+
+    fn time(&self) -> Rc<Time> {
+        self.time.borrow().clone()
     }
 
     pub fn wait(&self, time: Time) {
-        self.time.replace_with(|time_ref| *time_ref + time);
+        self.time.replace_with(|rc_time| Rc::new(**rc_time + time));
     }
 }
 
-#[derive(Default)]
-struct TimerStack(RefCell<nonempty::NonEmpty<Timer>>);
-
-impl TimerStack {
-    fn time(&self) -> Time {
-        self.0.borrow().last().time()
-    }
-
-    fn grow_stack(&mut self) {
-        self.0.borrow_mut().push(Timer::default());
-    }
-
-    fn shrink_stack(&mut self) {
-        self.0.borrow_mut().push(Timer {
-            time: RefCell::new(0.0),
-        });
-    }
+struct Context<'c, W> {
+    config: &'c Config,
+    timer: Timer,
+    world: W,
 }
+
+impl<W> Context<'_, W>
+where
+    W: WorldErasure,
+{
+    fn new(config: &Config) -> Self {
+        Self {
+            config,
+            timer: Timer::new(),
+            world: W::new(),
+        }
+    }
+
+    // fn balance<F>(&self, f: F) where F: FnOnce(&Config, &Timer, &W) {
+    //     let timer = Timer::new();
+    //     let world = W::new();
+    //     f(&self.config, &timer, &world);
+    //     self.world.merge(world, time_interval, time_eval);
+    // }
+
+    // fn grow_stack(&self) -> &(Timer, W) {
+    //     self.timer_world_stack.borrow_mut().push((
+    //         Timer::new(),
+    //         W::new(),
+    //     ));
+    //     self.timer_world_stack.borrow()
+    // }
+
+    // fn shrink_stack<TE>(&self, time_interval: &Range<Time>, time_eval: &TE)
+    // where
+    //     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+    // {
+    //     let mut timer_world_stack = self.timer_world_stack.borrow_mut();
+    //     let (timer, world) = timer_world_stack.pop().unwrap();
+    //     timer_world_stack.last_mut().1.shrink_stack(time_interval, time_eval, &0.0..timer.time());
+    // }
+
+    // fn collect(self) -> Vec<PreallocatedTimelineEntry<MP>> {
+    //     let timer_world_stack = self.timer_world_stack.into_inner();
+    //     assert!(timer_world_stack.tail.is_empty());
+    //     timer_world_stack.head
+    // }
+
+    // fn timer_world_ref(&self) -> &(Timer, W) {
+    //     self.timer_world_stack.borrow().last()
+    // }
+
+    // fn timer_world_mut(&self) -> &mut (Timer, W) {
+    //     self.timer_world_stack.borrow_mut().last_mut()
+    // }
+}
+
+// #[derive(Default)]
+// struct TimerStack(RefCell<nonempty::NonEmpty<Timer>>);
+
+// impl TimerStack {
+//     fn time(&self) -> Time {
+//         self.0.borrow().last().time()
+//     }
+
+//     fn grow_stack(&mut self) {
+//         self.0.borrow_mut().push(Timer::default());
+//     }
+
+//     fn shrink_stack(&mut self) {
+//         self.0.borrow_mut().push(Timer {
+//             time: RefCell::new(Rc::new(0.0)),
+//         });
+//     }
+// }
+
+// struct Channel(Vec<>)
 
 pub struct LayerField<'lf, W, MP>
 where
@@ -750,51 +1058,40 @@ where
     }
 }
 
-pub trait Layer {
-    type LayerPreallocated: LayerPreallocated;
+// pub trait LayerEntry: serde_traitobject::Deserialize + serde_traitobject::Serialize {
+//     fn new(config: &Config, timer_stack: &TimerStack) -> Self;
+//     fn merge<TE>(&mut self, laye_entry: Self, time_interval: Range<Time>, time_eval: &TE)
+//     where
+//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
+//     fn prepare(
+//         &self,
+//         time: Time,
+//         storage_type_map: &mut StorageTypeMap,
+//         device: &wgpu::Device,
+//         queue: &wgpu::Queue,
+//         format: wgpu::TextureFormat,
+//     ) -> Box<dyn Render>;
+// }
 
-    fn new<W>(config: &Config, timer_stack: &TimerStack, world: Weak<W>) -> Self
-    where
-        W: World;
-    fn grow_stack(&self);
-    fn shrink_stack<TE>(&self, time_interval: Range<Time>, time_eval: &TE)
-    where
-        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-    fn collect(self) -> Self::LayerPreallocated;
-}
+// pub trait World {
+//     type SerializableKeyFn: SerializableKeyFn;
 
-pub trait LayerPreallocated: serde_traitobject::Deserialize + serde_traitobject::Serialize {
-    // type LayerAllocated: LayerAllocated;
+//     fn new(config: &Config, timer_stack: &TimerStack) -> Rc<Self>;
+//     fn grow_stack(&self);
+//     fn shrink_stack<TE>(&self, time_interval: Range<Time>, time_eval: &TE)
+//     where
+//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
+//     fn collect(self) -> Vec<Box<dyn LayerPreallocated>>;
+// }
 
-    fn allocate(
-        self,
-        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Box<dyn LayerAllocated>;
-}
-
-pub trait LayerAllocated {
-    // type LayerRender: Render;
-
-    fn prepare(
-        &self,
-        time: Time,
-        storage_type_map: &mut StorageTypeMap,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Box<dyn Render>;
-    // fn render()
-}
-
-pub trait World {
+pub trait WorldEntry {
     type SerializableKeyFn: SerializableKeyFn;
 
-    fn new(config: &Config, timer_stack: &TimerStack) -> Rc<Self>;
-    fn grow_stack(&self);
-    fn shrink_stack<TE>(&self, time_interval: Range<Time>, time_eval: &TE)
+    fn new(config: &Config, timer_stack: &TimerStack) -> Self;
+    fn merge<TE>(&mut self, world_entry: Self, time_interval: Range<Time>, time_eval: &TE)
     where
         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-    fn collect(self) -> Vec<Box<dyn LayerPreallocated>>;
+    fn collect(self) -> Vec<Box<dyn LayerEntry>>;
 }
 
 // test code
@@ -821,8 +1118,8 @@ struct MyLayerAllocated {
 }
 
 struct MyLayerRender {
-    field_0: Vec<PresentationCell<MyMobjectPresentation0>>,
-    field_1: Vec<PresentationCell<MyMobjectPresentation1>>,
+    field_0: Vec<PresentationKey<MyMobjectPresentation0>>,
+    field_1: Vec<PresentationKey<MyMobjectPresentation1>>,
 }
 
 impl Layer for MyLayer<'_> {
@@ -926,7 +1223,13 @@ impl LayerAllocated for MyLayerAllocated {
 }
 
 impl Render for MyLayerRender {
-    fn render(&self, _encoder: &mut wgpu::CommandEncoder, _target: &wgpu::TextureView) {}
+    fn render(
+        &self,
+        _storage_type_map: &StorageTypeMap,
+        _encoder: &mut wgpu::CommandEncoder,
+        _target: &wgpu::TextureView,
+    ) {
+    }
 }
 
 struct MyWorld<'w> {
@@ -985,7 +1288,7 @@ where
     TS: TimelineState,
 {
     layer_field: &'lf LayerField<'lf, W, TS::MobjectPresentation>,
-    spawn_time: Time,
+    spawn_time: Rc<Time>,
     timeline_state: Option<TS>,
 }
 
