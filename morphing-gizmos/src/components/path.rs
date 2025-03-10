@@ -1,3 +1,4 @@
+use core::range::IterRangeFrom;
 use std::sync::Mutex;
 
 use itertools::Itertools;
@@ -265,10 +266,14 @@ pub struct ManipulatorGroupId(usize);
 
 impl bezier_rs::Identifier for ManipulatorGroupId {
     fn new() -> Self {
-        let mut counter_ref = MANIPULATOR_GROUP_ID_COUNTER.lock().unwrap();
-        *counter_ref += 1;
-        Self(*counter_ref)
+        Self(
+            MANIPULATOR_GROUP_ID_GENERATOR
+                .lock()
+                .unwrap()
+                .next()
+                .unwrap(),
+        )
     }
 }
 
-static MANIPULATOR_GROUP_ID_COUNTER: Mutex<usize> = Mutex::new(0);
+static MANIPULATOR_GROUP_ID_GENERATOR: Mutex<IterRangeFrom<usize>> = Mutex::new((0..).into_iter());

@@ -1,3 +1,5 @@
+#![feature(new_range_api)]
+
 use morphing_core::config::ConfigFallbackContent;
 
 pub mod components;

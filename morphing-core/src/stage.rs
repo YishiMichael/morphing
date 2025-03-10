@@ -1,328 +1,399 @@
+use core::range::Range;
 use std::cell::RefCell;
-use std::ops::Range;
+use std::marker::PhantomData;
 
-use super::animation::AnimationAllocatedErasure;
-use super::animation::AnimationErasure;
-use super::animation::IncreasingTimeEval;
-use super::animation::Node;
-use super::animation::NormalizedTimeMetric;
-use super::animation::PresentationKey;
-use super::animation::Time;
+use super::config::Config;
 use super::storable::SlotKeyGeneratorTypeMap;
 use super::storable::StorageTypeMap;
+use super::timeline::IncreasingTimeEval;
+use super::timeline::Node;
+use super::timeline::NormalizedTimeMetric;
+use super::timeline::PresentationKey;
+use super::timeline::Time;
+use super::timeline::TimelineAllocationErasure;
+use super::timeline::TimelineErasure;
+use super::timeline::Timer;
 use super::traits::StorableKeyFn;
 
-pub trait Cell {
-    type Attached<SKF>
+pub trait Channel {
+    type Architecture<SKF, const LI: usize, const CI: usize>
     where
         SKF: StorableKeyFn;
-    type Archived<SKF>
+    type Archive<SKF>
     where
         SKF: StorableKeyFn;
-    type Allocated<SKF>
+    type Allocation<SKF>
     where
         SKF: StorableKeyFn;
-    type Attachment<'c, C, SKF>
+    type Prepare<SKF>
+    where
+        SKF: StorableKeyFn;
+    type Attachment<'c, W, L, C>
     where
         Self: 'c,
-        C: 'c,
-        SKF: StorableKeyFn;
+        W: 'c,
+        L: 'c,
+        C: 'c;
 
-    fn new<SKF>() -> Self::Attached<SKF>
+    fn architecture<SKF, const LI: usize, const CI: usize>() -> Self::Architecture<SKF, LI, CI>
     where
         SKF: StorableKeyFn;
-    fn attachment<'c, C, SKF>(
-        this: &'c Self::Attached<SKF>,
-        context: &'c C,
-    ) -> Self::Attachment<'c, C, SKF>
-    where
-        SKF: StorableKeyFn;
-    fn archive<SKF>(this: Self::Attached<SKF>) -> Self::Archived<SKF>
-    where
-        SKF: StorableKeyFn;
-    fn allocate<SKF>(
-        this: Self::Archived<SKF>,
-        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Self::Allocated<SKF>
-    where
-        SKF: StorableKeyFn;
-}
-
-pub trait Merge: Cell {
-    fn merge<SKF, TE>(
-        this: &mut Self::Attached<SKF>,
-        child: Self::Attached<SKF>,
-        time_interval: &Range<Time>,
+    fn merge<TE, SKF, const LI: usize, const CI: usize>(
+        architecture: &mut Self::Architecture<SKF, LI, CI>,
+        archive: Self::Archive<SKF>,
+        alive_id: usize,
         time_eval: &TE,
-        child_time_interval: &Range<Time>,
+        parent_time_interval: Range<Time>,
+        child_time_interval: Range<Time>,
     ) where
-        SKF: StorableKeyFn,
-        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-}
-
-pub trait Prepare: Cell {
-    type Prepared<SKF>
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+        SKF: StorableKeyFn;
+    fn archive<SKF, const LI: usize, const CI: usize>(
+        architecture: Self::Architecture<SKF, LI, CI>,
+    ) -> Self::Archive<SKF>
     where
         SKF: StorableKeyFn;
-
+    fn allocation<SKF>(
+        archive: Self::Archive<SKF>,
+        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::Allocation<SKF>
+    where
+        SKF: StorableKeyFn;
     fn prepare<SKF>(
-        this: &Self::Allocated<SKF>,
+        allocation: &Self::Allocation<SKF>,
         time: Time,
         storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> Self::Prepared<SKF>
+    ) -> Self::Prepare<SKF>
+    where
+        SKF: StorableKeyFn;
+    fn attachment<'c, W, L, SKF, const LI: usize, const CI: usize>(
+        architecture: &'c Self::Architecture<SKF, LI, CI>,
+        config: &Config,
+        timer: &Timer,
+        world: &W,
+        layer: &L,
+    ) -> Self::Attachment<'c, W, L, Self::Architecture<SKF, LI, CI>>
     where
         SKF: StorableKeyFn;
 }
 
-pub trait Render: Prepare {
+pub trait Layer {
+    type Architecture<SKF, const LI: usize>
+    where
+        SKF: StorableKeyFn;
+    type Archive<SKF>
+    where
+        SKF: StorableKeyFn;
+    type Allocation<SKF>
+    where
+        SKF: StorableKeyFn;
+    type Prepare<SKF>
+    where
+        SKF: StorableKeyFn;
+    type Attachment<'l, W, L>
+    where
+        Self: 'l,
+        W: 'l,
+        L: 'l;
+
+    fn architecture<SKF, const LI: usize>() -> Self::Architecture<SKF, LI>
+    where
+        SKF: StorableKeyFn;
+    fn merge<TE, SKF, const LI: usize>(
+        architecture: &mut Self::Architecture<SKF, LI>,
+        archive: Self::Archive<SKF>,
+        alive_id: usize,
+        time_eval: &TE,
+        parent_time_interval: Range<Time>,
+        child_time_interval: Range<Time>,
+    ) where
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+        SKF: StorableKeyFn;
+    fn archive<SKF, const LI: usize>(
+        architecture: Self::Architecture<SKF, LI>,
+    ) -> Self::Archive<SKF>
+    where
+        SKF: StorableKeyFn;
+    fn allocation<SKF>(
+        archive: Self::Archive<SKF>,
+        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::Allocation<SKF>
+    where
+        SKF: StorableKeyFn;
+    fn prepare<SKF>(
+        allocation: &Self::Allocation<SKF>,
+        time: Time,
+        storage_type_map: &mut StorageTypeMap,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Self::Prepare<SKF>
+    where
+        SKF: StorableKeyFn;
     fn render<SKF>(
-        this: &Self::Prepared<SKF>,
+        prepare: &Self::Prepare<SKF>,
         storage_type_map: &StorageTypeMap,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
     ) where
         SKF: StorableKeyFn;
-}
-
-pub trait Layer: Render {}
-
-pub trait World: Render {}
-
-struct Timeline<MP>(MP);
-
-impl<MP> Cell for Timeline<MP>
-where
-    MP: 'static + Send + Sync,
-{
-    type Attached<SKF> = RefCell<
-        Option<(
-            Range<Time>,
-            Node<Box<dyn AnimationErasure<SKF, MobjectPresentation = MP>>>,
-        )>,
-    > where SKF: StorableKeyFn;
-    type Archived<SKF> = (
-        Range<Time>,
-        Node<Box<dyn AnimationErasure<SKF, MobjectPresentation = MP>>>,
-    ) where SKF: StorableKeyFn;
-    type Allocated<SKF> = (
-        Range<Time>,
-        Node<Box<dyn AnimationAllocatedErasure<SKF, MobjectPresentation = MP>>>,
-    ) where SKF: StorableKeyFn;
-    type Attachment<'c, C, SKF> = TimelineAttachment<'c, MP, C, SKF>
+    fn attachment<'l, W, SKF, const LI: usize>(
+        architecture: &'l Self::Architecture<SKF, LI>,
+        config: &Config,
+        timer: &Timer,
+        world: &W,
+    ) -> Self::Attachment<'l, W, Self::Architecture<SKF, LI>>
     where
-        Self: 'c,
-        C: 'c,
         SKF: StorableKeyFn;
-
-    fn new<SKF>() -> Self::Attached<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        RefCell::new(None)
-    }
-
-    fn attachment<'c, C, SKF>(
-        this: &'c Self::Attached<SKF>,
-        context: &'c C,
-    ) -> Self::Attachment<'c, C, SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        TimelineAttachment {
-            animation_entry: this,
-            context,
-        }
-    }
-
-    fn archive<SKF>(this: Self::Attached<SKF>) -> Self::Archived<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        this.into_inner().unwrap()
-    }
-
-    fn allocate<SKF>(
-        this: Self::Archived<SKF>,
-        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Self::Allocated<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        let (time_interval, animation_node) = this;
-        (
-            time_interval,
-            animation_node.map(|animation| animation.allocate(slot_key_generator_type_map)),
-        )
-    }
 }
 
-impl<MP> Prepare for Timeline<MP>
-where
-    MP: 'static + Send + Sync,
-{
-    type Prepared<SKF> = Option<Node<PresentationKey<SKF, MP>>> where SKF: StorableKeyFn;
+pub trait World {
+    type Architecture<SKF>
+    where
+        SKF: StorableKeyFn;
+    type Archive<SKF>
+    where
+        SKF: StorableKeyFn;
+    type Allocation<SKF>
+    where
+        SKF: StorableKeyFn;
+    type Prepare<SKF>
+    where
+        SKF: StorableKeyFn;
+    type Attachment<'w, W>
+    where
+        Self: 'w,
+        W: 'w;
 
+    fn architecture<SKF>() -> Self::Architecture<SKF>
+    where
+        SKF: StorableKeyFn;
+    fn merge<TE, SKF>(
+        architecture: &mut Self::Architecture<SKF>,
+        archive: Self::Archive<SKF>,
+        alive_id: usize,
+        time_eval: &TE,
+        parent_time_interval: Range<Time>,
+        child_time_interval: Range<Time>,
+    ) where
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+        SKF: StorableKeyFn;
+    fn archive<SKF>(architecture: Self::Architecture<SKF>) -> Self::Archive<SKF>
+    where
+        SKF: StorableKeyFn;
+    fn allocation<SKF>(
+        archive: Self::Archive<SKF>,
+        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::Allocation<SKF>
+    where
+        SKF: StorableKeyFn;
     fn prepare<SKF>(
-        this: &Self::Allocated<SKF>,
+        allocation: &Self::Allocation<SKF>,
         time: Time,
         storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> Self::Prepared<SKF>
+    ) -> Self::Prepare<SKF>
+    where
+        SKF: StorableKeyFn;
+    fn render<SKF>(
+        prepare: &Self::Prepare<SKF>,
+        storage_type_map: &StorageTypeMap,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+    ) where
+        SKF: StorableKeyFn;
+    fn attachment<'w, SKF>(
+        architecture: &'w Self::Architecture<SKF>,
+        config: &Config,
+        timer: &Timer,
+    ) -> Self::Attachment<'w, Self::Architecture<SKF>>
+    where
+        SKF: StorableKeyFn;
+}
+
+pub struct ChannelAttachment<'c, W, L, C, R> {
+    config: &'c Config,
+    timer: &'c Timer,
+    world: &'c W,
+    layer: &'c L,
+    channel: &'c C,
+    residue: R,
+}
+
+pub struct LayerAttachment<'c, W, L, R> {
+    config: &'c Config,
+    timer: &'c Timer,
+    world: &'c W,
+    layer: &'c L,
+    residue: R,
+}
+
+pub struct WorldAttachment<'c, W, R> {
+    config: &'c Config,
+    timer: &'c Timer,
+    world: &'c W,
+    residue: R,
+}
+
+pub struct PresentationChannel<MP>(MP);
+
+impl<MP> Channel for PresentationChannel<MP>
+where
+    MP: 'static + Send + Sync,
+{
+    type Architecture<SKF, const LI: usize, const CI: usize> = (
+        Vec<(
+            usize,
+            Node<(
+                Range<Time>,
+                Box<dyn TimelineErasure<SKF, MobjectPresentation = MP>>,
+            )>,
+        )>,
+        PhantomData<([(); LI], [(); CI])>,
+    )
+    where
+        SKF: StorableKeyFn;
+    type Archive<SKF> = Vec<(Range<Time>, Box<dyn TimelineErasure<SKF, MobjectPresentation = MP>>)>
+    where
+        SKF: StorableKeyFn;
+    type Allocation<SKF> = Vec<(Range<Time>, Box<dyn TimelineAllocationErasure<SKF, MobjectPresentation = MP>>)>
+    where
+        SKF: StorableKeyFn;
+    type Prepare<SKF> = Vec<PresentationKey<SKF, MP>>
+    where
+        SKF: StorableKeyFn;
+    type Attachment<'c, W, L, C> = ChannelAttachment<'c, W, L, C, ()>
+    where
+        Self: 'c,
+        W: 'c,
+        L: 'c,
+        C: 'c;
+
+    fn architecture<SKF, const LI: usize, const CI: usize>() -> Self::Architecture<SKF, LI, CI>
     where
         SKF: StorableKeyFn,
     {
-        let (time_interval, animation_node) = this;
-        time_interval.contains(&time).then(|| {
-            animation_node.map_ref(|animation| {
-                animation.prepare(
-                    time,
-                    time_interval.clone(),
-                    storage_type_map,
-                    device,
-                    queue,
-                    format,
-                )
-            })
+        (Vec::new(), PhantomData)
+    }
+
+    fn merge<TE, SKF, const LI: usize, const CI: usize>(
+        architecture: &mut Self::Architecture<SKF, LI, CI>,
+        archive: Self::Archive<SKF>,
+        alive_id: usize,
+        time_eval: &TE,
+        parent_time_interval: Range<Time>,
+        child_time_interval: Range<Time>,
+    ) where
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+        SKF: StorableKeyFn,
+    {
+        architecture.0.push((
+            alive_id,
+            Node::Multiton(
+                archive
+                    .into_iter()
+                    .map(|(time_interval, animation)| {
+                        (
+                            parent_time_interval.start
+                                + (parent_time_interval.end - parent_time_interval.start)
+                                    * *time_eval
+                                        .time_eval(time_interval.start, child_time_interval.clone())
+                                ..parent_time_interval.start
+                                    + (parent_time_interval.end - parent_time_interval.start)
+                                        * *time_eval.time_eval(
+                                            time_interval.end,
+                                            child_time_interval.clone(),
+                                        ),
+                            animation,
+                        )
+                    })
+                    .collect(),
+            ),
+        ));
+    }
+
+    fn archive<SKF, const LI: usize, const CI: usize>(
+        architecture: Self::Architecture<SKF, LI, CI>,
+    ) -> Self::Archive<SKF>
+    where
+        SKF: StorableKeyFn,
+    {
+        architecture.0.sort_by_key(|(alive_id, _)| alive_id);
+        architecture
+            .0
+            .into_iter()
+            .flat_map(|(_, timeline)| timeline)
+            .collect()
+    }
+
+    fn allocation<SKF>(
+        archive: Self::Archive<SKF>,
+        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::Allocation<SKF>
+    where
+        SKF: StorableKeyFn,
+    {
+        archive.into_iter().map(|(time_interval, timeline)| {
+            (
+                time_interval,
+                timeline.allocation(slot_key_generator_type_map),
+            )
         })
     }
-}
-
-struct TimelineAttachment<'c, MP, C, SKF>
-where
-    MP: 'static + Send + Sync,
-    SKF: StorableKeyFn,
-{
-    animation_entry: &'c <Timeline<MP> as Cell>::Attached<SKF>,
-    context: &'c C,
-}
-
-struct Channel<MP>(MP);
-
-impl<MP> Cell for Channel<MP>
-where
-    MP: 'static + Send + Sync,
-{
-    type Attached<SKF> = Vec<<Timeline<MP> as Cell>::Attached<SKF>> where SKF: StorableKeyFn;
-    type Archived<SKF> = Vec<<Timeline<MP> as Cell>::Archived<SKF>> where SKF: StorableKeyFn;
-    type Allocated<SKF> = Vec<<Timeline<MP> as Cell>::Allocated<SKF>> where SKF: StorableKeyFn;
-    type Attachment<'c, C, SKF> = ChannelAttachment<'c, MP, C, SKF>
-    where
-        Self: 'c,
-        C: 'c,
-        SKF: StorableKeyFn;
-
-    fn new<SKF>() -> Self::Attached<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        Vec::new()
-    }
-
-    fn attachment<'c, C, SKF>(
-        this: &'c Self::Attached<SKF>,
-        context: &'c C,
-    ) -> Self::Attachment<'c, C, SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        this.into_iter()
-            .map(|timeline| Cell::attachment(context))
-            .collect()
-    }
-
-    fn archive<SKF>(this: Self::Attached<SKF>) -> Self::Archived<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        this.into_iter()
-            .map(|timeline| Cell::archive(timeline))
-            .collect()
-    }
-
-    fn allocate<SKF>(
-        this: Self::Archived<SKF>,
-        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Self::Allocated<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        this.into_iter()
-            .map(|timeline| Cell::allocate(timeline, slot_key_generator_type_map))
-            .collect()
-    }
-}
-
-impl<MP> Merge for Channel<MP>
-where
-    MP: 'static + Send + Sync,
-{
-    fn merge<SKF, TE>(
-        this: &mut Self::Attached<SKF>,
-        child: Self::Attached<SKF>,
-        time_interval: &Range<Time>,
-        time_eval: &TE,
-        child_time_interval: &Range<Time>,
-    ) where
-        SKF: StorableKeyFn,
-        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-    {
-        this.0
-            .extend(child.0.into_iter().map(|(entry_time_interval, animation)| {
-                (
-                    time_interval.start
-                        + (time_interval.end - time_interval.start)
-                            * *time_eval
-                                .time_eval(entry_time_interval.start, child_time_interval.clone())
-                        ..time_interval.start
-                            + (time_interval.end - time_interval.start)
-                                * *time_eval.time_eval(
-                                    entry_time_interval.end,
-                                    child_time_interval.clone(),
-                                ),
-                    animation,
-                )
-            }));
-    }
-}
-
-impl<MP> Prepare for Channel<MP>
-where
-    MP: 'static + Send + Sync,
-{
-    type Prepared<SKF> = Vec<PresentationKey<SKF, MP>> where SKF: StorableKeyFn;
 
     fn prepare<SKF>(
-        this: &Self::Allocated<SKF>,
+        allocation: &Self::Allocation<SKF>,
         time: Time,
         storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> Self::Prepared<SKF>
+    ) -> Self::Prepare<SKF>
     where
         SKF: StorableKeyFn,
     {
-        this.into_iter()
-            .filter_map(|timeline| {
-                Prepare::prepare(timeline, time, storage_type_map, device, queue, format)
+        allocation
+            .into_iter()
+            .filter_map(|(time_interval, timeline)| {
+                time_interval.contains(&time).then(|| {
+                    timeline.prepare(
+                        time,
+                        *time_interval,
+                        storage_type_map,
+                        device,
+                        queue,
+                        format,
+                    )
+                })
             })
             .flatten()
             .collect()
     }
-}
 
-struct ChannelAttachment<'c, MP, C, SKF>
-where
-    MP: 'static + Send + Sync,
-    SKF: StorableKeyFn,
-{
-    animation_entries: &'c <Channel<MP> as Cell>::Attached<SKF>,
-    context: &'c C,
+    fn attachment<'c, W, L, SKF, const LI: usize, const CI: usize>(
+        architecture: &'c Self::Architecture<SKF, LI, CI>,
+        config: &Config,
+        timer: &Timer,
+        world: &W,
+        layer: &L,
+    ) -> Self::Attachment<'c, W, L, Self::Architecture<SKF, LI, CI>>
+    where
+        SKF: StorableKeyFn,
+    {
+        ChannelAttachment {
+            config,
+            timer,
+            world,
+            layer,
+            channel: architecture,
+            residue: (),
+        }
+    }
 }
 
 // pub struct Alive<'a, SKF, W, M, TS>
@@ -352,136 +423,131 @@ struct MyLayer {
 */
 
 #[allow(non_camel_case_types)]
-struct MyLayer<CHANNEL_0 = (), CHANNEL_1 = ()> {
-    channel_0: CHANNEL_0,
-    channel_1: CHANNEL_1,
+struct MyLayer<channel_0 = (), channel_1 = ()> {
+    channel_0: channel_0,
+    channel_1: channel_1,
 }
 
-impl Cell for MyLayer {
-    type Attached<SKF> = MyLayer<
-        <Channel<MyMobjectPresentation0> as Cell>::Attached<SKF>,
-        <Channel<MyMobjectPresentation1> as Cell>::Attached<SKF>,
-    > where SKF: StorableKeyFn;
-    type Archived<SKF> = MyLayer<
-        <Channel<MyMobjectPresentation0> as Cell>::Archived<SKF>,
-        <Channel<MyMobjectPresentation1> as Cell>::Archived<SKF>,
-    > where SKF: StorableKeyFn;
-    type Allocated<SKF> = MyLayer<
-        <Channel<MyMobjectPresentation0> as Cell>::Allocated<SKF>,
-        <Channel<MyMobjectPresentation1> as Cell>::Allocated<SKF>,
-    > where SKF: StorableKeyFn;
-    type Attachment<'c, C, SKF> = MyLayer<
-        <Channel<MyMobjectPresentation0> as Cell>::Attachment<'c, C, SKF>,
-        <Channel<MyMobjectPresentation1> as Cell>::Attachment<'c, C, SKF>
+impl Layer for MyLayer {
+    type Architecture<SKF, const LI: usize> = MyLayer<
+        <PresentationChannel<MyMobjectPresentation0> as Channel>::Architecture<SKF, LI, 0>,
+        <PresentationChannel<MyMobjectPresentation1> as Channel>::Architecture<SKF, LI, 1>,
     >
     where
-        Self: 'c,
-        C: 'c,
-        SKF: StorableKeyFn; // wrapper needed to add `spawn` method
+        SKF: StorableKeyFn;
+    type Archive<SKF> = MyLayer<
+        <PresentationChannel<MyMobjectPresentation0> as Channel>::Archive<SKF>,
+        <PresentationChannel<MyMobjectPresentation1> as Channel>::Archive<SKF>,
+    >
+    where
+        SKF: StorableKeyFn;
+    type Allocation<SKF> = MyLayer<
+        <PresentationChannel<MyMobjectPresentation0> as Channel>::Allocation<SKF>,
+        <PresentationChannel<MyMobjectPresentation1> as Channel>::Allocation<SKF>,
+    >
+    where
+        SKF: StorableKeyFn;
+    type Prepare<SKF> = MyLayer<
+        <PresentationChannel<MyMobjectPresentation0> as Channel>::Prepare<SKF>,
+        <PresentationChannel<MyMobjectPresentation1> as Channel>::Prepare<SKF>,
+    >
+    where
+        SKF: StorableKeyFn;
+    type Attachment<'l, W, L> = LayerAttachment<'l, W, L, MyLayer<
+        <PresentationChannel<MyMobjectPresentation0> as Channel>::Attachment<'l, W, L, PresentationChannel<MyMobjectPresentation0>>,
+        <PresentationChannel<MyMobjectPresentation1> as Channel>::Attachment<'l, W, L, PresentationChannel<MyMobjectPresentation1>>,
+    >>
+    where
+        Self: 'l,
+        W: 'l,
+        L: 'l;
 
-    fn new<SKF>() -> Self::Attached<SKF>
+    fn architecture<SKF, const LI: usize>() -> Self::Architecture<SKF, LI>
     where
         SKF: StorableKeyFn,
     {
         MyLayer {
-            channel_0: Cell::new(),
-            channel_1: Cell::new(),
+            channel_0: Channel::architecture(),
+            channel_1: Channel::architecture(),
         }
     }
 
-    fn attachment<'c, C, SKF>(
-        this: &'c Self::Attached<SKF>,
-        context: &'c C,
-    ) -> Self::Attachment<'c, C, SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        MyLayer {
-            channel_0: Cell::attachment(this.channel_0, context),
-            channel_1: Cell::attachment(this.channel_1, context),
-        }
-    }
-
-    fn archive<SKF>(this: Self::Attached<SKF>) -> Self::Archived<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        MyLayer {
-            channel_0: Cell::archive(this.channel_0),
-            channel_1: Cell::archive(this.channel_1),
-        }
-    }
-
-    fn allocate<SKF>(
-        this: Self::Archived<SKF>,
-        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Self::Allocated<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        MyLayer {
-            channel_0: Cell::allocate(this.channel_0, slot_key_generator_type_map),
-            channel_1: Cell::allocate(this.channel_1, slot_key_generator_type_map),
-        }
-    }
-}
-
-impl Merge for MyLayer {
-    fn merge<SKF, TE>(
-        this: &mut Self::Attached<SKF>,
-        child: Self::Attached<SKF>,
-        time_interval: &Range<Time>,
+    fn merge<TE, SKF, const LI: usize>(
+        architecture: &mut Self::Architecture<SKF, LI>,
+        archive: Self::Archive<SKF>,
+        alive_id: usize,
         time_eval: &TE,
-        child_time_interval: &Range<Time>,
+        parent_time_interval: Range<Time>,
+        child_time_interval: Range<Time>,
     ) where
-        SKF: StorableKeyFn,
         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+        SKF: StorableKeyFn,
     {
-        Merge::merge(
-            this.channel_0,
-            child.channel_0,
-            time_interval,
+        Channel::merge(
+            architecture.channel_0,
+            archive.channel_0,
+            alive_id,
             time_eval,
+            parent_time_interval,
             child_time_interval,
         );
-        Merge::merge(
-            this.channel_1,
-            child.channel_1,
-            time_interval,
+        Channel::merge(
+            architecture.channel_1,
+            archive.channel_1,
+            alive_id,
             time_eval,
+            parent_time_interval,
             child_time_interval,
         );
     }
-}
 
-impl Prepare for MyLayer {
-    type Prepared<SKF> = MyLayer<
-        <Channel<MyMobjectPresentation0> as Prepare>::Prepared<SKF>,
-        <Channel<MyMobjectPresentation1> as Prepare>::Prepared<SKF>,
-    > where SKF: StorableKeyFn;
+    fn archive<SKF, const LI: usize>(
+        architecture: Self::Architecture<SKF, LI>,
+    ) -> Self::Archive<SKF>
+    where
+        SKF: StorableKeyFn,
+    {
+        MyLayer {
+            channel_0: Channel::archive(architecture.channel_0),
+            channel_1: Channel::archive(architecture.channel_1),
+        }
+    }
+
+    fn allocation<SKF>(
+        archive: Self::Archive<SKF>,
+        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::Allocation<SKF>
+    where
+        SKF: StorableKeyFn,
+    {
+        MyLayer {
+            channel_0: Channel::allocation(archive.channel_0, slot_key_generator_type_map),
+            channel_1: Channel::allocation(archive.channel_1, slot_key_generator_type_map),
+        }
+    }
 
     fn prepare<SKF>(
-        this: &Self::Allocated<SKF>,
+        allocation: &Self::Allocation<SKF>,
         time: Time,
         storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> Self::Prepared<SKF>
+    ) -> Self::Prepare<SKF>
     where
         SKF: StorableKeyFn,
     {
         MyLayer {
-            channel_0: Prepare::prepare(
-                this.channel_0,
+            channel_0: Channel::prepare(
+                allocation.channel_0,
                 time,
                 storage_type_map,
                 device,
                 queue,
                 format,
             ),
-            channel_1: Prepare::prepare(
-                this.channel_1,
+            channel_1: Channel::prepare(
+                allocation.channel_1,
                 time,
                 storage_type_map,
                 device,
@@ -490,22 +556,51 @@ impl Prepare for MyLayer {
             ),
         }
     }
-}
 
-impl Render for MyLayer {
     fn render<SKF>(
-        this: &Self::Prepared<SKF>,
+        prepare: &Self::Prepare<SKF>,
         storage_type_map: &StorageTypeMap,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
     ) where
         SKF: StorableKeyFn,
     {
-        render_my_layer(this, storage_type_map, encoder, target)
+        render_my_layer(prepare, storage_type_map, encoder, target);
+    }
+
+    fn attachment<'l, W, SKF, const LI: usize>(
+        architecture: &'l Self::Architecture<SKF, LI>,
+        config: &Config,
+        timer: &Timer,
+        world: &W,
+    ) -> Self::Attachment<'l, W, Self::Architecture<SKF, LI>>
+    where
+        SKF: StorableKeyFn,
+    {
+        LayerAttachment {
+            config,
+            timer,
+            world,
+            layer: architecture,
+            residue: MyLayer {
+                channel_0: Channel::attachment(
+                    architecture.channel_0,
+                    config,
+                    timer,
+                    world,
+                    architecture,
+                ),
+                channel_1: Channel::attachment(
+                    architecture.channel_1,
+                    config,
+                    timer,
+                    world,
+                    architecture,
+                ),
+            },
+        }
     }
 }
-
-impl Layer for MyLayer {}
 
 // impl<SKF, W> MyLayerAttachment<'_, SKF, W>
 // where
@@ -527,7 +622,7 @@ impl Layer for MyLayer {}
 
 // hand-written, privide name
 fn render_my_layer<SKF>(
-    prepared_layer: &<MyLayer as Prepare>::Prepared<SKF>,
+    prepared_layer: &<MyLayer as Layer>::Prepare<SKF>,
     storage_type_map: &StorageTypeMap,
     encoder: &mut wgpu::CommandEncoder,
     target: &wgpu::TextureView,
@@ -545,147 +640,167 @@ struct MyWorld {
 */
 
 #[allow(non_camel_case_types)]
-struct MyWorld<LAYER_0 = (), LAYER_1 = ()> {
-    layer_0: LAYER_0,
-    layer_1: LAYER_1,
+struct MyWorld<layer_0 = (), layer_1 = ()> {
+    layer_0: layer_0,
+    layer_1: layer_1,
 }
 
-impl Cell for MyWorld {
-    type Attached<SKF> = MyWorld<
-        <MyLayer as Cell>::Attached<SKF>,
-        <MyLayer as Cell>::Attached<SKF>,
-    > where SKF: StorableKeyFn;
-    type Archived<SKF> = MyWorld<
-        <MyLayer as Cell>::Archived<SKF>,
-        <MyLayer as Cell>::Archived<SKF>,
-    > where SKF: StorableKeyFn;
-    type Allocated<SKF> = MyWorld<
-        <MyLayer as Cell>::Allocated<SKF>,
-        <MyLayer as Cell>::Allocated<SKF>,
-    > where SKF: StorableKeyFn;
-    type Attachment<'c, C, SKF> = MyWorld<
-        <MyLayer as Cell>::Attachment<'c, C, SKF>,
-        <MyLayer as Cell>::Attachment<'c, C, SKF>
+impl World for MyWorld {
+    type Architecture<SKF> = MyWorld<
+        <MyLayer as Layer>::Architecture<SKF, 0>,
+        <MyLayer as Layer>::Architecture<SKF, 1>,
     >
     where
-        Self: 'c,
-        C: 'c,
-        SKF: StorableKeyFn; // wrapper needed to add `spawn` method
+        SKF: StorableKeyFn;
+    type Archive<SKF> = MyWorld<
+        <MyLayer as Layer>::Archive<SKF>,
+        <MyLayer as Layer>::Archive<SKF>,
+    >
+    where
+        SKF: StorableKeyFn;
+    type Allocation<SKF> = MyWorld<
+        <MyLayer as Layer>::Allocation<SKF>,
+        <MyLayer as Layer>::Allocation<SKF>,
+    >
+    where
+        SKF: StorableKeyFn;
+    type Prepare<SKF> = MyWorld<
+        <MyLayer as Layer>::Prepare<SKF>,
+        <MyLayer as Layer>::Prepare<SKF>,
+    >
+    where
+        SKF: StorableKeyFn;
+    type Attachment<'w, W> = WorldAttachment<'w, W, MyWorld<
+        <MyLayer as Layer>::Attachment<'w, W, MyLayer>,
+        <MyLayer as Layer>::Attachment<'w, W, MyLayer>,
+    >>
+    where
+        Self: 'w,
+        W: 'w;
 
-    fn new<SKF>() -> Self::Attached<SKF>
+    fn architecture<SKF>() -> Self::Architecture<SKF>
     where
         SKF: StorableKeyFn,
     {
         MyWorld {
-            layer_0: Cell::new(),
-            layer_1: Cell::new(),
+            layer_0: Layer::architecture(),
+            layer_1: Layer::architecture(),
         }
     }
 
-    fn attachment<'c, C, SKF>(
-        this: &'c Self::Attached<SKF>,
-        context: &'c C,
-    ) -> Self::Attachment<'c, C, SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        MyWorld {
-            layer_0: Cell::attachment(this.layer_0, context),
-            layer_1: Cell::attachment(this.layer_1, context),
-        }
-    }
-
-    fn archive<SKF>(this: Self::Attached<SKF>) -> Self::Archived<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        MyWorld {
-            layer_0: Cell::archive(this.layer_0),
-            layer_1: Cell::archive(this.layer_1),
-        }
-    }
-
-    fn allocate<SKF>(
-        this: Self::Archived<SKF>,
-        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Self::Allocated<SKF>
-    where
-        SKF: StorableKeyFn,
-    {
-        MyWorld {
-            layer_0: Cell::allocate(this.layer_0, slot_key_generator_type_map),
-            layer_1: Cell::allocate(this.layer_1, slot_key_generator_type_map),
-        }
-    }
-}
-
-impl Merge for MyWorld {
-    fn merge<SKF, TE>(
-        this: &mut Self::Attached<SKF>,
-        child: Self::Attached<SKF>,
-        time_interval: &Range<Time>,
+    fn merge<TE, SKF>(
+        architecture: &mut Self::Architecture<SKF>,
+        archive: Self::Archive<SKF>,
+        alive_id: usize,
         time_eval: &TE,
-        child_time_interval: &Range<Time>,
+        parent_time_interval: Range<Time>,
+        child_time_interval: Range<Time>,
     ) where
-        SKF: StorableKeyFn,
         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+        SKF: StorableKeyFn,
     {
-        Merge::merge(
-            this.layer_0,
-            child.layer_0,
-            time_interval,
+        Layer::merge(
+            architecture.layer_0,
+            archive.layer_0,
+            alive_id,
             time_eval,
+            parent_time_interval,
             child_time_interval,
         );
-        Merge::merge(
-            this.layer_1,
-            child.layer_1,
-            time_interval,
+        Layer::merge(
+            architecture.layer_1,
+            archive.layer_1,
+            alive_id,
             time_eval,
+            parent_time_interval,
             child_time_interval,
         );
     }
-}
 
-impl Prepare for MyWorld {
-    type Prepared<SKF> = MyWorld<
-        <MyLayer as Prepare>::Prepared<SKF>,
-        <MyLayer as Prepare>::Prepared<SKF>,
-    > where SKF: StorableKeyFn;
+    fn archive<SKF>(architecture: Self::Architecture<SKF>) -> Self::Archive<SKF>
+    where
+        SKF: StorableKeyFn,
+    {
+        MyWorld {
+            layer_0: Layer::archive(architecture.layer_0),
+            layer_1: Layer::archive(architecture.layer_1),
+        }
+    }
+
+    fn allocation<SKF>(
+        archive: Self::Archive<SKF>,
+        slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::Allocation<SKF>
+    where
+        SKF: StorableKeyFn,
+    {
+        MyWorld {
+            layer_0: Layer::allocation(archive.layer_0, slot_key_generator_type_map),
+            layer_1: Layer::allocation(archive.layer_1, slot_key_generator_type_map),
+        }
+    }
 
     fn prepare<SKF>(
-        this: &Self::Allocated<SKF>,
+        allocation: &Self::Allocation<SKF>,
         time: Time,
         storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> Self::Prepared<SKF>
+    ) -> Self::Prepare<SKF>
     where
         SKF: StorableKeyFn,
     {
         MyWorld {
-            layer_0: Prepare::prepare(this.layer_0, time, storage_type_map, device, queue, format),
-            layer_1: Prepare::prepare(this.layer_1, time, storage_type_map, device, queue, format),
+            layer_0: Layer::prepare(
+                allocation.layer_0,
+                time,
+                storage_type_map,
+                device,
+                queue,
+                format,
+            ),
+            layer_1: Layer::prepare(
+                allocation.layer_1,
+                time,
+                storage_type_map,
+                device,
+                queue,
+                format,
+            ),
         }
     }
-}
 
-impl Render for MyWorld {
     fn render<SKF>(
-        this: &Self::Prepared<SKF>,
+        prepare: &Self::Prepare<SKF>,
         storage_type_map: &StorageTypeMap,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
     ) where
         SKF: StorableKeyFn,
     {
-        Render::render(this.layer_0, storage_type_map, encoder, target);
-        Render::render(this.layer_1, storage_type_map, encoder, target);
+        render_my_layer(prepare, storage_type_map, encoder, target);
+    }
+
+    fn attachment<'w, SKF>(
+        architecture: &'w Self::Architecture<SKF>,
+        config: &Config,
+        timer: &Timer,
+    ) -> Self::Attachment<'w, Self::Architecture<SKF>>
+    where
+        SKF: StorableKeyFn,
+    {
+        WorldAttachment {
+            config,
+            timer,
+            layer: architecture,
+            residue: MyWorld {
+                layer_0: Layer::attachment(architecture.layer_0, config, timer, architecture),
+                layer_1: Layer::attachment(architecture.layer_1, config, timer, architecture),
+            },
+        }
     }
 }
-
-impl World for MyWorld {}
 
 // #[derive(Debug)]
 // struct MySerializableKeyFn;
@@ -704,10 +819,10 @@ impl World for MyWorld {}
 // impl World for MyWorld<'_> {
 //     type SerializableKeyFn = MySerializableKeyFn;
 
-//     fn new(config: &Config, timer_stack: &TimerStack) -> Rc<Self> {
+//     fn architecture(config: &Config, timer_stack: &TimerStack) -> Rc<Self> {
 //         Rc::new_cyclic(|world| Self {
-//             layer_0: MyWorld::new(config, timer_stack, world.clone()),
-//             layer_1: MyWorld::new(config, timer_stack, world.clone()),
+//             layer_0: MyWorld::architecture(config, timer_stack, world.clone()),
+//             layer_1: MyWorld::architecture(config, timer_stack, world.clone()),
 //         })
 //     }
 
@@ -725,8 +840,8 @@ impl World for MyWorld {}
 
 //     fn collect(self) -> Vec<Box<dyn LayerPreallocated>> {
 //         Vec::from([
-//             Box::new(self.layer_0.collect()) as Box<dyn LayerPreallocated>,
-//             Box::new(self.layer_1.collect()) as Box<dyn LayerPreallocated>,
+//             Box::architecture(self.layer_0.collect()) as Box<dyn LayerPreallocated>,
+//             Box::architecture(self.layer_1.collect()) as Box<dyn LayerPreallocated>,
 //         ])
 //     }
 // }

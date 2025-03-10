@@ -1,3 +1,4 @@
+use core::range::IterRangeFrom;
 use std::any::Any;
 use std::any::TypeId;
 use std::cell::RefCell;
@@ -28,17 +29,17 @@ use super::traits::StorableKeyFn;
 use super::traits::Update;
 
 // #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
-// pub struct StaticAnimationId(pub u64);
+// pub struct StaticTimelineId(pub u64);
 
 // #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
-// pub struct DynamicAnimationId(pub u64);
+// pub struct DynamicTimelineId(pub u64);
 
-// impl AnimationId {
-//     fn new(animation: &serde_traitobject::Arc<dyn Animation>) -> Self {
+// impl TimelineId {
+//     fn new(timeline: &serde_traitobject::Arc<dyn Timeline>) -> Self {
 //         // Hash `Arc<T>` instead of `T`.
 //         // Presentation maps inside `storage` are identified only by `T::Presentation` type, without `T`.
 //         Self(seahash::hash(
-//             &ron::ser::to_string(animation).unwrap().into_bytes(),
+//             &ron::ser::to_string(timeline).unwrap().into_bytes(),
 //         ))
 //     }
 
@@ -121,7 +122,7 @@ where
     }
 }
 
-trait Animation:
+trait Timeline:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize + Storable
 {
     type MobjectPresentation: Send + Sync;
@@ -151,21 +152,21 @@ trait Animation:
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     );
-    // fn erased(&self) -> Box<dyn Animation<PresentationStorage = Self::PresentationStorage>>;
+    // fn erased(&self) -> Box<dyn Timeline<PresentationStorage = Self::PresentationStorage>>;
 
     // let slot_map = storage
-    //     .entry::<AllocatedAnimation<Self::SerdeKey, Self::MobjectPresentationStorage>>()
+    //     .entry::<TimelineAllocation<Self::SerdeKey, Self::MobjectPresentationStorage>>()
     //     .or_insert_with(HashMap::new);
     // let serde_key = self.serde_key();
     // let slot_id = slot_map
     //     .entry(serde_key.clone())
     //     .or_insert_with(Self::MobjectPresentationStorage::new)
     //     .allocate();
-    // AllocatedAnimation {
+    // TimelineAllocation {
     //     serde_key,
     //     slot_id,
-    //     animation: self as Box<
-    //         dyn Animation<
+    //     timeline: self as Box<
+    //         dyn Timeline<
     //             SerdeKey = Self::SerdeKey,
     //             MobjectPresentationStorage = Self::MobjectPresentationStorage,
     //         >,
@@ -173,15 +174,15 @@ trait Animation:
     // }
 }
 
-// struct StaticAnimationKeyFn<M, MKF>(PhantomData<(M, MKF)>);
+// struct StaticTimelineKeyFn<M, MKF>(PhantomData<(M, MKF)>);
 
-// impl<M, MKF> Default for StaticAnimationKeyFn<M, MKF> {
+// impl<M, MKF> Default for StaticTimelineKeyFn<M, MKF> {
 //     fn default() -> Self {
 //         Self(PhantomData)
 //     }
 // }
 
-// impl<M, MKF> KeyFn for StaticAnimationKeyFn<M, MKF>
+// impl<M, MKF> KeyFn for StaticTimelineKeyFn<M, MKF>
 // where
 //     M: Mobject,
 //     MKF: MobjectKeyFn,
@@ -195,7 +196,7 @@ trait Animation:
 // }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct StaticAnimation<M> {
+struct StaticTimeline<M> {
     // mobject_serde_key: serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
     // slot_id: SI,
     // time_interval: Range<Time>,
@@ -203,7 +204,7 @@ struct StaticAnimation<M> {
     // phantom: PhantomData<SKF>,
 }
 
-impl<M> Storable for StaticAnimation<M>
+impl<M> Storable for StaticTimeline<M>
 where
     M: Mobject,
 {
@@ -232,7 +233,7 @@ where
     // }
 }
 
-impl<M> Animation for StaticAnimation<M>
+impl<M> Timeline for StaticTimeline<M>
 where
     M: Mobject,
 {
@@ -273,8 +274,8 @@ where
     ) {
     }
 
-    // fn erased(&self) -> Box<dyn Animation<PresentationStorage = Self::PresentationStorage>> {
-    //     Box::new(StaticAnimation {
+    // fn erased(&self) -> Box<dyn Timeline<PresentationStorage = Self::PresentationStorage>> {
+    //     Box::new(StaticTimeline {
     //         mobject: self.mobject.clone(),
     //     })
     // }
@@ -301,15 +302,15 @@ where
     // }
 }
 
-// struct DynamicAnimationKeyFn<TM, M, U, MKF, UKF>(PhantomData<(TM, M, U, MKF, UKF)>);
+// struct DynamicTimelineKeyFn<TM, M, U, MKF, UKF>(PhantomData<(TM, M, U, MKF, UKF)>);
 
-// impl<TM, M, U, MKF, UKF> Default for DynamicAnimationKeyFn<TM, M, U, MKF, UKF> {
+// impl<TM, M, U, MKF, UKF> Default for DynamicTimelineKeyFn<TM, M, U, MKF, UKF> {
 //     fn default() -> Self {
 //         Self(PhantomData)
 //     }
 // }
 
-// impl<TM, M, U, MKF, UKF> KeyFn for DynamicAnimationKeyFn<TM, M, U, MKF, UKF>
+// impl<TM, M, U, MKF, UKF> KeyFn for DynamicTimelineKeyFn<TM, M, U, MKF, UKF>
 // where
 //     TM: TimeMetric,
 //     M: Mobject,
@@ -326,7 +327,7 @@ where
 // }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct DynamicAnimation<M, TE, U> {
+struct DynamicTimeline<M, TE, U> {
     // mobject_serde_key: serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
     // update_serde_key: serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
     // slot_id: SI,
@@ -337,7 +338,7 @@ struct DynamicAnimation<M, TE, U> {
     // phantom: PhantomData<SKF>,
 }
 
-impl<M, TE, U> Storable for DynamicAnimation<M, TE, U>
+impl<M, TE, U> Storable for DynamicTimeline<M, TE, U>
 where
     M: Mobject,
     TE: TimeEval,
@@ -379,7 +380,7 @@ where
     // }
 }
 
-impl<M, TE, U> Animation for DynamicAnimation<M, TE, U>
+impl<M, TE, U> Timeline for DynamicTimeline<M, TE, U>
 where
     M: Mobject,
     TE: TimeEval,
@@ -443,8 +444,8 @@ where
         );
     }
 
-    // fn erased(&self) -> Box<dyn Animation<PresentationStorage = Self::PresentationStorage>> {
-    //     Box::new(DynamicAnimation {
+    // fn erased(&self) -> Box<dyn Timeline<PresentationStorage = Self::PresentationStorage>> {
+    //     Box::new(DynamicTimeline {
     //         mobject: self.mobject.clone(),
     //         time_eval: self.time_eval.clone(),
     //         update: self.update.clone(),
@@ -459,7 +460,7 @@ where
 }
 
 // #[derive(Debug)]
-// struct AllocatedAnimation<SK, MPS>
+// struct TimelineAllocation<SK, MPS>
 // where
 //     SK: SerdeKey,
 //     MPS: MobjectPresentationStorage,
@@ -467,10 +468,10 @@ where
 //     // time_interval: Range<Time>,
 //     serde_key: SK,        //T::SerdeKey,
 //     slot_id: MPS::SlotId, //<T::MobjectPresentationStorage as MobjectPresentationStorage>::SlotId,
-//     animation: Box<dyn Animation<SerdeKey = SK, MobjectPresentationStorage = MPS>>,
+//     timeline: Box<dyn Timeline<SerdeKey = SK, MobjectPresentationStorage = MPS>>,
 // }
 
-// impl<SK, MPS> typemap_rev::TypeMapKey for AllocatedAnimation<SK, MPS>
+// impl<SK, MPS> typemap_rev::TypeMapKey for TimelineAllocation<SK, MPS>
 // where
 //     SK: SerdeKey,
 //     MPS: MobjectPresentationStorage,
@@ -478,7 +479,7 @@ where
 //     type Value = HashMap<SK, MPS>;
 // }
 
-// impl<SK, MPS> AllocatedAnimation<SK, MPS>
+// impl<SK, MPS> TimelineAllocation<SK, MPS>
 // where
 //     SK: SerdeKey,
 //     MPS: MobjectPresentationStorage,
@@ -512,24 +513,24 @@ where
 // #[derive(Deserialize, Serialize)]
 // struct Preallocated<T>
 // where
-//     A: Animation,
+//     T: Timeline,
 // {
-//     animation: T,
+//     timeline: T,
 // }
 
-pub trait AnimationErasure<SKF>:
+pub trait TimelineErasure<SKF>:
     serde_traitobject::Deserialize + serde_traitobject::Serialize
 {
     type MobjectPresentation;
     // type SerializableKeyFn;
 
-    fn allocate(
+    fn allocation(
         self: Box<Self>,
         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Box<dyn AnimationAllocatedErasure<SKF, MobjectPresentation = Self::MobjectPresentation>>;
+    ) -> Box<dyn TimelineAllocationErasure<SKF, MobjectPresentation = Self::MobjectPresentation>>;
 }
 
-pub trait AnimationAllocatedErasure<SKF>
+pub trait TimelineAllocationErasure<SKF>
 where
     SKF: StorableKeyFn,
 {
@@ -546,44 +547,44 @@ where
     ) -> PresentationKey<SKF, Self::MobjectPresentation>;
 }
 
-struct AnimationAllocated<SKF, A>
+struct TimelineAllocation<SKF, T>
 where
     SKF: StorableKeyFn,
-    A: Animation,
+    T: Timeline,
 {
     storage_key: Arc<
         StorageKey<
-            A::StorableKey<SKF>,
-            <<A::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+            T::StorableKey<SKF>,
+            <<T::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
         >,
     >,
-    animation: Box<A>,
+    timeline: Box<T>,
 }
 
-impl<SKF, A> AnimationErasure<SKF> for A
+impl<SKF, T> TimelineErasure<SKF> for T
 where
     SKF: StorableKeyFn,
-    A: Animation,
+    T: Timeline,
 {
-    type MobjectPresentation = A::MobjectPresentation;
+    type MobjectPresentation = T::MobjectPresentation;
     // type SerializableKeyFn = T::SerializableKeyFn;
 
-    fn allocate(
+    fn allocation(
         self: Box<Self>,
         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Box<dyn AnimationAllocatedErasure<SKF, MobjectPresentation = Self::MobjectPresentation>>
+    ) -> Box<dyn TimelineAllocationErasure<SKF, MobjectPresentation = Self::MobjectPresentation>>
     {
-        Box::new(AnimationAllocated {
+        Box::new(TimelineAllocation {
             storage_key: Arc::new(slot_key_generator_type_map.allocate(&self)),
-            animation: self,
+            timeline: self,
         })
     }
 }
 
-impl<SKF, A> AnimationAllocatedErasure<SKF> for AnimationAllocated<SKF, A>
+impl<SKF, T> TimelineAllocationErasure<SKF> for TimelineAllocation<SKF, T>
 where
     SKF: StorableKeyFn,
-    A: Animation,
+    T: Timeline,
 {
     // fn fetch_presentation(
     //     &self,
@@ -593,7 +594,7 @@ where
     //         .fetch_presentation(storage_type_map.get_ref(self).as_ref().unwrap())
     // }
 
-    type MobjectPresentation = A::MobjectPresentation;
+    type MobjectPresentation = T::MobjectPresentation;
     // type SerializableKeyFn = T::SerializableKeyFn;
 
     fn prepare(
@@ -606,10 +607,10 @@ where
         format: wgpu::TextureFormat,
     ) -> PresentationKey<SKF, Self::MobjectPresentation> {
         let mobject_presentation = storage_type_map
-            .get_or_insert_with::<_, A::Slot, _>(&self.storage_key, || {
-                self.animation.init_presentation(device)
+            .get_or_insert_with::<_, T::Slot, _>(&self.storage_key, || {
+                self.timeline.init_presentation(device)
             });
-        self.animation.prepare_presentation(
+        self.timeline.prepare_presentation(
             time,
             time_interval,
             mobject_presentation,
@@ -617,7 +618,7 @@ where
             queue,
             format,
         );
-        self.animation
+        self.timeline
             .erase_presentation_key(self.storage_key.clone())
     }
 }
@@ -628,29 +629,29 @@ pub(crate) enum Node<V> {
     Multiton(Vec<V>),
 }
 
-impl<V> Node<V> {
-    pub(crate) fn map_ref<F, FO>(&self, f: F) -> Node<FO>
-    where
-        F: FnMut(&V) -> FO,
-    {
-        match self {
-            Self::None => Self::None,
-            Self::Singleton(v) => Self::Singleton(f(v)),
-            Self::Multiton(vs) => Self::Multiton(vs.iter().map(f).collect()),
-        }
-    }
+// impl<V> Node<V> {
+//     pub(crate) fn map_ref<F, FO>(&self, f: F) -> Node<FO>
+//     where
+//         F: FnMut(&V) -> FO,
+//     {
+//         match self {
+//             Self::None => Self::None,
+//             Self::Singleton(v) => Self::Singleton(f(v)),
+//             Self::Multiton(vs) => Self::Multiton(vs.iter().map(f).collect()),
+//         }
+//     }
 
-    pub(crate) fn map<F, FO>(self, f: F) -> Node<FO>
-    where
-        F: FnMut(V) -> FO,
-    {
-        match self {
-            Self::None => Self::None,
-            Self::Singleton(v) => Self::Singleton(f(v)),
-            Self::Multiton(vs) => Self::Multiton(vs.into_iter().map(f).collect()),
-        }
-    }
-}
+//     pub(crate) fn map<F, FO>(self, f: F) -> Node<FO>
+//     where
+//         F: FnMut(V) -> FO,
+//     {
+//         match self {
+//             Self::None => Self::None,
+//             Self::Singleton(v) => Self::Singleton(f(v)),
+//             Self::Multiton(vs) => Self::Multiton(vs.into_iter().map(f).collect()),
+//         }
+//     }
+// }
 
 impl<V> IntoIterator for Node<V> {
     type Item = V;
@@ -772,7 +773,7 @@ impl<V> IntoIterator for Node<V> {
 //     RefCell<
 //         Vec<(
 //             Range<Time>,
-//             Box<dyn AnimationErasure<SKF, MobjectPresentation = MP>>,
+//             Box<dyn TimelineErasure<SKF, MobjectPresentation = MP>>,
 //         )>,
 //     >,
 // );
@@ -814,7 +815,7 @@ impl<V> IntoIterator for Node<V> {
 //                     .0
 //                     .into_inner()
 //                     .into_iter()
-//                     .map(|(entry_time_interval, animation)| {
+//                     .map(|(entry_time_interval, timeline)| {
 //                         (
 //                             time_interval.start
 //                                 + (time_interval.end - time_interval.start)
@@ -828,7 +829,7 @@ impl<V> IntoIterator for Node<V> {
 //                                             entry_time_interval.end,
 //                                             child_time_interval.clone(),
 //                                         ),
-//                             animation,
+//                             timeline,
 //                         )
 //                     }),
 //             );
@@ -859,10 +860,10 @@ impl<V> IntoIterator for Node<V> {
 //             self.0
 //                 .into_inner()
 //                 .into_iter()
-//                 .map(|(time_interval, animation)| {
+//                 .map(|(time_interval, timeline)| {
 //                     (
 //                         time_interval,
-//                         animation.allocate(slot_key_generator_type_map),
+//                         timeline.allocate(slot_key_generator_type_map),
 //                     )
 //                 })
 //                 .collect(),
@@ -873,7 +874,7 @@ impl<V> IntoIterator for Node<V> {
 // struct ChannelAllocated<SKF, MP>(
 //     Vec<(
 //         Range<Time>,
-//         Box<dyn AnimationAllocatedErasure<SKF, MobjectPresentation = MP>>,
+//         Box<dyn TimelineAllocationErasure<SKF, MobjectPresentation = MP>>,
 //     )>,
 // );
 
@@ -894,9 +895,9 @@ impl<V> IntoIterator for Node<V> {
 //     ) -> Vec<PresentationKey<SKF, Self::MobjectPresentation>> {
 //         self.0
 //             .iter()
-//             .filter_map(|(time_interval, animation)| {
+//             .filter_map(|(time_interval, timeline)| {
 //                 time_interval.contains(&time).then(|| {
-//                     animation.prepare(
+//                     timeline.prepare(
 //                         time,
 //                         time_interval.clone(),
 //                         storage_type_map,
@@ -915,29 +916,29 @@ impl<V> IntoIterator for Node<V> {
 //     SKF: StorableKeyFn,
 //     W: WorldErasure<SKF>,
 // {
-//     fn push<A>(&self, time_interval: Range<Rc<Time>>, animation: A)
+//     fn push<T>(&self, time_interval: Range<Rc<Time>>, timeline: T)
 //     where
-//         A: Animation<MobjectPresentation = MP>,
+//         T: Timeline<MobjectPresentation = MP>,
 //     {
 //         if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
 //             self.channel.0.borrow_mut().push((
 //                 *time_interval.start..*time_interval.end,
-//                 Box::new(animation),
+//                 Box::new(timeline),
 //             ))
 //         }
 //     }
 
-//     fn start<M, TS>(&self, mobject: Arc<M>, animation_state: TS) -> Alive<SKF, W, M, TS>
+//     fn start<M, TS>(&self, mobject: Arc<M>, timeline_state: TS) -> Alive<SKF, W, M, TS>
 //     where
 //         M: Mobject<MobjectPresentation = MP>,
-//         TS: AnimationState<SKF, W, M>,
+//         TS: TimelineState<SKF, W, M>,
 //     {
 //         Alive {
 //             channel_attachment: self,
 //             // index: usize,
 //             spawn_time: self.context.timer.time(),
 //             mobject,
-//             animation_state: Some(animation_state),
+//             timeline_state: Some(timeline_state),
 //         }
 //     }
 
@@ -946,74 +947,76 @@ impl<V> IntoIterator for Node<V> {
 //     }
 
 //     #[must_use]
-//     pub fn spawn<M>(&self, mobject: M) -> Alive<SKF, W, M, CollapsedAnimationState>
+//     pub fn spawn<M>(&self, mobject: M) -> Alive<SKF, W, M, CollapsedTimelineState>
 //     where
 //         M: Mobject<MobjectPresentation = MP>,
 //     {
-//         self.start(Arc::new(mobject), CollapsedAnimationState)
+//         self.start(Arc::new(mobject), CollapsedTimelineState)
 //     }
 // }
 
 // #[derive(Deserialize, Serialize)]
-// pub struct PreallocatedAnimationEntry<SKF, MP>
+// pub struct PreallocatedTimelineEntry<SKF, MP>
 // where
 //     MP: 'static,
 //     SKF: 'static,
 // {
 //     time_interval: Range<Time>,
-//     animation: serde_traitobject::Box<
-//         dyn PreallocatedAnimation<MobjectPresentation = MP, SerializableKeyFn = SKF>,
+//     timeline: serde_traitobject::Box<
+//         dyn PreallocatedTimeline<MobjectPresentation = MP, SerializableKeyFn = SKF>,
 //     >,
 // }
 
-// pub struct AllocatedAnimationEntry<SKF, MP> {
+// pub struct TimelineAllocationEntry<SKF, MP> {
 //     time_interval: Range<Time>,
-//     animation: Box<dyn AllocatedAnimation<MobjectPresentation = MP, SerializableKeyFn = SKF>>,
+//     timeline: Box<dyn TimelineAllocation<MobjectPresentation = MP, SerializableKeyFn = SKF>>,
 // }
 
-// impl<SKF, MP> PreallocatedAnimationEntry<SKF, MP> {
+// impl<SKF, MP> PreallocatedTimelineEntry<SKF, MP> {
 //     fn allocate(
 //         self,
 //         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-//     ) -> AllocatedAnimationEntry<SKF, MP> {
-//         AllocatedAnimationEntry {
+//     ) -> TimelineAllocationEntry<SKF, MP> {
+//         TimelineAllocationEntry {
 //             time_interval: self.time_interval,
-//             animation: self
-//                 .animation
+//             timeline: self
+//                 .timeline
 //                 .into_box()
 //                 .allocate(slot_key_generator_type_map),
 //         }
 //     }
 // }
 
-// struct AnimationEntriesSink<'v>(Option<&'v mut Vec<WithTimeInterval<Box<dyn AllocatedAnimation>>>>);
+// struct TimelineEntriesSink<'v>(Option<&'v mut Vec<WithTimeInterval<Box<dyn TimelineAllocation>>>>);
 
-// impl Extend<Box<dyn AllocatedAnimation>> for AnimationEntriesSink<'_> {
+// impl Extend<Box<dyn TimelineAllocation>> for TimelineEntriesSink<'_> {
 //     fn extend<I>(&mut self, iter: I)
 //     where
-//         I: IntoIterator<Item = Box<dyn AllocatedAnimation>>,
+//         I: IntoIterator<Item = Box<dyn TimelineAllocation>>,
 //     {
-//         if let Some(animation_entries) = self.0.as_mut() {
-//             animation_entries.extend(iter)
+//         if let Some(timeline_entries) = self.0.as_mut() {
+//             timeline_entries.extend(iter)
 //         }
 //     }
 // }
 
-// trait AnimationState {
-//     fn flush_animations(
+// trait TimelineState {
+//     fn flush_timelines(
 //         &mut self,
 //         time_interval: Range<Time>,
-//     ) -> Vec<WithTimeInterval<Box<dyn AnimationErasure>>>;
+//     ) -> Vec<WithTimeInterval<Box<dyn TimelineErasure>>>;
 // }
 
 pub struct Timer {
     time: RefCell<Rc<Time>>,
+    alive_id_generator: RefCell<IterRangeFrom<usize>>,
 }
 
 impl Timer {
     fn new() -> Self {
         Self {
             time: RefCell::new(Rc::new(0.0)),
+            alive_id_generator: RefCell::new((0..).into_iter()),
         }
     }
 
@@ -1021,70 +1024,74 @@ impl Timer {
         self.time.borrow().clone()
     }
 
+    fn generate_alive_id(&self) -> usize {
+        self.alive_id_generator.borrow_mut().next().unwrap()
+    }
+
     pub fn wait(&self, time: Time) {
         self.time.replace_with(|rc_time| Rc::new(**rc_time + time));
     }
 }
 
-struct Context<'c, SKF, W> {
-    config: &'c Config,
-    timer: Timer,
-    world: W,
-    phantom: PhantomData<SKF>,
-}
+// struct Context<'c, SKF, W> {
+//     config: &'c Config,
+//     timer: Timer,
+//     world: W,
+//     phantom: PhantomData<SKF>,
+// }
 
-impl<'c, SKF, W> Context<'c, SKF, W>
-where
-    SKF: StorableKeyFn,
-    W: World,
-{
-    fn new(config: &'c Config) -> Self {
-        Self {
-            config,
-            timer: Timer::new(),
-            world: W::new(),
-            phantom: PhantomData,
-        }
-    }
+// impl<'c, SKF, W> Context<'c, SKF, W>
+// where
+//     SKF: StorableKeyFn,
+//     W: World,
+// {
+// fn new(config: &'c Config) -> Self {
+//     Self {
+//         config,
+//         timer: Timer::new(),
+//         world: W::new(),
+//         phantom: PhantomData,
+//     }
+// }
 
-    // fn balance<F>(&self, f: F) where F: FnOnce(&Config, &Timer, &W) {
-    //     let timer = Timer::new();
-    //     let world = W::new();
-    //     f(&self.config, &timer, &world);
-    //     self.world.merge(world, time_interval, time_eval);
-    // }
+// fn balance<F>(&self, f: F) where F: FnOnce(&Config, &Timer, &W) {
+//     let timer = Timer::new();
+//     let world = W::new();
+//     f(&self.config, &timer, &world);
+//     self.world.merge(world, time_interval, time_eval);
+// }
 
-    // fn grow_stack(&self) -> &(Timer, W) {
-    //     self.timer_world_stack.borrow_mut().push((
-    //         Timer::new(),
-    //         W::new(),
-    //     ));
-    //     self.timer_world_stack.borrow()
-    // }
+// fn grow_stack(&self) -> &(Timer, W) {
+//     self.timer_world_stack.borrow_mut().push((
+//         Timer::new(),
+//         W::new(),
+//     ));
+//     self.timer_world_stack.borrow()
+// }
 
-    // fn shrink_stack<TE>(&self, time_interval: &Range<Time>, time_eval: &TE)
-    // where
-    //     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-    // {
-    //     let mut timer_world_stack = self.timer_world_stack.borrow_mut();
-    //     let (timer, world) = timer_world_stack.pop().unwrap();
-    //     timer_world_stack.last_mut().1.shrink_stack(time_interval, time_eval, &0.0..timer.time());
-    // }
+// fn shrink_stack<TE>(&self, time_interval: &Range<Time>, time_eval: &TE)
+// where
+//     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+// {
+//     let mut timer_world_stack = self.timer_world_stack.borrow_mut();
+//     let (timer, world) = timer_world_stack.pop().unwrap();
+//     timer_world_stack.last_mut().1.shrink_stack(time_interval, time_eval, &0.0..timer.time());
+// }
 
-    // fn collect(self) -> Vec<PreallocatedAnimationEntry<MP>> {
-    //     let timer_world_stack = self.timer_world_stack.into_inner();
-    //     assert!(timer_world_stack.tail.is_empty());
-    //     timer_world_stack.head
-    // }
+// fn collect(self) -> Vec<PreallocatedTimelineEntry<MP>> {
+//     let timer_world_stack = self.timer_world_stack.into_inner();
+//     assert!(timer_world_stack.tail.is_empty());
+//     timer_world_stack.head
+// }
 
-    // fn timer_world_ref(&self) -> &(Timer, W) {
-    //     self.timer_world_stack.borrow().last()
-    // }
+// fn timer_world_ref(&self) -> &(Timer, W) {
+//     self.timer_world_stack.borrow().last()
+// }
 
-    // fn timer_world_mut(&self) -> &mut (Timer, W) {
-    //     self.timer_world_stack.borrow_mut().last_mut()
-    // }
-}
+// fn timer_world_mut(&self) -> &mut (Timer, W) {
+//     self.timer_world_stack.borrow_mut().last_mut()
+// }
+// }
 
 // #[derive(Default)]
 // struct TimerStack(RefCell<nonempty::NonEmpty<Timer>>);
@@ -1117,7 +1124,7 @@ where
 //     // layer: Weak<L>,
 //     // timer: &'lf Timer,
 //     // depth: &'lf RefCell<usize>,
-//     animation_entries_stack: RefCell<nonempty::NonEmpty<Vec<PreallocatedAnimationEntry<MP>>>>,
+//     timeline_entries_stack: RefCell<nonempty::NonEmpty<Vec<PreallocatedTimelineEntry<MP>>>>,
 // }
 
 // impl<'lf, W, MP> LayerField<'lf, W, MP>
@@ -1131,12 +1138,12 @@ where
 //             config,
 //             timer_stack,
 //             world,
-//             animation_entries_stack: RefCell::new(nonempty::NonEmpty::singleton(Vec::new())),
+//             timeline_entries_stack: RefCell::new(nonempty::NonEmpty::singleton(Vec::new())),
 //         }
 //     }
 
 //     pub fn grow_stack(&self) {
-//         self.animation_entries_stack.borrow_mut().push(Vec::new());
+//         self.timeline_entries_stack.borrow_mut().push(Vec::new());
 //     }
 
 //     pub fn shrink_stack<TE>(&self, time_interval: Range<Time>, time_eval: &TE)
@@ -1144,35 +1151,35 @@ where
 //         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
 //     {
 //         let child_time_interval = 0.0..self.timer_stack.time();
-//         let mut animation_entries_stack = self.animation_entries_stack.borrow_mut();
-//         let animation_entries = animation_entries_stack.pop().unwrap();
-//         animation_entries_stack
+//         let mut timeline_entries_stack = self.timeline_entries_stack.borrow_mut();
+//         let timeline_entries = timeline_entries_stack.pop().unwrap();
+//         timeline_entries_stack
 //             .last_mut()
 //             .extend(
-//                 animation_entries
+//                 timeline_entries
 //                     .into_iter()
-//                     .map(|animation_entry| PreallocatedAnimationEntry {
+//                     .map(|timeline_entry| PreallocatedTimelineEntry {
 //                         time_interval: time_interval.start
 //                             + (time_interval.end - time_interval.start)
 //                                 * *time_eval.time_eval(
-//                                     animation_entry.time_interval.start,
+//                                     timeline_entry.time_interval.start,
 //                                     child_time_interval.clone(),
 //                                 )
 //                             ..time_interval.start
 //                                 + (time_interval.end - time_interval.start)
 //                                     * *time_eval.time_eval(
-//                                         animation_entry.time_interval.end,
+//                                         timeline_entry.time_interval.end,
 //                                         child_time_interval.clone(),
 //                                     ),
-//                         animation: animation_entry.animation,
+//                         timeline: timeline_entry.timeline,
 //                     }),
 //             );
 //     }
 
-//     pub fn collect(self) -> Vec<PreallocatedAnimationEntry<MP>> {
-//         let animation_entries_stack = self.animation_entries_stack.into_inner();
-//         assert!(animation_entries_stack.tail.is_empty());
-//         animation_entries_stack.head
+//     pub fn collect(self) -> Vec<PreallocatedTimelineEntry<MP>> {
+//         let timeline_entries_stack = self.timeline_entries_stack.into_inner();
+//         assert!(timeline_entries_stack.tail.is_empty());
+//         timeline_entries_stack.head
 //     }
 
 //     fn world(&self) -> Rc<W> {
@@ -1183,40 +1190,40 @@ where
 //     //     self.layer.upgrade().unwrap()
 //     // }
 
-//     fn push<T>(&self, time_interval: Range<Time>, animation: T)
+//     fn push<T>(&self, time_interval: Range<Time>, timeline: T)
 //     where
-//         A: Animation<MobjectPresentation = MP>,
+//         T: Timeline<MobjectPresentation = MP>,
 //         Box<T>: Storable,
 //     {
 //         if time_interval.start < time_interval.end {
-//             self.animation_entries_stack
+//             self.timeline_entries_stack
 //                 .borrow_mut()
 //                 .last_mut()
-//                 .push(PreallocatedAnimationEntry {
+//                 .push(PreallocatedTimelineEntry {
 //                     time_interval,
-//                     animation: serde_traitobject::Box::new(animation),
+//                     timeline: serde_traitobject::Box::new(timeline),
 //                 });
 //         }
 //     }
 
-//     fn start<TS>(&self, animation_state: TS) -> Alive<W, TS>
+//     fn start<TS>(&self, timeline_state: TS) -> Alive<W, TS>
 //     where
-//         TS: AnimationState<MobjectPresentation = MP>,
+//         TS: TimelineState<MobjectPresentation = MP>,
 //     {
 //         Alive {
 //             channel_attachment: self,
 //             // index: usize,
 //             spawn_time: self.timer_stack.time(),
-//             animation_state: Some(animation_state),
+//             timeline_state: Some(timeline_state),
 //         }
 //     }
 
 //     #[must_use]
-//     pub fn spawn<M>(&self, mobject: M) -> Alive<W, M, CollapsedAnimationState>
+//     pub fn spawn<M>(&self, mobject: M) -> Alive<W, M, CollapsedTimelineState>
 //     where
 //         M: Mobject<MobjectPresentation = MP>,
 //     {
-//         self.start(CollapsedAnimationState {
+//         self.start(CollapsedTimelineState {
 //             mobject: Arc::new(mobject),
 //         })
 //     }
@@ -1263,12 +1270,12 @@ where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
     M: Mobject,
-    TS: AnimationState<SKF, W, M>,
+    TS: TimelineState<SKF, W, M>,
 {
     channel_attachment: &'a ChannelAttachment<'a, SKF, W, M::MobjectPresentation>,
     spawn_time: Rc<Time>,
     mobject: Arc<M>,
-    animation_state: Option<TS>,
+    timeline_state: Option<TS>,
 }
 
 impl<'a, SKF, W, M, TS> Alive<'a, SKF, W, M, TS>
@@ -1276,7 +1283,7 @@ where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
     M: Mobject,
-    TS: AnimationState<SKF, W, M>,
+    TS: TimelineState<SKF, W, M>,
 {
     // pub(crate) fn alive_context(&self) -> &'ac AC {
     //     &self.alive_context
@@ -1291,8 +1298,8 @@ where
         // let entry = recorder.get_mut(self.index).unwrap();
         let spawn_time = self.spawn_time;
         let archive_time = self.channel_attachment.timer_stack.time();
-        let mut animation_state = self.animation_state.take().unwrap();
-        animation_state.archive(
+        let mut timeline_state = self.timeline_state.take().unwrap();
+        timeline_state.archive(
             spawn_time..archive_time,
             self.channel_attachment,
             self.mobject.clone(),
@@ -1302,7 +1309,7 @@ where
     pub(crate) fn map<F, FO>(&mut self, f: F) -> Alive<'a, SKF, W, TS::OutputMobject, FO>
     where
         F: FnOnce(Arc<TS::OutputMobject>) -> FO,
-        FO: AnimationState<SKF, W, TS::OutputMobject>,
+        FO: TimelineState<SKF, W, TS::OutputMobject>,
     {
         self.channel_attachment.start(f(self.end()))
     }
@@ -1313,16 +1320,16 @@ where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
     M: Mobject,
-    TS: AnimationState<SKF, W, M>,
+    TS: TimelineState<SKF, W, M>,
 {
     fn drop(&mut self) {
-        if self.animation_state.is_some() {
+        if self.timeline_state.is_some() {
             self.end();
         }
     }
 }
 
-pub trait AnimationState<M, C, SKF>
+pub trait TimelineState<M, C, SKF>
 where
     M: Mobject,
     SKF: StorableKeyFn,
@@ -1337,9 +1344,9 @@ where
     ) -> Arc<Self::OutputMobject>;
 }
 
-pub struct CollapsedAnimationState;
+pub struct CollapsedTimelineState;
 
-impl<SKF, W, M> AnimationState<SKF, W, M> for CollapsedAnimationState
+impl<SKF, W, M> TimelineState<SKF, W, M> for CollapsedTimelineState
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
@@ -1356,7 +1363,7 @@ where
     ) -> Arc<Self::OutputMobject> {
         channel_attachment.push(
             time_interval,
-            StaticAnimation {
+            StaticTimeline {
                 mobject: mobject.clone(),
             },
         );
@@ -1364,11 +1371,11 @@ where
     }
 }
 
-pub struct IndeterminedAnimationState<TE> {
+pub struct IndeterminedTimelineState<TE> {
     time_eval: Arc<TE>,
 }
 
-impl<SKF, W, M, TE> AnimationState<SKF, W, M> for IndeterminedAnimationState<TE>
+impl<SKF, W, M, TE> TimelineState<SKF, W, M> for IndeterminedTimelineState<TE>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
@@ -1386,7 +1393,7 @@ where
     ) -> Arc<Self::OutputMobject> {
         channel_attachment.push(
             time_interval,
-            StaticAnimation {
+            StaticTimeline {
                 mobject: mobject.clone(),
             },
         );
@@ -1394,13 +1401,13 @@ where
     }
 }
 
-pub struct UpdateAnimationState<TE, U> {
+pub struct UpdateTimelineState<TE, U> {
     // mobject: Arc<M>,
     time_eval: Arc<TE>,
     update: Arc<U>,
 }
 
-impl<SKF, W, M, TE, U> AnimationState<SKF, W, M> for UpdateAnimationState<TE, U>
+impl<SKF, W, M, TE, U> TimelineState<SKF, W, M> for UpdateTimelineState<TE, U>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
@@ -1419,7 +1426,7 @@ where
     ) -> Arc<Self::OutputMobject> {
         channel_attachment.push(
             time_interval,
-            DynamicAnimation {
+            DynamicTimeline {
                 mobject: mobject.clone(),
                 time_eval: self.time_eval.clone(),
                 update: self.update.clone(),
@@ -1428,15 +1435,15 @@ where
         mobject
     }
 
-    // type OutputAnimationState = M, CollapsedAnimationState;
+    // type OutputTimelineState = M, CollapsedTimelineState;
 
     // fn into_next(
     //     self,
     //     supervisor: &Supervisor,
     //     time_interval: Range<Rc<Time>>,
-    //     mut animation_entries_sink: AnimationEntriesSink,
-    // ) -> Self::OutputAnimationState {
-    //     animation_entries_sink.extend_one(supervisor.new_dynamic_animation_entry(
+    //     mut timeline_entries_sink: TimelineEntriesSink,
+    // ) -> Self::OutputTimelineState {
+    //     timeline_entries_sink.extend_one(supervisor.new_dynamic_timeline_entry(
     //         time_interval.clone(),
     //         self.mobject.clone(),
     //         self.time_eval.clone(),
@@ -1447,13 +1454,13 @@ where
     //         self.time_eval.time_eval(time_interval.end, time_interval),
     //         &mut mobject,
     //     );
-    //     CollapsedAnimationState {
+    //     CollapsedTimelineState {
     //         mobject: Arc::new(mobject),
     //     }
     // }
 }
 
-pub struct ConstructAnimationState<TE, C> {
+pub struct ConstructTimelineState<TE, C> {
     // mobject: Arc<M>,
     time_eval: Arc<TE>,
     // root_archive: (Range<Time>, Vec<RenderableEntry>),
@@ -1461,7 +1468,7 @@ pub struct ConstructAnimationState<TE, C> {
     construct: Option<C>,
 }
 
-impl<SKF, W, M, TE, C> AnimationState<SKF, W, M> for ConstructAnimationState<TE, C>
+impl<SKF, W, M, TE, C> TimelineState<SKF, W, M> for ConstructTimelineState<TE, C>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
@@ -1504,7 +1511,7 @@ where
         //     .unwrap()
         //     .construct(
         //         world,
-        //         channel_attachment.start(CollapsedAnimationState {
+        //         channel_attachment.start(CollapsedTimelineState {
         //             mobject: self.mobject.clone(),
         //         }),
         //     )
@@ -1535,57 +1542,57 @@ where
     //     };
     //     for RenderableEntry {
     //         time_interval,
-    //         animation_entries,
+    //         timeline_entries,
     //         ..
     //     } in renderables.as_mut_slice()
     //     {
     //         rescale_time_interval(time_interval);
-    //         for AnimationEntry { time_interval, .. } in animation_entries.as_mut_slice() {
+    //         for TimelineEntry { time_interval, .. } in timeline_entries.as_mut_slice() {
     //             rescale_time_interval(time_interval);
     //         }
     //     }
     //     global_archive.borrow_mut().1.extend(renderables.drain(..));
     // }
 
-    // type OutputAnimationState = CollapsedAnimationState<C::OutputMobject>;
+    // type OutputTimelineState = CollapsedTimelineState<C::OutputMobject>;
 
     // fn into_next(
     //     self,
     //     supervisor: &Supervisor,
     //     time_interval: Range<Time>,
-    //     mut animation_entries_sink: AnimationEntriesSink,
-    // ) -> Self::OutputAnimationState {
+    //     mut timeline_entries_sink: TimelineEntriesSink,
+    // ) -> Self::OutputTimelineState {
     //     let child_supervisor = Supervisor::new(supervisor.config);
-    //     let output_animation_state = child_supervisor
+    //     let output_timeline_state = child_supervisor
     //         .end(&self.construct.construct(
     //             child_supervisor.start(AliveContent {
     //                 spawn_time: child_supervisor.time.borrow().clone(),
-    //                 animation_state: CollapsedAnimationState {
+    //                 timeline_state: CollapsedTimelineState {
     //                     mobject: self.mobject,
     //                 },
     //             }),
     //             &child_supervisor,
     //         ))
-    //         .animation_state;
+    //         .timeline_state;
     //     let children_time_interval = child_supervisor.time_interval();
-    //     animation_entries_sink.extend(child_supervisor.iter_animation_entries().map(
-    //         |mut animation_entry| {
-    //             animation_entry.time_interval = time_interval.start
+    //     timeline_entries_sink.extend(child_supervisor.iter_timeline_entries().map(
+    //         |mut timeline_entry| {
+    //             timeline_entry.time_interval = time_interval.start
     //                 + (time_interval.end - time_interval.start)
     //                     * *self.time_eval.time_eval(
-    //                         animation_entry.time_interval.start,
+    //                         timeline_entry.time_interval.start,
     //                         children_time_interval.clone(),
     //                     )
     //                 ..time_interval.start
     //                     + (time_interval.end - time_interval.start)
     //                         * *self.time_eval.time_eval(
-    //                             animation_entry.time_interval.end,
+    //                             timeline_entry.time_interval.end,
     //                             children_time_interval.clone(),
     //                         );
-    //             animation_entry
+    //             timeline_entry
     //         },
     //     ));
-    //     output_animation_state
+    //     output_timeline_state
     // }
 
     // fn into_next(
@@ -1593,16 +1600,16 @@ where
     //     time_interval: Range<f32>,
     //     _mobject: Arc<M>,
     //     _storage: &S,
-    // ) -> Vec<AnimationEntry> {
-    //     let mut animation_entries = self.children_animation_entries;
-    //     animation_entries.iter_mut().for_each(|animation_entry| {
-    //         animation_entry.rescale_time_interval(
+    // ) -> Vec<TimelineEntry> {
+    //     let mut timeline_entries = self.children_timeline_entries;
+    //     timeline_entries.iter_mut().for_each(|timeline_entry| {
+    //         timeline_entry.rescale_time_interval(
     //             &self.time_eval,
     //             &self.children_time_interval,
     //             &time_interval,
     //         )
     //     });
-    //     animation_entries
+    //     timeline_entries
     // }
 }
 
@@ -1670,7 +1677,7 @@ where
 // impl<L, TS> AliveContent<L> for WithSpawnTime<TS>
 // where
 //     W: World,
-//     TS: AnimationState,
+//     TS: TimelineState,
 // {
 // }
 
@@ -1678,7 +1685,7 @@ where
 //     config: &'c Config,
 //     // storage: &'s Storage,
 //     time: RefCell<Arc<Time>>,
-//     animation_slots: RefCell<Vec<Result<Vec<Box<dyn AllocatedAnimation>>, Arc<dyn Any>>>>,
+//     timeline_slots: RefCell<Vec<Result<Vec<Box<dyn TimelineAllocation>>, Arc<dyn Any>>>>,
 // }
 
 // impl<L, MB> IntoArchiveState<AliveRenderable<'_, '_, LayerRenderableState<L>>> for MB
@@ -1686,13 +1693,13 @@ where
 //     W: World,
 //     MB: MobjectBuilder<L>,
 // {
-//     type ArchiveState = CollapsedAnimationState<MB::Instantiation>;
+//     type ArchiveState = CollapsedTimelineState<MB::Instantiation>;
 
 //     fn into_archive_state(
 //         self,
 //         alive_context: &AliveRenderable<'_, '_, LayerRenderableState<L>>,
 //     ) -> Self::ArchiveState {
-//         CollapsedAnimationState {
+//         CollapsedTimelineState {
 //             mobject: Arc::new(self.instantiate(
 //                 &alive_context.archive_state().layer,
 //                 alive_context.alive_context().config(),
@@ -1851,14 +1858,14 @@ where
         C: Construct<SKF, W, M>;
 }
 
-impl<'a, SKF, W, M> Quantize for Alive<'a, SKF, W, M, CollapsedAnimationState>
+impl<'a, SKF, W, M> Quantize for Alive<'a, SKF, W, M, CollapsedTimelineState>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
     M: Mobject,
 {
     type Output<TE> =
-        Alive<'a, SKF, W, M, IndeterminedAnimationState<TE>>
+        Alive<'a, SKF, W, M, IndeterminedTimelineState<TE>>
     where
         TE: TimeEval;
 
@@ -1867,14 +1874,14 @@ where
     where
         TE: TimeEval,
     {
-        self.map(|animation_state| IndeterminedAnimationState {
-            mobject: animation_state.mobject.clone(),
+        self.map(|timeline_state| IndeterminedTimelineState {
+            mobject: timeline_state.mobject.clone(),
             time_eval: Arc::new(time_eval),
         })
     }
 }
 
-impl<'a, SKF, W, M, TE, U> Collapse for Alive<'a, SKF, W, M, UpdateAnimationState<TE, U>>
+impl<'a, SKF, W, M, TE, U> Collapse for Alive<'a, SKF, W, M, UpdateTimelineState<TE, U>>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
@@ -1882,17 +1889,17 @@ where
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, M>,
 {
-    type Output = Alive<'a, SKF, W, M, CollapsedAnimationState>;
+    type Output = Alive<'a, SKF, W, M, CollapsedTimelineState>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        self.map(|animation_state| CollapsedAnimationState {
-            mobject: animation_state.mobject.clone(),
+        self.map(|timeline_state| CollapsedTimelineState {
+            mobject: timeline_state.mobject.clone(),
         })
     }
 }
 
-impl<'a, SKF, W, M, TE, C> Collapse for Alive<'a, SKF, W, ConstructAnimationState<M, TE, C>>
+impl<'a, SKF, W, M, TE, C> Collapse for Alive<'a, SKF, W, ConstructTimelineState<M, TE, C>>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
@@ -1900,18 +1907,18 @@ where
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
     C: Construct<M>,
 {
-    type Output = Alive<'a, SKF, W, M, CollapsedAnimationState>;
+    type Output = Alive<'a, SKF, W, M, CollapsedTimelineState>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        self.map(|animation_state| CollapsedAnimationState {
-            mobject: animation_state.mobject.clone(),
+        self.map(|timeline_state| CollapsedTimelineState {
+            mobject: timeline_state.mobject.clone(),
         })
     }
 }
 
 impl<'a, SKF, W, M, TE> ApplyRate<TE::OutputTimeMetric>
-    for Alive<'a, SKF, W, M, IndeterminedAnimationState<TE>>
+    for Alive<'a, SKF, W, M, IndeterminedTimelineState<TE>>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
@@ -1919,7 +1926,7 @@ where
     TE: TimeEval,
 {
     type Output<RA> =
-        Alive<'a, SKF, W, M, IndeterminedAnimationState<RateComposeTimeEval<RA, TE>>>
+        Alive<'a, SKF, W, M, IndeterminedTimelineState<RateComposeTimeEval<RA, TE>>>
     where
         RA: Rate<TE::OutputTimeMetric>;
 
@@ -1928,18 +1935,18 @@ where
     where
         RA: Rate<TE::OutputTimeMetric>,
     {
-        self.map(|animation_state| IndeterminedAnimationState {
-            mobject: animation_state.mobject.clone(),
+        self.map(|timeline_state| IndeterminedTimelineState {
+            mobject: timeline_state.mobject.clone(),
             time_eval: Arc::new(RateComposeTimeEval {
                 rate,
-                time_eval: animation_state.time_eval.clone(),
+                time_eval: timeline_state.time_eval.clone(),
             }),
         })
     }
 }
 
 impl<'a, SKF, W, M, TE> ApplyUpdate<TE::OutputTimeMetric, M>
-    for Alive<'a, SKF, W, M, IndeterminedAnimationState<TE>>
+    for Alive<'a, SKF, W, M, IndeterminedTimelineState<TE>>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
@@ -1947,7 +1954,7 @@ where
     TE: TimeEval,
 {
     type Output<U> =
-        Alive<'a, SKF, W, M, UpdateAnimationState<TE, U>>
+        Alive<'a, SKF, W, M, UpdateTimelineState<TE, U>>
     where
         U: Update<TE::OutputTimeMetric, M>;
 
@@ -1956,23 +1963,23 @@ where
     where
         U: Update<TE::OutputTimeMetric, M>,
     {
-        self.map(|animation_state| UpdateAnimationState {
-            mobject: animation_state.mobject,
-            time_eval: animation_state.time_eval,
+        self.map(|timeline_state| UpdateTimelineState {
+            mobject: timeline_state.mobject,
+            time_eval: timeline_state.time_eval,
             update: Arc::new(update),
         })
     }
 }
 
 impl<'a, SKF, W, M> ApplyUpdate<NormalizedTimeMetric, M>
-    for Alive<'a, SKF, W, M, CollapsedAnimationState>
+    for Alive<'a, SKF, W, M, CollapsedTimelineState>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
     M: Mobject,
 {
     type Output<U> =
-        Alive<'a, SKF, W, M, CollapsedAnimationState>
+        Alive<'a, SKF, W, M, CollapsedTimelineState>
     where
         U: Update<NormalizedTimeMetric, M>;
 
@@ -1981,18 +1988,17 @@ where
     where
         U: Update<NormalizedTimeMetric, M>,
     {
-        self.map(|animation_state| {
-            let mut mobject = Arc::unwrap_or_clone(animation_state.mobject);
+        self.map(|timeline_state| {
+            let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
             update.update(NormalizedTimeMetric(1.0), &mut mobject);
-            CollapsedAnimationState {
+            CollapsedTimelineState {
                 mobject: Arc::new(mobject),
             }
         })
     }
 }
 
-impl<'a, SKF, W, M, TE> ApplyConstruct<L, M>
-    for Alive<'a, SKF, W, M, IndeterminedAnimationState<TE>>
+impl<'a, SKF, W, M, TE> ApplyConstruct<L, M> for Alive<'a, SKF, W, M, IndeterminedTimelineState<TE>>
 where
     SKF: StorableKeyFn,
     W: WorldErasure<SKF>,
@@ -2000,7 +2006,7 @@ where
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
 {
     type Output<C> =
-        Alive<'a, W, ConstructAnimationState<C::OutputMobject, TE>>
+        Alive<'a, W, ConstructTimelineState<C::OutputMobject, TE>>
     where
         C: Construct<L, M>;
 
@@ -2009,23 +2015,23 @@ where
     where
         C: Construct<L, M>,
     {
-        self.map(|alive_context, animation_state| {
+        self.map(|alive_context, timeline_state| {
             let child_root = AliveRoot::new(alive_context.alive_context().config());
             let child_renderable = child_root.start(LayerRenderableState {
                 layer: alive_context.archive_state().layer.clone(),
             });
-            let child_animation = child_renderable.start(CollapsedAnimationState {
-                mobject: animation_state.mobject.clone(),
+            let child_timeline = child_renderable.start(CollapsedTimelineState {
+                mobject: timeline_state.mobject.clone(),
             });
             let mobject = construct
-                .construct(&child_root, &child_renderable, child_animation)
+                .construct(&child_root, &child_renderable, child_timeline)
                 .archive_state()
                 .mobject
                 .clone();
             drop(child_renderable);
-            ConstructAnimationState {
+            ConstructTimelineState {
                 mobject,
-                time_eval: animation_state.time_eval.clone(),
+                time_eval: timeline_state.time_eval.clone(),
                 root_archive: child_root.into_archive(),
             }
         })
@@ -2059,6 +2065,6 @@ where
 //     // where
 //     //     M: Mobject,
 //     // {
-//     //     self.0.get::<StaticAnimation<M>>()
+//     //     self.0.get::<StaticTimeline<M>>()
 //     // }
 // }
