@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use crate::traits::StorableKeyFn;
+
 // trait SerdeKey: 'static + Clone + Eq + Hash + Send + Sync {}
 
 // impl<T> SerdeKey for T where T: 'static + Clone + Eq + Hash + Send + Sync {}
@@ -365,10 +367,14 @@ where
 // }
 
 pub trait Storable: 'static + Send + Sync {
-    type StorableKey: Clone + Eq + Hash + Send + Sync;
+    type StorableKey<SKF>: Clone + Eq + Hash + Send + Sync
+    where
+        SKF: StorableKeyFn;
     type Slot: Slot;
 
-    fn key(&self) -> Self::StorableKey;
+    fn key<SKF>(&self) -> Self::StorableKey<SKF>
+    where
+        SKF: StorableKeyFn;
     // fn store(&self) -> <Self::Slot as Slot>::Value;
 }
 
@@ -423,14 +429,15 @@ impl SlotKeyGeneratorTypeMap {
         Self(typemap_rev::TypeMap::new())
     }
 
-    pub fn allocate<S>(
+    pub fn allocate<SKF, S>(
         &mut self,
         storable: &S,
     ) -> StorageKey<
-        S::StorableKey,
+        S::StorableKey<SKF>,
         <<S::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
     >
     where
+        SKF: StorableKeyFn,
         S: Storable,
     {
         let storable_key = storable.key();

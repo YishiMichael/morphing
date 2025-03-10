@@ -1,21 +1,18 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use crate::storable::StorageTypeMap;
-
-use super::config::Config;
-use super::timeline::Alive;
-use super::timeline::CollapsedTimelineState;
-use super::timeline::Layer;
-use super::timeline::TimeMetric;
-use super::timeline::World;
+use super::animation::Alive;
+use super::animation::CollapsedAnimationState;
+use super::animation::TimeMetric;
+use super::stage::Layer;
+use super::stage::World;
 
 pub trait Mobject:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
     type MobjectPresentation: 'static + Send + Sync;
 
-    // fn spawn(self, layer: &L) -> Alive<CollapsedTimelineState<Self>>;
+    // fn spawn(self, layer: &L) -> Alive<CollapsedAnimationState<Self>>;
     fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
 }
 
@@ -29,13 +26,12 @@ where
 {
     type Instantiation: Mobject;
 
-    fn instantiate<'a, W>(
+    fn instantiate<'a, SKF, C>(
         self,
-        layer: &'a L,
-        config: &'a Config,
-    ) -> Alive<'a, W, CollapsedTimelineState<Self::Instantiation>>
+        layer_attachment: &'a L::Attachment<'a, C, SKF>,
+    ) -> Alive<'a, Self::Instantiation, CollapsedAnimationState, C, SKF>
     where
-        W: World;
+        SKF: StorableKeyFn;
 }
 
 pub trait Rate<TM>:
@@ -82,19 +78,20 @@ where
 //     fn act(self, mobject: &M) -> Self::Update;
 // }
 
-pub trait Construct<M>: 'static
+pub trait Construct<W, M>: 'static
 where
+    W: World,
     M: Mobject,
 {
     type OutputMobject: Mobject;
 
-    fn construct<'a, W>(
+    fn construct<'a, C, SKF>(
         self,
-        world: &'a W,
-        mobject: Alive<'a, W, CollapsedTimelineState<M>>,
-    ) -> Alive<'a, W, CollapsedTimelineState<Self::OutputMobject>>
+        world_attachment: &'a W::Attachment<'a, C, SKF>,
+        mobject: Alive<'a, M, CollapsedAnimationState, C, SKF>,
+    ) -> Alive<'a, Self::OutputMobject, CollapsedAnimationState, C, SKF>
     where
-        W: World;
+        SKF: StorableKeyFn;
 }
 
 // pub trait SerdeMobject: serde_traitobject::Deserialize + serde_traitobject::Serialize {}
@@ -114,16 +111,7 @@ where
 // {
 // }
 
-pub trait Render {
-    fn render(
-        &self,
-        storage_type_map: &StorageTypeMap,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
-    );
-}
-
-pub trait SerializableKeyFn: 'static + Debug + Send + Sync {
+pub trait StorableKeyFn: 'static + Debug + Send + Sync {
     type Output: Clone + Eq + Hash + Send + Sync;
 
     fn eval_key<S>(serializable: &S) -> Self::Output
