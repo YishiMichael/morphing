@@ -1,15 +1,13 @@
 use std::fmt::Debug;
-use std::hash::Hash;
 
 use super::config::Config;
 use super::stage::Layer;
-use super::stage::LayerIndexed;
-use super::stage::PresentationChannel;
-use super::stage::WorldIndexed;
+use super::stage::World;
+use super::storable::StorableKeyFn;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
-use super::timeline::Locate;
-use super::timeline::Located;
+use super::timeline::MobjectLocate;
+use super::timeline::MobjectLocated;
 use super::timeline::TimeMetric;
 use super::timeline::Timer;
 
@@ -24,16 +22,12 @@ where
     fn spawn<W, LI, SKF>(
         self: Box<Self>,
         layer_architecture: &L::Architecture<SKF>,
-    ) -> Alive<'_, Located<W, LI, Self::ChannelIndex, Self>, CollapsedTimelineState, SKF>
+    ) -> Alive<'_, MobjectLocated<W, LI, Self::ChannelIndex, Self>, CollapsedTimelineState, SKF>
     where
-        Located<W, LI, Self::ChannelIndex, Self>: Locate,
+        MobjectLocated<W, LI, Self::ChannelIndex, Self>: MobjectLocate,
         SKF: StorableKeyFn;
     fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
 }
-
-// pub trait MobjectPresentation: Send + Sync + Any {
-//     fn render(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView);
-// }
 
 pub trait MobjectBuilder<L>
 where
@@ -45,7 +39,7 @@ where
 }
 
 pub trait Rate<TM>:
-    'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     TM: TimeMetric,
 {
@@ -60,19 +54,18 @@ where
 {
 }
 
-pub trait Update<TM, L, M>:
+pub trait Update<TM, ML>:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     TM: TimeMetric,
-    L: Layer,
-    M: Mobject<L>,
+    ML: MobjectLocate,
 {
-    fn update(&self, time_metric: TM, mobject: &mut M);
+    fn update(&self, time_metric: TM, mobject: &mut ML::Mobject);
     fn prepare_presentation(
         &self,
         time_metric: TM,
-        mobject: &M,
-        mobject_presentation: &mut M::MobjectPresentation,
+        mobject: &ML::Mobject,
+        mobject_presentation: &mut <ML::Mobject as Mobject<ML::Layer>>::MobjectPresentation,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -89,67 +82,22 @@ where
 //     fn act(self, mobject: &M) -> Self::Update;
 // }
 
-pub trait Construct<W, L, M>: 'static
+pub trait Construct<ML>: 'static
 where
-    W: WorldIndexed<Self::OutputLayerIndex>,
-    L: Layer,
-    M: Mobject<L>,
+    ML: MobjectLocate,
 {
-    type OutputLayerIndex;
-    type OutputMobject: Mobject<<W as WorldIndexed<Self::OutputLayerIndex>>::Layer>;
+    type OutputMobjectLocate: MobjectLocate;
 
-    fn construct<'a, LI, CI, SKF>(
+    fn construct<'a, SKF>(
         self,
-        world_attachment: &'a W::Attachment<'a, W::Architecture<SKF>>,
+        world_attachment: &'a <ML::World as World>::Attachment<'a, SKF>,
         config: &Config,
         timer: &Timer,
-        mobject: Alive<'a, W, LI, CI, M, CollapsedTimelineState, SKF>,
-    ) -> Alive<
-        'a,
-        W,
-        Self::OutputLayerIndex,
-        <Self::OutputMobject as Mobject<<W as WorldIndexed<Self::OutputLayerIndex>>::Layer>>::ChannelIndex,
-        Self::OutputMobject,
-        CollapsedTimelineState,
-        SKF,
-    >
+        alive: Alive<'a, ML, CollapsedTimelineState, SKF>,
+    ) -> Alive<'a, Self::OutputMobjectLocate, CollapsedTimelineState, SKF>
     where
-        W: WorldIndexed<LI, Layer = L>,
-        L: LayerIndexed<CI, Channel = PresentationChannel<M::MobjectPresentation>>,
-        <W as WorldIndexed<Self::OutputLayerIndex>>::Layer: LayerIndexed<<Self::OutputMobject as Mobject<<W as WorldIndexed<Self::OutputLayerIndex>>::Layer>>::ChannelIndex, Channel = PresentationChannel<<Self::OutputMobject as Mobject<<W as WorldIndexed<Self::OutputLayerIndex>>::Layer>>::MobjectPresentation>>,
         SKF: StorableKeyFn;
 }
-
-// pub trait SerdeMobject: serde_traitobject::Deserialize + serde_traitobject::Serialize {}
-
-// struct SerdeMobjectWrapper<M>(M);
-
-// impl<M> SerdeMobject for M where M: Mobject {}
-
-// pub trait SerdeUpdate: serde_traitobject::Deserialize + serde_traitobject::Serialize {}
-
-// struct SerdeUpdateWrapper<U>(U);
-
-// impl<U, TM, M> SerdeUpdate for SerdeUpdateWrapper<U>
-// where
-//     U: Update<TM, M>,
-//     TM: TimeMetric,
-// {
-// }
-
-pub trait StorableKeyFn: 'static + Debug + Send + Sync {
-    type Output: Clone + Eq + Hash + Send + Sync;
-
-    fn eval_key<S>(serializable: &S) -> Self::Output
-    where
-        S: serde::Serialize;
-}
-
-// pub trait LayerBuilder {
-//     type Instantiation: Layer;
-
-//     fn instantiate(self, config: &Config) -> Self::Instantiation;
-// }
 
 // TODO: alive container morphisms
 

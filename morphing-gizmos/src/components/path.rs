@@ -1,4 +1,5 @@
 use core::range::IterRangeFrom;
+use core::range::RangeFrom;
 use std::sync::Mutex;
 
 use itertools::Itertools;
@@ -276,4 +277,5 @@ impl bezier_rs::Identifier for ManipulatorGroupId {
     }
 }
 
-static MANIPULATOR_GROUP_ID_GENERATOR: Mutex<IterRangeFrom<usize>> = Mutex::new((0..).into_iter());
+static MANIPULATOR_GROUP_ID_GENERATOR: Mutex<IterRangeFrom<usize>> =
+    Mutex::new(RangeFrom { start: 0 }.into_iter());

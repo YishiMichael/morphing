@@ -1,28 +1,31 @@
 use core::range::IterRangeFrom;
 use core::range::Range;
-use std::any::Any;
+use core::range::RangeFrom;
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt::Debug;
+use std::fmt::Pointer;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::stage::Channel;
-use crate::stage::Layer;
-use crate::stage::LayerIndexed;
-use crate::stage::PresentationChannel;
-use crate::stage::WorldIndexed;
+use serde::Deserialize;
+use serde::Serialize;
 
-use super::config::Config;
+use super::stage::Channel;
 use super::stage::ChannelAttachment;
+use super::stage::Layer;
+use super::stage::LayerIndexed;
+use super::stage::PresentationChannel;
 use super::stage::World;
+use super::stage::WorldIndexed;
 use super::storable::SharableSlot;
 use super::storable::Slot;
 use super::storable::SlotKeyGenerator;
 use super::storable::SlotKeyGeneratorTypeMap;
 use super::storable::Storable;
+use super::storable::StorableKeyFn;
 use super::storable::StorageKey;
 use super::storable::StorageTypeMap;
 use super::storable::SwapSlot;
@@ -30,9 +33,7 @@ use super::storable::VecSlot;
 use super::traits::Construct;
 use super::traits::IncreasingRate;
 use super::traits::Mobject;
-use super::traits::MobjectBuilder;
 use super::traits::Rate;
-use super::traits::StorableKeyFn;
 use super::traits::Update;
 
 // #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -104,7 +105,7 @@ where
     ),
     Dynamic(
         Arc<StorageKey<
-            (TypeId, SKF::Output, TypeId, SKF::Output),
+            (TypeId, SKF::Output, SKF::Output),
             <<SwapSlot<VecSlot<MP>> as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
         >>,
     ),
@@ -203,27 +204,28 @@ trait Timeline:
 // }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct StaticTimeline<L, M> {
+struct StaticTimeline<ML> {
     // mobject_serde_key: serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
     // slot_id: SI,
     // time_interval: Range<Time>,
-    mobject: Arc<M>,
-    phantom: PhantomData<fn() -> L>,
+    mobject_locate: ML,
 }
 
-impl<L, M> Storable for StaticTimeline<L, M>
+impl<ML> Storable for StaticTimeline<ML>
 where
-    L: Layer,
-    M: Mobject<L>,
+    ML: MobjectLocate,
 {
     type StorableKey<SKF> = (TypeId, SKF::Output) where SKF: StorableKeyFn;
-    type Slot = SwapSlot<SharableSlot<M::MobjectPresentation>>;
+    type Slot = SwapSlot<SharableSlot<<ML::Mobject as Mobject<ML::Layer>>::MobjectPresentation>>;
 
     fn key<SKF>(&self) -> Self::StorableKey<SKF>
     where
         SKF: StorableKeyFn,
     {
-        (TypeId::of::<(L, M)>(), SKF::eval_key(&self.mobject))
+        (
+            TypeId::of::<(ML::Layer, ML::Mobject)>(),
+            SKF::eval_key(&self.mobject_locate.mobject()),
+        )
     }
 
     // type PresentationStorage = MapStorage<
@@ -241,12 +243,11 @@ where
     // }
 }
 
-impl<L, M> Timeline for StaticTimeline<L, M>
+impl<ML> Timeline for StaticTimeline<ML>
 where
-    L: Layer,
-    M: Mobject<L>,
+    ML: MobjectLocate,
 {
-    type MobjectPresentation = M::MobjectPresentation;
+    type MobjectPresentation = <ML::Mobject as Mobject<ML::Layer>>::MobjectPresentation;
     // type SerdeKey = serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>;
     // type MobjectPresentationStorage = ;
 
@@ -254,7 +255,7 @@ where
     //     serde_hashkey::to_key_with_ordered_float(self.mobject.as_ref()).unwrap()
     // }
     fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value {
-        Arc::new(self.mobject.presentation(device))
+        Arc::new(self.mobject_locate.mobject().presentation(device))
     }
 
     fn erase_presentation_key<SKF>(
@@ -336,34 +337,32 @@ where
 // }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct DynamicTimeline<L, M, TE, U> {
+struct DynamicTimeline<ML, TE, U> {
     // mobject_serde_key: serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
     // update_serde_key: serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
     // slot_id: SI,
     // time_interval: Range<Time>,
-    mobject: Arc<M>,
+    mobject_locate: ML,
     time_eval: TE,
     update: U,
-    phantom: PhantomData<fn() -> L>,
 }
 
-impl<L, M, TE, U> Storable for DynamicTimeline<L, M, TE, U>
+impl<ML, TE, U> Storable for DynamicTimeline<ML, TE, U>
 where
-    L: Layer,
-    M: Mobject<L>,
+    ML: MobjectLocate,
     TE: TimeEval,
-    U: Update<TE::OutputTimeMetric, L, M>,
+    U: Update<TE::OutputTimeMetric, ML>,
 {
     type StorableKey<SKF> = (TypeId, SKF::Output, SKF::Output) where SKF: StorableKeyFn;
-    type Slot = SwapSlot<VecSlot<M::MobjectPresentation>>;
+    type Slot = SwapSlot<VecSlot<<ML::Mobject as Mobject<ML::Layer>>::MobjectPresentation>>;
 
     fn key<SKF>(&self) -> Self::StorableKey<SKF>
     where
         SKF: StorableKeyFn,
     {
         (
-            TypeId::of::<(L, M, U)>(),
-            SKF::eval_key(&self.mobject),
+            TypeId::of::<(ML::Layer, ML::Mobject, U)>(),
+            SKF::eval_key(&self.mobject_locate.mobject()),
             SKF::eval_key(&self.update),
         )
     }
@@ -389,12 +388,11 @@ where
     // }
 }
 
-impl<L, M, TE, U> Timeline for DynamicTimeline<L, M, TE, U>
+impl<ML, TE, U> Timeline for DynamicTimeline<ML, TE, U>
 where
-    L: Layer,
-    M: Mobject<L>,
+    ML: MobjectLocate,
     TE: TimeEval,
-    U: Update<TE::OutputTimeMetric, L, M>,
+    U: Update<TE::OutputTimeMetric, ML>,
 {
     // type SerdeKey = (
     //     serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
@@ -414,10 +412,10 @@ where
     //         serde_hashkey::to_key_with_ordered_float(self.update.as_ref()).unwrap(),
     //     )
     // }
-    type MobjectPresentation = M::MobjectPresentation;
+    type MobjectPresentation = <ML::Mobject as Mobject<ML::Layer>>::MobjectPresentation;
 
     fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value {
-        self.mobject.presentation(device)
+        self.mobject_locate.mobject().presentation(device)
     }
 
     fn erase_presentation_key<SKF>(
@@ -446,7 +444,7 @@ where
     ) {
         self.update.prepare_presentation(
             self.time_eval.time_eval(time, time_interval),
-            &self.mobject,
+            self.mobject_locate.mobject(),
             mobject_presentation,
             device,
             queue,
@@ -1005,12 +1003,12 @@ pub struct Timer {
 impl Timer {
     fn new() -> Self {
         Self {
-            alive_id_generator: RefCell::new((0..).into_iter()),
+            alive_id_generator: RefCell::new(RangeFrom { start: 0 }.into_iter()),
             time: RefCell::new(Rc::new(0.0)),
         }
     }
 
-    fn generate_alive_id(&self) -> usize {
+    pub(crate) fn generate_alive_id(&self) -> usize {
         self.alive_id_generator.borrow_mut().next().unwrap()
     }
 
@@ -1255,24 +1253,45 @@ impl Timer {
 //     fn collect(self) -> Vec<Box<dyn LayerEntry>>;
 // }
 
-pub trait Locate {
-    type World: World;
+pub trait MobjectLocate:
+    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+{
+    type World: WorldIndexed<Self::LayerIndex, Layer = Self::Layer>;
     type LayerIndex;
-    type Layer: Layer;
+    type Layer: LayerIndexed<Self::ChannelIndex, Channel = Self::Channel>;
     type ChannelIndex;
     type Channel: Channel;
     type Mobject: Mobject<Self::Layer>;
 
-    fn mobject(&self) -> Arc<Self::Mobject>;
+    fn mobject(&self) -> &Arc<Self::Mobject>;
 }
 
-pub struct Located<W, LI, CI, M> {
+#[derive(Deserialize, Serialize)]
+pub struct MobjectLocated<W, LI, CI, M> {
     mobject: Arc<M>,
-    phantom: PhantomData<(W, LI, CI)>,
+    phantom: PhantomData<fn() -> (W, LI, CI)>,
 }
 
-impl<W, LI, CI, M> Locate for Located<W, LI, CI, M>
+impl<W, LI, CI, M> Clone for MobjectLocated<W, LI, CI, M> {
+    fn clone(&self) -> Self {
+        Self {
+            mobject: self.mobject.clone(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<W, LI, CI, M> Debug for MobjectLocated<W, LI, CI, M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.mobject.fmt(f)?;
+        Ok(())
+    }
+}
+
+impl<W, LI, CI, M> MobjectLocate for MobjectLocated<W, LI, CI, M>
 where
+    LI: 'static,
+    CI: 'static,
     W: WorldIndexed<LI>,
     <W as WorldIndexed<LI>>::Layer:
         LayerIndexed<CI, Channel = PresentationChannel<M::MobjectPresentation>>,
@@ -1281,22 +1300,19 @@ where
     type World = W;
     type LayerIndex = LI;
     type Layer = <W as WorldIndexed<LI>>::Layer;
-    type ChannelIndex = LI;
+    type ChannelIndex = CI;
     type Channel = PresentationChannel<M::MobjectPresentation>;
     type Mobject = M;
 
-    fn mobject(&self) -> Arc<Self::Mobject> {
-        self.mobject.clone()
+    fn mobject(&self) -> &Arc<Self::Mobject> {
+        &self.mobject
     }
 }
 
-pub struct Alive<'a, W, LI, CI, M, TS, SKF>
+pub struct Alive<'a, ML, TS, SKF>
 where
-    W: WorldIndexed<LI>,
-    <W as WorldIndexed<LI>>::Layer:
-        LayerIndexed<CI, Channel = PresentationChannel<M::MobjectPresentation>>,
-    M: Mobject<<W as WorldIndexed<LI>>::Layer>,
-    TS: TimelineState<W, LI, CI, M>,
+    ML: MobjectLocate,
+    TS: TimelineState<ML>,
     SKF: StorableKeyFn,
     // where
     //     SKF: StorableKeyFn,
@@ -1304,30 +1320,25 @@ where
     //     M: Mobject,
     //     TS: TimelineState<SKF, W, M>,
 {
-    channel_attachment: &'a ChannelAttachment<
-        'a,
-        W::Architecture<SKF>,
-        <<W as WorldIndexed<LI>>::Layer as Layer>::Architecture<SKF>,
-        <<<W as WorldIndexed<LI>>::Layer as LayerIndexed<CI>>::Channel as Channel>::Architecture<
-            SKF,
-        >,
-    >,
     alive_id: usize,
     spawn_time: Rc<Time>,
-    mobject: Arc<M>,
+    channel_attachment: &'a ChannelAttachment<
+        'a,
+        ML::World,
+        ML::LayerIndex,
+        ML::Layer,
+        ML::ChannelIndex,
+        ML::Channel,
+        SKF,
+    >,
+    mobject_locate: ML,
     timeline_state: Option<TS>,
 }
 
-impl<'a, W, LI, CI, M, TS, SKF> Alive<'a, W, LI, CI, M, TS, SKF>
+impl<'a, ML, TS, SKF> Alive<'a, ML, TS, SKF>
 where
-    // SKF: StorableKeyFn,
-    // W: WorldErasure<SKF>,
-    // M: Mobject,
-    W: WorldIndexed<LI>,
-    <W as WorldIndexed<LI>>::Layer:
-        LayerIndexed<CI, Channel = PresentationChannel<M::MobjectPresentation>>,
-    M: Mobject<<W as WorldIndexed<LI>>::Layer>,
-    TS: TimelineState<W, LI, CI, M>,
+    ML: MobjectLocate,
+    TS: TimelineState<ML>,
     SKF: StorableKeyFn,
 {
     // pub(crate) fn alive_context(&self) -> &'ac AC {
@@ -1338,51 +1349,42 @@ where
     //     self.archive_state.as_ref().unwrap()
     // }
 
-    fn start(
-        channel_attachment: &'a ChannelAttachment<
-            'a,
-            W::Architecture<SKF>,
-            <<W as WorldIndexed<LI>>::Layer as Layer>::Architecture<SKF>,
-            <PresentationChannel<M::MobjectPresentation> as Channel>::Architecture<SKF>,
-        >,
-        mobject: Arc<M>,
-        timeline_state: TS,
-    ) -> Self {
-        Self {
-            channel_attachment,
-            alive_id: channel_attachment.timer().generate_alive_id(),
-            spawn_time: channel_attachment.timer().time(),
-            mobject,
-            timeline_state,
-        }
-    }
-
-    fn end(&mut self) -> Arc<TS::OutputMobject> {
+    fn end(&mut self) -> TS::OutputMobjectLocate {
         // let mut recorder = self.alive_recorder.recorder.borrow_mut();
         // let entry = recorder.get_mut(self.index).unwrap();
         self.timeline_state.take().unwrap().transit(
-            self.spawn_time.clone()..self.channel_attachment.timer().time(),
+            self.alive_id,
+            Range {
+                start: self.spawn_time.clone(),
+                end: self.channel_attachment.timer().time(),
+            },
             self.channel_attachment,
-            self.mobject.clone(),
+            self.mobject_locate.clone(),
         )
     }
 
-    fn map<F, FO>(&mut self, f: F) -> Alive<'a, SKF, W, TS::OutputMobject, FO>
+    fn map<F, FO>(&mut self, f: F) -> Alive<'a, TS::OutputMobjectLocate, FO, SKF>
     where
-        F: FnOnce(Arc<TS::OutputMobject>) -> FO,
-        FO: TimelineState<SKF, W, TS::OutputMobject>,
+        F: FnOnce(&TS) -> FO,
+        FO: TimelineState<TS::OutputMobjectLocate>,
     {
-        self.channel_attachment.start(f(self.end()))
+        self.channel_attachment
+            .start(self.end(), f(self.timeline_state.as_ref().unwrap()))
+    }
+
+    fn update<F>(&mut self, f: F) -> Alive<'a, TS::OutputMobjectLocate, TS, SKF>
+    where
+        F: FnOnce(&mut <TS::OutputMobjectLocate as MobjectLocate>::Mobject),
+    {
+        self.channel_attachment
+            .start(self.end().map(f), self.timeline_state.clone().unwrap())
     }
 }
 
-impl<W, LI, CI, M, TS, SKF> Drop for Alive<'_, W, LI, CI, M, TS, SKF>
+impl<ML, TS, SKF> Drop for Alive<'_, ML, TS, SKF>
 where
-    W: WorldIndexed<LI>,
-    <W as WorldIndexed<LI>>::Layer:
-        LayerIndexed<CI, Channel = PresentationChannel<M::MobjectPresentation>>,
-    M: Mobject<<W as WorldIndexed<LI>>::Layer>,
-    TS: TimelineState<W, LI, CI, M>,
+    ML: MobjectLocate,
+    TS: TimelineState<ML>,
     SKF: StorableKeyFn,
 {
     fn drop(&mut self) {
@@ -1392,11 +1394,11 @@ where
     }
 }
 
-pub trait TimelineState<L>
+pub trait TimelineState<ML>
 where
-    L: Locate,
+    ML: MobjectLocate,
 {
-    type OutputLocate;
+    type OutputMobjectLocate: MobjectLocate;
     // type OutputLayerIndex;
     // type OutputChannelIndex;
     // type OutputMobject;
@@ -1404,40 +1406,44 @@ where
     fn transit<SKF>(
         self,
         alive_id: usize,
-        time_interval: Range<Time>,
+        time_interval: Range<Rc<Time>>,
         channel_attachment: &ChannelAttachment<
-            <L::World as World>::Architecture<SKF>,
-            <L::Layer as Layer>::Architecture<SKF>,
-            <L::Channel as World>::Architecture<SKF>,
+            ML::World,
+            ML::LayerIndex,
+            ML::Layer,
+            ML::ChannelIndex,
+            ML::Channel,
+            SKF,
         >,
-        locate: L,
-    ) -> Self::OutputLocate
+        mobject_locate: ML,
+    ) -> Self::OutputMobjectLocate
     where
         SKF: StorableKeyFn;
 }
 
 pub struct CollapsedTimelineState;
 
-impl<L> TimelineState<L> for CollapsedTimelineState
+impl<ML> TimelineState<ML> for CollapsedTimelineState
 where
-    L: Locate,
+    ML: MobjectLocate,
 {
     // type MobjectPresentation = M::MobjectPresentation;
-    type OutputLayerIndex = L::LayerIndex;
-    type OutputChannelIndex = L::ChannelIndex;
-    type OutputMobject = L::Mobject;
+    type OutputMobjectLocate = ML;
 
     fn transit<SKF>(
         self,
         alive_id: usize,
-        time_interval: Range<Time>,
+        time_interval: Range<Rc<Time>>,
         channel_attachment: &ChannelAttachment<
-            W::Architecture<SKF>,
-            <<W as WorldIndexed<LI>>::Layer as Layer>::Architecture<SKF>,
-            <PresentationChannel<M::MobjectPresentation> as Channel>::Architecture<SKF>,
+            ML::World,
+            ML::LayerIndex,
+            ML::Layer,
+            ML::ChannelIndex,
+            ML::Channel,
+            SKF,
         >,
-        mobject: Arc<M>,
-    ) -> Arc<Self::OutputMobject>
+        mobject_locate: ML,
+    ) -> Self::OutputMobjectLocate
     where
         SKF: StorableKeyFn,
     {
@@ -1445,10 +1451,10 @@ where
             alive_id,
             time_interval,
             Box::new(StaticTimeline {
-                mobject: mobject.clone(),
+                mobject_locate: mobject_locate.clone(),
             }),
         );
-        mobject
+        mobject_locate
     }
 }
 
@@ -1456,30 +1462,28 @@ pub struct IndeterminedTimelineState<TE> {
     time_eval: TE,
 }
 
-impl<W, LI, CI, M, TE> TimelineState<W, LI, CI, M> for IndeterminedTimelineState<TE>
+impl<ML, TE> TimelineState<ML> for IndeterminedTimelineState<TE>
 where
-    W: WorldIndexed<LI>,
-    <W as WorldIndexed<LI>>::Layer:
-        LayerIndexed<CI, Channel = PresentationChannel<M::MobjectPresentation>>,
-    M: Mobject<<W as WorldIndexed<LI>>::Layer>,
+    ML: MobjectLocate,
     TE: TimeEval,
 {
     // type MobjectPresentation = M::MobjectPresentation;
-    type OutputLayerIndex = LI;
-    type OutputChannelIndex = CI;
-    type OutputMobject = M;
+    type OutputMobjectLocate = ML;
 
     fn transit<SKF>(
         self,
         alive_id: usize,
-        time_interval: Range<Time>,
+        time_interval: Range<Rc<Time>>,
         channel_attachment: &ChannelAttachment<
-            W::Architecture<SKF>,
-            <<W as WorldIndexed<LI>>::Layer as Layer>::Architecture<SKF>,
-            <PresentationChannel<M::MobjectPresentation> as Channel>::Architecture<SKF>,
+            ML::World,
+            ML::LayerIndex,
+            ML::Layer,
+            ML::ChannelIndex,
+            ML::Channel,
+            SKF,
         >,
-        mobject: Arc<M>,
-    ) -> Arc<Self::OutputMobject>
+        mobject_locate: ML,
+    ) -> Self::OutputMobjectLocate
     where
         SKF: StorableKeyFn,
     {
@@ -1487,10 +1491,10 @@ where
             alive_id,
             time_interval,
             Box::new(StaticTimeline {
-                mobject: mobject.clone(),
+                mobject_locate: mobject_locate.clone(),
             }),
         );
-        mobject
+        mobject_locate
     }
 }
 
@@ -1500,30 +1504,28 @@ pub struct UpdateTimelineState<TE, U> {
     update: U,
 }
 
-impl<W, LI, CI, M, TE, U> TimelineState<W, LI, CI, M> for UpdateTimelineState<TE, U>
+impl<ML, TE, U> TimelineState<ML> for UpdateTimelineState<TE, U>
 where
-    W: WorldIndexed<LI>,
-    <W as WorldIndexed<LI>>::Layer:
-        LayerIndexed<CI, Channel = PresentationChannel<M::MobjectPresentation>>,
-    M: Mobject<<W as WorldIndexed<LI>>::Layer>,
+    ML: MobjectLocate,
     TE: TimeEval,
-    U: Update<TE::OutputTimeMetric, <W as WorldIndexed<LI>>::Layer, M>,
+    U: Update<TE::OutputTimeMetric, ML>,
 {
-    type OutputLayerIndex = LI;
-    type OutputChannelIndex = CI;
-    type OutputMobject = M;
+    type OutputMobjectLocate = ML;
 
     fn transit<SKF>(
         self,
         alive_id: usize,
-        time_interval: Range<Time>,
+        time_interval: Range<Rc<Time>>,
         channel_attachment: &ChannelAttachment<
-            W::Architecture<SKF>,
-            <<W as WorldIndexed<LI>>::Layer as Layer>::Architecture<SKF>,
-            <PresentationChannel<M::MobjectPresentation> as Channel>::Architecture<SKF>,
+            ML::World,
+            ML::LayerIndex,
+            ML::Layer,
+            ML::ChannelIndex,
+            ML::Channel,
+            SKF,
         >,
-        mobject: Arc<M>,
-    ) -> Arc<Self::OutputMobject>
+        mobject_locate: ML,
+    ) -> Self::OutputMobjectLocate
     where
         SKF: StorableKeyFn,
     {
@@ -1531,12 +1533,12 @@ where
             alive_id,
             time_interval,
             Box::new(DynamicTimeline {
-                mobject: mobject.clone(),
+                mobject_locate: mobject_locate.clone(),
                 time_eval: self.time_eval,
                 update: self.update,
             }),
         );
-        mobject
+        mobject_locate
     }
 
     // type OutputTimelineState = M, CollapsedTimelineState;
@@ -1569,45 +1571,43 @@ pub struct ConstructTimelineState<TE, C> {
     construct: C,
 }
 
-impl<L, TE, C> TimelineState<L> for ConstructTimelineState<TE, C>
+impl<ML, TE, C> TimelineState<ML> for ConstructTimelineState<TE, C>
 where
-    W: WorldIndexed<LI>,
-    <W as WorldIndexed<LI>>::Layer:
-        LayerIndexed<CI, Channel = PresentationChannel<M::MobjectPresentation>>,
-    M: Mobject<<W as WorldIndexed<LI>>::Layer>,
+    ML: MobjectLocate,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-    C: Construct<W, <W as WorldIndexed<LI>>::Layer, M>,
-    W: WorldIndexed<C::OutputLayerIndex>,
+    C: Construct<ML>,
 {
-    type OutputLayerIndex = C::OutputLayerIndex;
-    type OutputChannelIndex = <C::OutputMobject as Mobject<
-        <W as WorldIndexed<C::OutputLayerIndex>>::Layer,
-    >>::ChannelIndex;
-    type OutputMobject = C::OutputMobject;
+    type OutputMobjectLocate = C::OutputMobjectLocate;
 
     fn transit<SKF>(
         self,
         alive_id: usize,
-        time_interval: Range<Time>,
+        time_interval: Range<Rc<Time>>,
         channel_attachment: &ChannelAttachment<
-            W::Architecture<SKF>,
-            <<W as WorldIndexed<LI>>::Layer as Layer>::Architecture<SKF>,
-            <PresentationChannel<M::MobjectPresentation> as Channel>::Architecture<SKF>,
+            ML::World,
+            ML::LayerIndex,
+            ML::Layer,
+            ML::ChannelIndex,
+            ML::Channel,
+            SKF,
         >,
-        mobject: Arc<M>,
-    ) -> Arc<Self::OutputMobject>
+        mobject_locate: ML,
+    ) -> Self::OutputMobjectLocate
     where
         SKF: StorableKeyFn,
     {
         let timer = Timer::new();
-        let world_architecture = W::architecture::<SKF>();
+        let world_architecture = ML::World::architecture::<SKF>();
         let output_mobject = {
             let world_attachment =
                 World::attachment(&world_architecture, channel_attachment.config(), &timer);
             self.construct
                 .construct::<_, _, SKF>(
                     &world_attachment,
-                    mobject.spawn(WorldIndexed::index::<LI>(&world_architecture)),
+                    mobject_locate
+                        .mobject()
+                        .clone()
+                        .spawn(WorldIndexed::index::<ML::LayerIndex>(&world_architecture)),
                 )
                 .end()
         };
@@ -1852,7 +1852,7 @@ impl Deref for DenormalizedTimeMetric {
 impl TimeMetric for DenormalizedTimeMetric {}
 
 pub trait TimeEval:
-    'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
     type OutputTimeMetric: TimeMetric;
 
@@ -1861,7 +1861,7 @@ pub trait TimeEval:
 
 pub trait IncreasingTimeEval: TimeEval {}
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct NormalizedTimeEval;
 
 impl TimeEval for NormalizedTimeEval {
@@ -1876,7 +1876,7 @@ impl TimeEval for NormalizedTimeEval {
 
 impl IncreasingTimeEval for NormalizedTimeEval {}
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct DenormalizedTimeEval;
 
 impl TimeEval for DenormalizedTimeEval {
@@ -1889,10 +1889,10 @@ impl TimeEval for DenormalizedTimeEval {
 
 impl IncreasingTimeEval for DenormalizedTimeEval {}
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct RateComposeTimeEval<RA, TE> {
     rate: RA,
-    time_eval: Arc<TE>,
+    time_eval: TE,
 }
 
 impl<RA, TE> TimeEval for RateComposeTimeEval<RA, TE>
@@ -1944,43 +1944,40 @@ where
         RA: Rate<TM>;
 }
 
-pub trait ApplyUpdate<TM, M>: Sized
+pub trait ApplyUpdate<TM, ML>: Sized
 where
     TM: TimeMetric,
-    M: Mobject,
+    ML: MobjectLocate,
 {
     type Output<U>
     where
-        U: Update<TM, M>;
+        U: Update<TM, ML>;
 
     fn apply_update<U>(self, update: U) -> Self::Output<U>
     where
-        U: Update<TM, M>;
+        U: Update<TM, ML>;
 }
 
-pub trait ApplyConstruct<SKF, W, M>: Sized
+pub trait ApplyConstruct<ML>: Sized
 where
-    SKF: StorableKeyFn,
-    W: WorldErasure<SKF>,
-    M: Mobject,
+    ML: MobjectLocate,
 {
     type Output<C>
     where
-        C: Construct<SKF, W, M>;
+        C: Construct<ML>;
 
     fn apply_construct<C>(self, construct: C) -> Self::Output<C>
     where
-        C: Construct<SKF, W, M>;
+        C: Construct<ML>;
 }
 
-impl<'a, SKF, W, M> Quantize for Alive<'a, SKF, W, M, CollapsedTimelineState>
+impl<'a, ML, SKF> Quantize for Alive<'a, ML, CollapsedTimelineState, SKF>
 where
+    ML: MobjectLocate,
     SKF: StorableKeyFn,
-    W: WorldErasure<SKF>,
-    M: Mobject,
 {
     type Output<TE> =
-        Alive<'a, SKF, W, M, IndeterminedTimelineState<TE>>
+        Alive<'a, ML, IndeterminedTimelineState<TE>, SKF>
     where
         TE: TimeEval;
 
@@ -1989,59 +1986,50 @@ where
     where
         TE: TimeEval,
     {
-        self.map(|timeline_state| IndeterminedTimelineState {
-            mobject: timeline_state.mobject.clone(),
-            time_eval: Arc::new(time_eval),
-        })
+        self.map(|_timeline_state| IndeterminedTimelineState { time_eval })
     }
 }
 
-impl<'a, SKF, W, M, TE, U> Collapse for Alive<'a, SKF, W, M, UpdateTimelineState<TE, U>>
+impl<'a, ML, TE, U, SKF> Collapse for Alive<'a, ML, UpdateTimelineState<TE, U>, SKF>
 where
-    SKF: StorableKeyFn,
-    W: WorldErasure<SKF>,
-    M: Mobject,
+    ML: MobjectLocate,
     TE: TimeEval,
-    U: Update<TE::OutputTimeMetric, M>,
+    U: Update<TE::OutputTimeMetric, ML>,
+    SKF: StorableKeyFn,
 {
-    type Output = Alive<'a, SKF, W, M, CollapsedTimelineState>;
+    type Output = Alive<'a, ML, CollapsedTimelineState, SKF>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        self.map(|timeline_state| CollapsedTimelineState {
-            mobject: timeline_state.mobject.clone(),
-        })
+        self.map(|_timeline_state| CollapsedTimelineState)
     }
 }
 
-impl<'a, SKF, W, M, TE, C> Collapse for Alive<'a, SKF, W, ConstructTimelineState<M, TE, C>>
+impl<'a, ML, TE, C, SKF> Collapse for Alive<'a, ML, ConstructTimelineState<TE, C>, SKF>
 where
-    SKF: StorableKeyFn,
-    W: WorldErasure<SKF>,
-    M: Mobject,
+    ML: MobjectLocate,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-    C: Construct<M>,
+    C: Construct<ML>,
+    SKF: StorableKeyFn,
 {
-    type Output = Alive<'a, SKF, W, M, CollapsedTimelineState>;
+    type Output = Alive<'a, ML, CollapsedTimelineState, SKF>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        self.map(|timeline_state| CollapsedTimelineState {
-            mobject: timeline_state.mobject.clone(),
-        })
+        // TODO
+        self.map(|_timeline_state| CollapsedTimelineState)
     }
 }
 
-impl<'a, SKF, W, M, TE> ApplyRate<TE::OutputTimeMetric>
-    for Alive<'a, SKF, W, M, IndeterminedTimelineState<TE>>
+impl<'a, ML, TE, SKF> ApplyRate<TE::OutputTimeMetric>
+    for Alive<'a, ML, IndeterminedTimelineState<TE>, SKF>
 where
-    SKF: StorableKeyFn,
-    W: WorldErasure<SKF>,
-    M: Mobject,
+    ML: MobjectLocate,
     TE: TimeEval,
+    SKF: StorableKeyFn,
 {
     type Output<RA> =
-        Alive<'a, SKF, W, M, IndeterminedTimelineState<RateComposeTimeEval<RA, TE>>>
+        Alive<'a, ML, IndeterminedTimelineState<RateComposeTimeEval<RA, TE>>, SKF>
     where
         RA: Rate<TE::OutputTimeMetric>;
 
@@ -2051,84 +2039,81 @@ where
         RA: Rate<TE::OutputTimeMetric>,
     {
         self.map(|timeline_state| IndeterminedTimelineState {
-            mobject: timeline_state.mobject.clone(),
-            time_eval: Arc::new(RateComposeTimeEval {
+            time_eval: RateComposeTimeEval {
                 rate,
                 time_eval: timeline_state.time_eval.clone(),
-            }),
+            },
         })
     }
 }
 
-impl<'a, SKF, W, M, TE> ApplyUpdate<TE::OutputTimeMetric, M>
-    for Alive<'a, SKF, W, M, IndeterminedTimelineState<TE>>
+impl<'a, ML, TE, SKF> ApplyUpdate<TE::OutputTimeMetric, ML>
+    for Alive<'a, ML, IndeterminedTimelineState<TE>, SKF>
 where
-    SKF: StorableKeyFn,
-    W: WorldErasure<SKF>,
-    M: Mobject,
+    ML: MobjectLocate,
     TE: TimeEval,
+    SKF: StorableKeyFn,
 {
     type Output<U> =
-        Alive<'a, SKF, W, M, UpdateTimelineState<TE, U>>
+        Alive<'a, ML, UpdateTimelineState<TE, U>, SKF>
     where
-        U: Update<TE::OutputTimeMetric, M>;
+        U: Update<TE::OutputTimeMetric, ML>;
 
     #[must_use]
     fn apply_update<U>(mut self, update: U) -> Self::Output<U>
     where
-        U: Update<TE::OutputTimeMetric, M>,
+        U: Update<TE::OutputTimeMetric, ML>,
     {
         self.map(|timeline_state| UpdateTimelineState {
-            mobject: timeline_state.mobject,
-            time_eval: timeline_state.time_eval,
-            update: Arc::new(update),
+            // mobject: timeline_state.mobject,
+            time_eval: timeline_state.time_eval.clone(),
+            update,
         })
     }
 }
 
-impl<'a, SKF, W, M> ApplyUpdate<NormalizedTimeMetric, M>
-    for Alive<'a, SKF, W, M, CollapsedTimelineState>
+impl<'a, ML, SKF> ApplyUpdate<NormalizedTimeMetric, ML>
+    for Alive<'a, ML, CollapsedTimelineState, SKF>
 where
+    ML: MobjectLocate,
     SKF: StorableKeyFn,
-    W: WorldErasure<SKF>,
-    M: Mobject,
 {
     type Output<U> =
-        Alive<'a, SKF, W, M, CollapsedTimelineState>
+        Alive<'a, ML, CollapsedTimelineState, SKF>
     where
-        U: Update<NormalizedTimeMetric, M>;
+        U: Update<NormalizedTimeMetric, ML>;
 
     #[must_use]
     fn apply_update<U>(mut self, update: U) -> Self::Output<U>
     where
-        U: Update<NormalizedTimeMetric, M>,
+        U: Update<NormalizedTimeMetric, ML>,
     {
-        self.map(|timeline_state| {
-            let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
-            update.update(NormalizedTimeMetric(1.0), &mut mobject);
-            CollapsedTimelineState {
-                mobject: Arc::new(mobject),
-            }
+        self.update(|mobject| {
+            update.update(NormalizedTimeMetric(1.0), mobject);
+            // let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
+            // update.update(NormalizedTimeMetric(1.0), &mut mobject);
+            // CollapsedTimelineState {
+            //     mobject: Arc::new(mobject),
+            // }
         })
     }
 }
 
-impl<'a, SKF, W, M, TE> ApplyConstruct<L, M> for Alive<'a, SKF, W, M, IndeterminedTimelineState<TE>>
+impl<'a, ML, TE, SKF> ApplyConstruct<ML> for Alive<'a, ML, IndeterminedTimelineState<TE>, SKF>
 where
-    SKF: StorableKeyFn,
-    W: WorldErasure<SKF>,
-    M: Mobject,
+    ML: MobjectLocate,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+    SKF: StorableKeyFn,
 {
     type Output<C> =
-        Alive<'a, W, ConstructTimelineState<C::OutputMobject, TE>>
+        Alive<'a, ML, ConstructTimelineState<TE, C>, SKF>
     where
-        C: Construct<L, M>;
+        C: Construct<ML>;
 
     #[must_use]
     fn apply_construct<C>(mut self, construct: C) -> Self::Output<C>
     where
-        C: Construct<L, M>,
+        C: Construct<ML>,
     {
         self.map(|alive_context, timeline_state| {
             let child_root = AliveRoot::new(alive_context.alive_context().config());

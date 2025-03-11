@@ -2,8 +2,6 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use crate::traits::StorableKeyFn;
-
 // trait SerdeKey: 'static + Clone + Eq + Hash + Send + Sync {}
 
 // impl<T> SerdeKey for T where T: 'static + Clone + Eq + Hash + Send + Sync {}
@@ -366,6 +364,14 @@ where
 //     }
 // }
 
+pub trait StorableKeyFn: 'static + Send + Sync {
+    type Output: Clone + Eq + Hash + Send + Sync;
+
+    fn eval_key<S>(serializable: &S) -> Self::Output
+    where
+        S: serde::Serialize;
+}
+
 pub trait Storable: 'static + Send + Sync {
     type StorableKey<SKF>: Clone + Eq + Hash + Send + Sync
     where
@@ -429,7 +435,7 @@ impl SlotKeyGeneratorTypeMap {
         Self(typemap_rev::TypeMap::new())
     }
 
-    pub fn allocate<SKF, S>(
+    pub fn allocate<S, SKF>(
         &mut self,
         storable: &S,
     ) -> StorageKey<
@@ -437,15 +443,15 @@ impl SlotKeyGeneratorTypeMap {
         <<S::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
     >
     where
-        SKF: StorableKeyFn,
         S: Storable,
+        SKF: StorableKeyFn,
     {
         let storable_key = storable.key();
         StorageKey {
             storable_key: storable_key.clone(),
             slot_key: self
                 .0
-                .entry::<SlotKeyGeneratorWrapper<S::StorableKey, S::Slot>>()
+                .entry::<SlotKeyGeneratorWrapper<S::StorableKey<SKF>, S::Slot>>()
                 .or_insert_with(HashMap::new)
                 .entry(storable_key)
                 .or_insert_with(<S::Slot as Slot>::SlotKeyGenerator::new)
