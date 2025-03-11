@@ -1,6 +1,6 @@
+use core::range::Range;
 use std::borrow::Cow;
 use std::ops::Deref;
-use std::ops::Range;
 use std::path::PathBuf;
 
 use comemo::Track;

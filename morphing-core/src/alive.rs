@@ -1,5 +1,5 @@
+use core::range::Range;
 use std::cell::RefCell;
-use std::ops::Range;
 
 use super::config::Config;
 use super::renderable::RenderableEntry;

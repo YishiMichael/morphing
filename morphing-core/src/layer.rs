@@ -1,6 +1,6 @@
+use core::range::Range;
 use std::cell::RefCell;
 use std::fmt::Debug;
-use std::ops::Range;
 use std::sync::Arc;
 
 use super::config::Config;

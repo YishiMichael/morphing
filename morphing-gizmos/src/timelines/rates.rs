@@ -1,5 +1,5 @@
+use core::range::Range;
 use std::fmt::Debug;
-use std::ops::Range;
 
 use morphing_core::timeline::ApplyRate;
 use morphing_core::traits::Rate;

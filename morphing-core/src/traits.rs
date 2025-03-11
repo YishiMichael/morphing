@@ -1,18 +1,33 @@
 use std::fmt::Debug;
 use std::hash::Hash;
 
+use super::config::Config;
 use super::stage::Layer;
-use super::stage::World;
+use super::stage::LayerIndexed;
+use super::stage::PresentationChannel;
+use super::stage::WorldIndexed;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
+use super::timeline::Locate;
+use super::timeline::Located;
 use super::timeline::TimeMetric;
+use super::timeline::Timer;
 
-pub trait Mobject:
+pub trait Mobject<L>:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+where
+    L: Layer,
 {
+    type ChannelIndex;
     type MobjectPresentation: 'static + Send + Sync;
 
-    // fn spawn(self, layer: &L) -> Alive<CollapsedTimelineState<Self>>;
+    fn spawn<W, LI, SKF>(
+        self: Box<Self>,
+        layer_architecture: &L::Architecture<SKF>,
+    ) -> Alive<'_, Located<W, LI, Self::ChannelIndex, Self>, CollapsedTimelineState, SKF>
+    where
+        Located<W, LI, Self::ChannelIndex, Self>: Locate,
+        SKF: StorableKeyFn;
     fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
 }
 
@@ -24,14 +39,9 @@ pub trait MobjectBuilder<L>
 where
     L: Layer,
 {
-    type Instantiation: Mobject;
+    type Instantiation: Mobject<L>;
 
-    fn instantiate<'a, SKF, C>(
-        self,
-        layer_attachment: &'a L::Attachment<'a, C, SKF>,
-    ) -> Alive<'a, Self::Instantiation, CollapsedTimelineState, C, SKF>
-    where
-        SKF: StorableKeyFn;
+    fn instantiate(self, config: &Config) -> Self::Instantiation;
 }
 
 pub trait Rate<TM>:
@@ -50,11 +60,12 @@ where
 {
 }
 
-pub trait Update<TM, M>:
+pub trait Update<TM, L, M>:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     TM: TimeMetric,
-    M: Mobject,
+    L: Layer,
+    M: Mobject<L>,
 {
     fn update(&self, time_metric: TM, mobject: &mut M);
     fn prepare_presentation(
@@ -78,19 +89,34 @@ where
 //     fn act(self, mobject: &M) -> Self::Update;
 // }
 
-pub trait Construct<W, M>: 'static
+pub trait Construct<W, L, M>: 'static
 where
-    W: World,
-    M: Mobject,
+    W: WorldIndexed<Self::OutputLayerIndex>,
+    L: Layer,
+    M: Mobject<L>,
 {
-    type OutputMobject: Mobject;
+    type OutputLayerIndex;
+    type OutputMobject: Mobject<<W as WorldIndexed<Self::OutputLayerIndex>>::Layer>;
 
-    fn construct<'a, C, SKF>(
+    fn construct<'a, LI, CI, SKF>(
         self,
-        world_attachment: &'a W::Attachment<'a, C, SKF>,
-        mobject: Alive<'a, M, CollapsedTimelineState, C, SKF>,
-    ) -> Alive<'a, Self::OutputMobject, CollapsedTimelineState, C, SKF>
+        world_attachment: &'a W::Attachment<'a, W::Architecture<SKF>>,
+        config: &Config,
+        timer: &Timer,
+        mobject: Alive<'a, W, LI, CI, M, CollapsedTimelineState, SKF>,
+    ) -> Alive<
+        'a,
+        W,
+        Self::OutputLayerIndex,
+        <Self::OutputMobject as Mobject<<W as WorldIndexed<Self::OutputLayerIndex>>::Layer>>::ChannelIndex,
+        Self::OutputMobject,
+        CollapsedTimelineState,
+        SKF,
+    >
     where
+        W: WorldIndexed<LI, Layer = L>,
+        L: LayerIndexed<CI, Channel = PresentationChannel<M::MobjectPresentation>>,
+        <W as WorldIndexed<Self::OutputLayerIndex>>::Layer: LayerIndexed<<Self::OutputMobject as Mobject<<W as WorldIndexed<Self::OutputLayerIndex>>::Layer>>::ChannelIndex, Channel = PresentationChannel<<Self::OutputMobject as Mobject<<W as WorldIndexed<Self::OutputLayerIndex>>::Layer>>::MobjectPresentation>>,
         SKF: StorableKeyFn;
 }
 
