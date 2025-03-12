@@ -9,16 +9,11 @@ use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use serde::Deserialize;
-use serde::Serialize;
-
 use super::stage::Channel;
-use super::stage::ChannelArchitecture;
 use super::stage::ChannelAttachment;
 use super::stage::ChannelIndex;
 use super::stage::LayerIndex;
 use super::stage::LayerIndexed;
-use super::stage::Node;
 use super::stage::World;
 use super::stage::WorldIndexed;
 use super::storable::DynKey;
@@ -160,14 +155,14 @@ trait Timeline:
     // fn erased(&self) -> Box<dyn Timeline<PresentationStorage = Self::PresentationStorage>>;
 
     // let slot_map = storage
-    //     .entry::<TimelineAllocation<Self::SerdeKey, Self::MobjectPresentationStorage>>()
+    //     .entry::<AllocatedTimeline<Self::SerdeKey, Self::MobjectPresentationStorage>>()
     //     .or_insert_with(HashMap::new);
     // let serde_key = self.serde_key();
     // let slot_id = slot_map
     //     .entry(serde_key.clone())
     //     .or_insert_with(Self::MobjectPresentationStorage::new)
     //     .allocate();
-    // TimelineAllocation {
+    // AllocatedTimeline {
     //     serde_key,
     //     slot_id,
     //     timeline: self as Box<
@@ -471,7 +466,7 @@ where
 }
 
 // #[derive(Debug)]
-// struct TimelineAllocation<SK, MPS>
+// struct AllocatedTimeline<SK, MPS>
 // where
 //     SK: SerdeKey,
 //     MPS: MobjectPresentationStorage,
@@ -482,7 +477,7 @@ where
 //     timeline: Box<dyn Timeline<SerdeKey = SK, MobjectPresentationStorage = MPS>>,
 // }
 
-// impl<SK, MPS> typemap_rev::TypeMapKey for TimelineAllocation<SK, MPS>
+// impl<SK, MPS> typemap_rev::TypeMapKey for AllocatedTimeline<SK, MPS>
 // where
 //     SK: SerdeKey,
 //     MPS: MobjectPresentationStorage,
@@ -490,7 +485,7 @@ where
 //     type Value = HashMap<SK, MPS>;
 // }
 
-// impl<SK, MPS> TimelineAllocation<SK, MPS>
+// impl<SK, MPS> AllocatedTimeline<SK, MPS>
 // where
 //     SK: SerdeKey,
 //     MPS: MobjectPresentationStorage,
@@ -521,7 +516,7 @@ where
 //     }
 // }
 
-// #[derive(Deserialize, Serialize)]
+// #[derive(serde::Deserialize, serde::Serialize)]
 // struct Preallocated<T>
 // where
 //     T: Timeline,
@@ -529,16 +524,18 @@ where
 //     timeline: T,
 // }
 
-pub trait TimelineErasure: serde_traitobject::Deserialize + serde_traitobject::Serialize {
+pub trait TimelineErasure:
+    'static + serde_traitobject::Deserialize + serde_traitobject::Serialize
+{
     type MobjectPresentation;
 
-    fn allocation(
+    fn allocate(
         self: Box<Self>,
         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Box<dyn TimelineAllocationErasure<MobjectPresentation = Self::MobjectPresentation>>;
+    ) -> Box<dyn AllocatedTimelineErasure<MobjectPresentation = Self::MobjectPresentation>>;
 }
 
-pub trait TimelineAllocationErasure {
+pub trait AllocatedTimelineErasure {
     type MobjectPresentation: Send + Sync;
 
     fn prepare(
@@ -552,7 +549,7 @@ pub trait TimelineAllocationErasure {
     ) -> PresentationKey<Self::MobjectPresentation>;
 }
 
-struct TimelineAllocation<T>
+struct AllocatedTimeline<T>
 where
     T: Timeline,
 {
@@ -571,18 +568,18 @@ where
 {
     type MobjectPresentation = T::MobjectPresentation;
 
-    fn allocation(
+    fn allocate(
         self: Box<Self>,
         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Box<dyn TimelineAllocationErasure<MobjectPresentation = Self::MobjectPresentation>> {
-        Box::new(TimelineAllocation {
+    ) -> Box<dyn AllocatedTimelineErasure<MobjectPresentation = Self::MobjectPresentation>> {
+        Box::new(AllocatedTimeline {
             storage_key: Arc::new(slot_key_generator_type_map.allocate(&self)),
             timeline: self,
         })
     }
 }
 
-impl<T> TimelineAllocationErasure for TimelineAllocation<T>
+impl<T> AllocatedTimelineErasure for AllocatedTimeline<T>
 where
     T: Timeline,
 {
@@ -853,7 +850,7 @@ where
 // struct ChannelAllocated<SKF, MP>(
 //     Vec<(
 //         Range<Time>,
-//         Box<dyn TimelineAllocationErasure<SKF, MobjectPresentation = MP>>,
+//         Box<dyn AllocatedTimelineErasure<SKF, MobjectPresentation = MP>>,
 //     )>,
 // );
 
@@ -934,7 +931,7 @@ where
 //     }
 // }
 
-// #[derive(Deserialize, Serialize)]
+// #[derive(serde::Deserialize, serde::Serialize)]
 // pub struct PreallocatedTimelineEntry<SKF, MP>
 // where
 //     MP: 'static,
@@ -946,17 +943,17 @@ where
 //     >,
 // }
 
-// pub struct TimelineAllocationEntry<SKF, MP> {
+// pub struct AllocatedTimelineEntry<SKF, MP> {
 //     time_interval: Range<Time>,
-//     timeline: Box<dyn TimelineAllocation<MobjectPresentation = MP, StorableKeyFn = SKF>>,
+//     timeline: Box<dyn AllocatedTimeline<MobjectPresentation = MP, StorableKeyFn = SKF>>,
 // }
 
 // impl<SKF, MP> PreallocatedTimelineEntry<SKF, MP> {
 //     fn allocate(
 //         self,
 //         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-//     ) -> TimelineAllocationEntry<SKF, MP> {
-//         TimelineAllocationEntry {
+//     ) -> AllocatedTimelineEntry<SKF, MP> {
+//         AllocatedTimelineEntry {
 //             time_interval: self.time_interval,
 //             timeline: self
 //                 .timeline
@@ -966,12 +963,12 @@ where
 //     }
 // }
 
-// struct TimelineEntriesSink<'v>(Option<&'v mut Vec<WithTimeInterval<Box<dyn TimelineAllocation>>>>);
+// struct TimelineEntriesSink<'v>(Option<&'v mut Vec<WithTimeInterval<Box<dyn AllocatedTimeline>>>>);
 
-// impl Extend<Box<dyn TimelineAllocation>> for TimelineEntriesSink<'_> {
+// impl Extend<Box<dyn AllocatedTimeline>> for TimelineEntriesSink<'_> {
 //     fn extend<I>(&mut self, iter: I)
 //     where
-//         I: IntoIterator<Item = Box<dyn TimelineAllocation>>,
+//         I: IntoIterator<Item = Box<dyn AllocatedTimeline>>,
 //     {
 //         if let Some(timeline_entries) = self.0.as_mut() {
 //             timeline_entries.extend(iter)
@@ -1254,14 +1251,14 @@ pub trait TypeQuery:
     type Channel: Channel<MobjectPresentation = Self::MobjectPresentation>;
     type Mobject: Mobject;
     type MobjectPresentation: MobjectPresentation<Self::Mobject>;
-    type Attachment: ChannelAttachment<
-        Self::World,
-        Self::LayerIndex,
-        Self::Layer,
-        Self::ChannelIndex,
-        Self::Channel,
-        Self::MobjectPresentation,
-    >;
+    // type Attachment: ChannelAttachment<
+    //     Self::World,
+    //     Self::LayerIndex,
+    //     Self::Layer,
+    //     Self::ChannelIndex,
+    //     Self::Channel,
+    //     Self::MobjectPresentation,
+    // >;
 
     // fn mobject(&self) -> &Arc<Self::Mobject>;
     // fn update<F>(self, f: F) -> Self
@@ -1270,28 +1267,28 @@ pub trait TypeQuery:
     // fn attachment(&self) -> &Self::Attachment;
 }
 
-#[derive(Deserialize, Serialize)]
-pub struct TypeQueried<W, LI, L, CI, C, M, MP, A>(PhantomData<fn() -> (W, LI, L, CI, C, M, MP, A)>);
+#[derive(serde::Deserialize, serde::Serialize)]
+pub struct TypeQueried<W, LI, L, CI, C, M, MP>(PhantomData<fn() -> (W, LI, L, CI, C, M, MP)>);
 
-impl<W, LI, L, CI, C, M, MP, A> Default for TypeQueried<W, LI, L, CI, C, M, MP, A> {
+impl<W, LI, L, CI, C, M, MP> Default for TypeQueried<W, LI, L, CI, C, M, MP> {
     fn default() -> Self {
         Self(PhantomData)
     }
 }
 
-impl<W, LI, L, CI, C, M, MP, A> Clone for TypeQueried<W, LI, L, CI, C, M, MP, A> {
+impl<W, LI, L, CI, C, M, MP> Clone for TypeQueried<W, LI, L, CI, C, M, MP> {
     fn clone(&self) -> Self {
         Self(PhantomData)
     }
 }
 
-impl<W, LI, L, CI, C, M, MP, A> Debug for TypeQueried<W, LI, L, CI, C, M, MP, A> {
+impl<W, LI, L, CI, C, M, MP> Debug for TypeQueried<W, LI, L, CI, C, M, MP> {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Ok(())
     }
 }
 
-impl<W, LI, L, CI, C, M, MP, A> TypeQuery for TypeQueried<W, LI, L, CI, C, M, MP, A>
+impl<W, LI, L, CI, C, M, MP> TypeQuery for TypeQueried<W, LI, L, CI, C, M, MP>
 where
     W: WorldIndexed<LI, Layer = L>,
     LI: LayerIndex,
@@ -1300,7 +1297,6 @@ where
     C: Channel<MobjectPresentation = MP>,
     M: Mobject,
     MP: MobjectPresentation<M>,
-    A: ChannelAttachment<W, LI, L, CI, C, MP>,
 {
     type World = W;
     type LayerIndex = LI;
@@ -1309,7 +1305,6 @@ where
     type Channel = C;
     type Mobject = M;
     type MobjectPresentation = MP;
-    type Attachment = A;
 
     // fn mobject(&self) -> &Arc<Self::Mobject> {
     //     &self.mobject
@@ -1872,7 +1867,7 @@ where
 //     config: &'c Config,
 //     // storage: &'s Storage,
 //     time: RefCell<Arc<Time>>,
-//     timeline_slots: RefCell<Vec<Result<Vec<Box<dyn TimelineAllocation>>, Arc<dyn Any>>>>,
+//     timeline_slots: RefCell<Vec<Result<Vec<Box<dyn AllocatedTimeline>>, Arc<dyn Any>>>>,
 // }
 
 // impl<L, MB> IntoArchiveState<AliveRenderable<'_, '_, LayerRenderableState<L>>> for MB

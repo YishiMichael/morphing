@@ -2,8 +2,10 @@ use std::fmt::Debug;
 
 use super::config::Config;
 use super::stage::Layer;
+use super::stage::LayerAttachment;
 use super::stage::LayerIndex;
 use super::stage::World;
+use super::stage::WorldAttachment;
 use super::stage::WorldIndexed;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
@@ -37,7 +39,7 @@ where
 
     fn instantiate<'a, W, LI>(
         self,
-        layer_attachment: &'a L::Attachment<'a, W, LI>,
+        layer_attachment: &'a LayerAttachment<'a, W, LI, L, L::Residue<'a, W, LI>>,
         config: &'a Config,
     ) -> Alive<'a, Self::OutputTypeQuery<W, LI>, CollapsedTimelineState>
     where
@@ -109,7 +111,7 @@ where
 
     fn construct<'a>(
         self,
-        world_attachment: &'a <TQ::World as World>::Attachment<'a>,
+        world_attachment: &'a WorldAttachment<'a, TQ::World, <TQ::World as World>::Residue<'a>>,
         config: &'a Config,
         timer: &'a Timer,
         alive: Alive<'a, TQ, CollapsedTimelineState>,
