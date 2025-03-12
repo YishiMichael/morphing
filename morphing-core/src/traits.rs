@@ -1,41 +1,52 @@
 use std::fmt::Debug;
 
 use super::config::Config;
+use super::stage::ChannelIndex;
 use super::stage::Layer;
 use super::stage::World;
-use super::storable::StorableKeyFn;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
-use super::timeline::MobjectLocate;
-use super::timeline::MobjectLocated;
+use super::timeline::CompatibleAttachment;
+use super::timeline::MobjectQuery;
 use super::timeline::TimeMetric;
 use super::timeline::Timer;
 
-pub trait Mobject<L>:
+pub trait Mobject:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
-where
-    L: Layer,
 {
-    type ChannelIndex;
-    type MobjectPresentation: 'static + Send + Sync;
+    // type MobjectPresentation: 'static + Send + Sync;
 
-    fn spawn<W, LI, SKF>(
-        self: Box<Self>,
-        layer_architecture: &L::Architecture<SKF>,
-    ) -> Alive<'_, MobjectLocated<W, LI, Self::ChannelIndex, Self>, CollapsedTimelineState, SKF>
-    where
-        MobjectLocated<W, LI, Self::ChannelIndex, Self>: MobjectLocate,
-        SKF: StorableKeyFn;
-    fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
+    // fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
+}
+
+pub trait MobjectPresentation<M>: 'static + Send + Sync
+where
+    M: Mobject,
+{
+    fn presentation(mobject: &M, device: &wgpu::Device) -> Self;
 }
 
 pub trait MobjectBuilder<L>
 where
     L: Layer,
 {
-    type Instantiation: Mobject<L>;
+    type ChannelIndex: ChannelIndex;
+    type Mobject: Mobject;
+    type MobjectPresentation: MobjectPresentation<Self::Mobject>;
 
-    fn instantiate(self, config: &Config) -> Self::Instantiation;
+    fn instantiate(self, config: &Config) -> Self::Mobject;
+    // fn spawn<W, LI, SKF>(
+    //     mobject: Box<Self::Mobject>,
+    //     layer_architecture: &L::Architecture<SKF>,
+    // ) -> Alive<
+    //     '_,
+    //     MobjectQueried<W, LI, Self::ChannelIndex, Self::Mobject>,
+    //     CollapsedTimelineState,
+    //     SKF,
+    // >
+    // where
+    //     MobjectQueried<W, LI, Self::ChannelIndex, Self::Mobject>: MobjectQuery,
+    //     SKF: StorableKeyFn;
 }
 
 pub trait Rate<TM>:
@@ -54,18 +65,18 @@ where
 {
 }
 
-pub trait Update<TM, ML>:
+pub trait Update<TM, MQ>:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     TM: TimeMetric,
-    ML: MobjectLocate,
+    MQ: MobjectQuery,
 {
-    fn update(&self, time_metric: TM, mobject: &mut ML::Mobject);
+    fn update(&self, time_metric: TM, mobject: &mut MQ::Mobject);
     fn prepare_presentation(
         &self,
         time_metric: TM,
-        mobject: &ML::Mobject,
-        mobject_presentation: &mut <ML::Mobject as Mobject<ML::Layer>>::MobjectPresentation,
+        mobject: &MQ::Mobject,
+        mobject_presentation: &mut MQ::MobjectPresentation,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -82,21 +93,21 @@ where
 //     fn act(self, mobject: &M) -> Self::Update;
 // }
 
-pub trait Construct<ML>: 'static
+pub trait Construct<MQ>: 'static
 where
-    ML: MobjectLocate,
+    MQ: MobjectQuery,
 {
-    type OutputMobjectLocate: MobjectLocate;
+    // type OutputMobjectQuery: MobjectQuery;
 
-    fn construct<'a, SKF>(
+    fn construct<'a, CA>(
         self,
-        world_attachment: &'a <ML::World as World>::Attachment<'a, SKF>,
-        config: &Config,
-        timer: &Timer,
-        alive: Alive<'a, ML, CollapsedTimelineState, SKF>,
-    ) -> Alive<'a, Self::OutputMobjectLocate, CollapsedTimelineState, SKF>
+        world_attachment: &'a <MQ::World as World>::Attachment<'a, MQ::StorableKeyFn>,
+        config: &'a Config,
+        timer: &'a Timer,
+        alive: Alive<'a, MQ, CA, CollapsedTimelineState>,
+    ) -> Alive<'a, MQ, CA, CollapsedTimelineState>
     where
-        SKF: StorableKeyFn;
+        CA: CompatibleAttachment<MQ>;
 }
 
 // TODO: alive container morphisms

@@ -1,26 +1,23 @@
 use core::range::Range;
 use std::cell::RefCell;
 use std::marker::PhantomData;
-use std::rc::Rc;
 
 use super::config::Config;
 use super::storable::SlotKeyGeneratorTypeMap;
 use super::storable::StorableKeyFn;
 use super::storable::StorageTypeMap;
-use super::timeline::Alive;
 use super::timeline::IncreasingTimeEval;
-use super::timeline::MobjectLocate;
 use super::timeline::NormalizedTimeMetric;
 use super::timeline::PresentationKey;
 use super::timeline::Time;
 use super::timeline::TimelineAllocationErasure;
 use super::timeline::TimelineErasure;
-use super::timeline::TimelineState;
 use super::timeline::Timer;
-use super::traits::Mobject;
 
-pub trait Channel: 'static {
-    type Architecture<SKF>
+pub trait Channel: 'static + Sized {
+    type MobjectPresentation: Send + Sync;
+
+    type Architecture<SKF>: ChannelArchitecture<Self::MobjectPresentation, SKF>
     where
         SKF: StorableKeyFn;
     type Archive<SKF>
@@ -32,10 +29,20 @@ pub trait Channel: 'static {
     type Prepare<SKF>
     where
         SKF: StorableKeyFn;
-    type Attachment<'c, W, LI, L, CI, SKF>
+    type Attachment<'c, W, LI, L, CI, SKF>: ChannelAttachment<
+        W,
+        LI,
+        L,
+        CI,
+        Self,
+        Self::MobjectPresentation,
+        SKF,
+    >
     where
         W: WorldIndexed<LI, Layer = L>,
+        LI: LayerIndex,
         L: LayerIndexed<CI, Channel = Self>,
+        CI: ChannelIndex,
         SKF: StorableKeyFn;
 
     fn architecture<SKF>() -> Self::Architecture<SKF>
@@ -79,7 +86,9 @@ pub trait Channel: 'static {
     ) -> Self::Attachment<'c, W, LI, L, CI, SKF>
     where
         W: WorldIndexed<LI, Layer = L>,
+        LI: LayerIndex,
         L: LayerIndexed<CI, Channel = Self>,
+        CI: ChannelIndex,
         SKF: StorableKeyFn;
 }
 
@@ -99,6 +108,7 @@ pub trait Layer: 'static {
     type Attachment<'l, W, LI, SKF>
     where
         W: WorldIndexed<LI, Layer = Self>,
+        LI: LayerIndex,
         SKF: StorableKeyFn;
 
     fn architecture<SKF>() -> Self::Architecture<SKF>
@@ -148,6 +158,7 @@ pub trait Layer: 'static {
     ) -> Self::Attachment<'l, W, LI, SKF>
     where
         W: WorldIndexed<LI, Layer = Self>,
+        LI: LayerIndex,
         SKF: StorableKeyFn;
 }
 
@@ -216,7 +227,22 @@ pub trait World: 'static {
         SKF: StorableKeyFn;
 }
 
-pub trait LayerIndexed<CI>: Layer {
+pub trait ChannelIndex: 'static {}
+
+pub trait LayerIndex: 'static {}
+
+pub struct Idx<const IDX: usize>([(); IDX]);
+
+impl<const IDX: usize> ChannelIndex for Idx<IDX> {}
+
+impl<const IDX: usize> LayerIndex for Idx<IDX> {}
+
+// pub trait Channel<MP>: Channel {}
+
+pub trait LayerIndexed<CI>: Layer
+where
+    CI: ChannelIndex,
+{
     type Channel: Channel;
 
     fn index<SKF>(this: &Self::Architecture<SKF>) -> &<Self::Channel as Channel>::Architecture<SKF>
@@ -224,7 +250,10 @@ pub trait LayerIndexed<CI>: Layer {
         SKF: StorableKeyFn;
 }
 
-pub trait WorldIndexed<LI>: World {
+pub trait WorldIndexed<LI>: World
+where
+    LI: LayerIndex,
+{
     type Layer: Layer;
 
     fn index<SKF>(this: &Self::Architecture<SKF>) -> &<Self::Layer as Layer>::Architecture<SKF>
@@ -232,11 +261,13 @@ pub trait WorldIndexed<LI>: World {
         SKF: StorableKeyFn;
 }
 
-pub struct ChannelAttachment<'c, W, LI, L, CI, C, SKF>
+pub struct ChannelAttachmentImpl<'c, W, LI, L, CI, C, MP, SKF>
 where
     W: WorldIndexed<LI, Layer = L>,
+    LI: LayerIndex,
     L: LayerIndexed<CI, Channel = C>,
-    C: Channel,
+    CI: ChannelIndex,
+    C: Channel<MobjectPresentation = MP>,
     SKF: StorableKeyFn,
 {
     config: &'c Config,
@@ -246,11 +277,13 @@ where
     layer_architecture: &'c L::Architecture<SKF>,
     channel_index: PhantomData<CI>,
     channel_architecture: &'c C::Architecture<SKF>,
+    residue: PhantomData<MP>,
 }
 
-pub struct LayerAttachment<'l, W, LI, L, R, SKF>
+pub struct LayerAttachmentImpl<'l, W, LI, L, R, SKF>
 where
     W: WorldIndexed<LI, Layer = L>,
+    LI: LayerIndex,
     L: Layer,
     SKF: StorableKeyFn,
 {
@@ -262,7 +295,7 @@ where
     residue: R,
 }
 
-pub struct WorldAttachment<'w, W, R, SKF>
+pub struct WorldAttachmentImpl<'w, W, R, SKF>
 where
     W: World,
     SKF: StorableKeyFn,
@@ -273,7 +306,7 @@ where
     residue: R,
 }
 
-enum Node<V> {
+pub(crate) enum Node<V> {
     Singleton(V),
     Multiton(Vec<V>),
 }
@@ -291,7 +324,29 @@ impl<V> IntoIterator for Node<V> {
     }
 }
 
-struct ChannelArchitecture<MP, SKF>(
+pub(crate) trait ChannelArchitecture<MP, SKF>
+where
+    MP: 'static + Send + Sync,
+    SKF: StorableKeyFn,
+{
+    fn new() -> Self;
+    fn push(
+        &self,
+        alive_id: usize,
+        node: Node<(
+            Range<Time>,
+            Box<dyn TimelineErasure<SKF, MobjectPresentation = MP>>,
+        )>,
+    );
+    fn archive(
+        self,
+    ) -> Vec<(
+        Range<Time>,
+        Box<dyn TimelineErasure<SKF, MobjectPresentation = MP>>,
+    )>;
+}
+
+struct ChannelArchitectureImpl<MP, SKF>(
     RefCell<
         Vec<(
             usize,
@@ -306,7 +361,7 @@ where
     MP: 'static + Send + Sync,
     SKF: StorableKeyFn;
 
-impl<MP, SKF> ChannelArchitecture<MP, SKF>
+impl<MP, SKF> ChannelArchitecture<MP, SKF> for ChannelArchitectureImpl<MP, SKF>
 where
     MP: 'static + Send + Sync,
     SKF: StorableKeyFn,
@@ -341,100 +396,63 @@ where
     }
 }
 
-impl<W, LI, L, CI, MP, SKF> ChannelAttachment<'_, W, LI, L, CI, PresentationChannel<MP>, SKF>
+pub(crate) trait ChannelAttachment<W, LI, L, CI, C, MP, SKF>: Sized
 where
     W: WorldIndexed<LI, Layer = L>,
-    L: LayerIndexed<CI, Channel = PresentationChannel<MP>>,
+    LI: LayerIndex,
+    L: LayerIndexed<CI, Channel = C>,
+    CI: ChannelIndex,
+    C: Channel<MobjectPresentation = MP>,
+    SKF: StorableKeyFn,
+{
+    fn config(&self) -> &Config;
+    fn timer(&self) -> &Timer;
+    fn world_architecture(&self) -> &W::Architecture<SKF>;
+    fn layer_architecture(&self) -> &L::Architecture<SKF>;
+    fn channel_architecture(&self) -> &C::Architecture<SKF>;
+}
+
+impl<W, LI, L, CI, C, MP, SKF> ChannelAttachment<W, LI, L, CI, C, MP, SKF>
+    for ChannelAttachmentImpl<'_, W, LI, L, CI, C, MP, SKF>
+where
+    W: WorldIndexed<LI, Layer = L>,
+    LI: LayerIndex,
+    L: LayerIndexed<CI, Channel = C>,
+    CI: ChannelIndex,
+    C: Channel<MobjectPresentation = MP>,
     MP: 'static + Send + Sync,
     SKF: StorableKeyFn,
 {
-    pub(crate) fn config(&self) -> &Config {
+    fn config(&self) -> &Config {
         self.config
     }
 
-    pub(crate) fn timer(&self) -> &Timer {
-        &self.timer
+    fn timer(&self) -> &Timer {
+        self.timer
     }
 
-    pub(crate) fn push(
-        &self,
-        alive_id: usize,
-        time_interval: Range<Rc<Time>>,
-        timeline: Box<dyn TimelineErasure<SKF, MobjectPresentation = MP>>,
-    ) {
-        if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
-            self.channel_architecture.push(
-                alive_id,
-                Node::Singleton((
-                    Range {
-                        start: *time_interval.start,
-                        end: *time_interval.end,
-                    },
-                    timeline,
-                )),
-            );
-        }
+    fn world_architecture(&self) -> &W::Architecture<SKF> {
+        self.world_architecture
     }
 
-    pub(crate) fn extend<TE>(
-        &self,
-        alive_id: usize,
-        time_interval: Range<Rc<Time>>,
-        time_eval: &TE,
-        world_time: Time,
-        world_architecture: W::Architecture<SKF>,
-    ) where
-        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-    {
-        if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
-            W::merge(
-                self.world_architecture,
-                W::archive(world_architecture),
-                alive_id,
-                time_eval,
-                Range {
-                    start: *time_interval.start,
-                    end: *time_interval.end,
-                },
-                Range {
-                    start: 0.0,
-                    end: world_time,
-                },
-            );
-        }
+    fn layer_architecture(&self) -> &L::Architecture<SKF> {
+        self.layer_architecture
     }
 
-    pub(crate) fn start<ML, TS>(&self, mobject_locate: ML, timeline_state: TS) -> Alive<ML, TS, SKF>
-    where
-        ML: MobjectLocate<
-            World = W,
-            LayerIndex = LI,
-            Layer = L,
-            ChannelIndex = CI,
-            Channel = PresentationChannel<MP>,
-        >,
-        <ML as MobjectLocate>::Mobject: Mobject<L, MobjectPresentation = MP>,
-        TS: TimelineState<ML>,
-    {
-        Alive {
-            alive_id: self.timer().generate_alive_id(),
-            spawn_time: self.timer().time(),
-            channel_attachment: self,
-            mobject_locate,
-            timeline_state: Some(timeline_state),
-        }
+    fn channel_architecture(&self) -> &C::Architecture<SKF> {
+        self.channel_architecture
     }
-
-    // pub fn spawn_mobject<M>(&self, mobject: Box<M>) -> Alive<MobjectLocate<>>
 }
 
-pub struct PresentationChannel<MP>(MP);
+pub struct ChannelImpl<MP>(MP);
 
-impl<MP> Channel for PresentationChannel<MP>
+impl<MP> Channel for ChannelImpl<MP>
 where
     MP: 'static + Send + Sync,
 {
-    type Architecture<SKF> = ChannelArchitecture<MP, SKF>
+    type MobjectPresentation = MP;
+
+    type Architecture<SKF> = ChannelArchitectureImpl<MP, SKF>
     where
         SKF: StorableKeyFn;
     type Archive<SKF> = Vec<(Range<Time>, Box<dyn TimelineErasure<SKF, MobjectPresentation = MP>>)>
@@ -446,17 +464,19 @@ where
     type Prepare<SKF> = Vec<PresentationKey<MP, SKF>>
     where
         SKF: StorableKeyFn;
-    type Attachment<'c, W, LI, L, CI, SKF> = ChannelAttachment<'c, W, LI, L, CI, PresentationChannel<MP>, SKF>
+    type Attachment<'c, W, LI, L, CI, SKF> = ChannelAttachmentImpl<'c, W, LI, L, CI, Self, MP, SKF>
     where
         W: WorldIndexed<LI, Layer = L>,
+        LI: LayerIndex,
         L: LayerIndexed<CI, Channel = Self>,
+        CI: ChannelIndex,
         SKF: StorableKeyFn;
 
     fn architecture<SKF>() -> Self::Architecture<SKF>
     where
         SKF: StorableKeyFn,
     {
-        ChannelArchitecture::new()
+        ChannelArchitectureImpl::new()
     }
 
     fn merge<TE, SKF>(
@@ -561,10 +581,12 @@ where
     ) -> Self::Attachment<'c, W, LI, L, CI, SKF>
     where
         W: WorldIndexed<LI, Layer = L>,
+        LI: LayerIndex,
         L: LayerIndexed<CI, Channel = Self>,
+        CI: ChannelIndex,
         SKF: StorableKeyFn,
     {
-        ChannelAttachment {
+        ChannelAttachmentImpl {
             config,
             timer,
             world_architecture,
@@ -572,9 +594,12 @@ where
             layer_architecture,
             channel_index: PhantomData,
             channel_architecture: architecture,
+            residue: PhantomData,
         }
     }
 }
+
+// impl<MP> Channel<MP> for ChannelImpl<MP> where MP: 'static + Send + Sync {}
 
 // test code
 struct MyMobjectPresentation0;
@@ -597,35 +622,36 @@ pub struct MyLayer<channel_0 = (), channel_1 = ()> {
 
 impl Layer for MyLayer {
     type Architecture<SKF> = MyLayer<
-        <PresentationChannel<MyMobjectPresentation0> as Channel>::Architecture<SKF>,
-        <PresentationChannel<MyMobjectPresentation1> as Channel>::Architecture<SKF>,
+        <ChannelImpl<MyMobjectPresentation0> as Channel>::Architecture<SKF>,
+        <ChannelImpl<MyMobjectPresentation1> as Channel>::Architecture<SKF>,
     >
     where
         SKF: StorableKeyFn;
     type Archive<SKF> = MyLayer<
-        <PresentationChannel<MyMobjectPresentation0> as Channel>::Archive<SKF>,
-        <PresentationChannel<MyMobjectPresentation1> as Channel>::Archive<SKF>,
+        <ChannelImpl<MyMobjectPresentation0> as Channel>::Archive<SKF>,
+        <ChannelImpl<MyMobjectPresentation1> as Channel>::Archive<SKF>,
     >
     where
         SKF: StorableKeyFn;
     type Allocation<SKF> = MyLayer<
-        <PresentationChannel<MyMobjectPresentation0> as Channel>::Allocation<SKF>,
-        <PresentationChannel<MyMobjectPresentation1> as Channel>::Allocation<SKF>,
+        <ChannelImpl<MyMobjectPresentation0> as Channel>::Allocation<SKF>,
+        <ChannelImpl<MyMobjectPresentation1> as Channel>::Allocation<SKF>,
     >
     where
         SKF: StorableKeyFn;
     type Prepare<SKF> = MyLayer<
-        <PresentationChannel<MyMobjectPresentation0> as Channel>::Prepare<SKF>,
-        <PresentationChannel<MyMobjectPresentation1> as Channel>::Prepare<SKF>,
+        <ChannelImpl<MyMobjectPresentation0> as Channel>::Prepare<SKF>,
+        <ChannelImpl<MyMobjectPresentation1> as Channel>::Prepare<SKF>,
     >
     where
         SKF: StorableKeyFn;
-    type Attachment<'l, W, LI, SKF> = LayerAttachment<'l, W, LI, MyLayer, MyLayer<
-        <PresentationChannel<MyMobjectPresentation0> as Channel>::Attachment<'l, W, LI, MyLayer, [(); 0], SKF>,
-        <PresentationChannel<MyMobjectPresentation1> as Channel>::Attachment<'l, W, LI, MyLayer, [(); 1], SKF>,
+    type Attachment<'l, W, LI, SKF> = LayerAttachmentImpl<'l, W, LI, MyLayer, MyLayer<
+        <ChannelImpl<MyMobjectPresentation0> as Channel>::Attachment<'l, W, LI, MyLayer, Idx<0>, SKF>,
+        <ChannelImpl<MyMobjectPresentation1> as Channel>::Attachment<'l, W, LI, MyLayer, Idx<1>, SKF>,
     >, SKF>
     where
         W: WorldIndexed<LI, Layer = Self>,
+        LI: LayerIndex,
         SKF: StorableKeyFn;
 
     fn architecture<SKF>() -> Self::Architecture<SKF>
@@ -633,8 +659,8 @@ impl Layer for MyLayer {
         SKF: StorableKeyFn,
     {
         MyLayer {
-            channel_0: <PresentationChannel<MyMobjectPresentation0> as Channel>::architecture(),
-            channel_1: <PresentationChannel<MyMobjectPresentation1> as Channel>::architecture(),
+            channel_0: <ChannelImpl<MyMobjectPresentation0> as Channel>::architecture(),
+            channel_1: <ChannelImpl<MyMobjectPresentation1> as Channel>::architecture(),
         }
     }
 
@@ -649,7 +675,7 @@ impl Layer for MyLayer {
         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
         SKF: StorableKeyFn,
     {
-        <PresentationChannel<MyMobjectPresentation0> as Channel>::merge(
+        <ChannelImpl<MyMobjectPresentation0> as Channel>::merge(
             &architecture.channel_0,
             archive.channel_0,
             alive_id,
@@ -657,7 +683,7 @@ impl Layer for MyLayer {
             parent_time_interval,
             child_time_interval,
         );
-        <PresentationChannel<MyMobjectPresentation1> as Channel>::merge(
+        <ChannelImpl<MyMobjectPresentation1> as Channel>::merge(
             &architecture.channel_1,
             archive.channel_1,
             alive_id,
@@ -672,10 +698,10 @@ impl Layer for MyLayer {
         SKF: StorableKeyFn,
     {
         MyLayer {
-            channel_0: <PresentationChannel<MyMobjectPresentation0> as Channel>::archive(
+            channel_0: <ChannelImpl<MyMobjectPresentation0> as Channel>::archive(
                 architecture.channel_0,
             ),
-            channel_1: <PresentationChannel<MyMobjectPresentation1> as Channel>::archive(
+            channel_1: <ChannelImpl<MyMobjectPresentation1> as Channel>::archive(
                 architecture.channel_1,
             ),
         }
@@ -689,11 +715,11 @@ impl Layer for MyLayer {
         SKF: StorableKeyFn,
     {
         MyLayer {
-            channel_0: <PresentationChannel<MyMobjectPresentation0> as Channel>::allocation(
+            channel_0: <ChannelImpl<MyMobjectPresentation0> as Channel>::allocation(
                 archive.channel_0,
                 slot_key_generator_type_map,
             ),
-            channel_1: <PresentationChannel<MyMobjectPresentation1> as Channel>::allocation(
+            channel_1: <ChannelImpl<MyMobjectPresentation1> as Channel>::allocation(
                 archive.channel_1,
                 slot_key_generator_type_map,
             ),
@@ -712,7 +738,7 @@ impl Layer for MyLayer {
         SKF: StorableKeyFn,
     {
         MyLayer {
-            channel_0: <PresentationChannel<MyMobjectPresentation0> as Channel>::prepare(
+            channel_0: <ChannelImpl<MyMobjectPresentation0> as Channel>::prepare(
                 &allocation.channel_0,
                 time,
                 storage_type_map,
@@ -720,7 +746,7 @@ impl Layer for MyLayer {
                 queue,
                 format,
             ),
-            channel_1: <PresentationChannel<MyMobjectPresentation1> as Channel>::prepare(
+            channel_1: <ChannelImpl<MyMobjectPresentation1> as Channel>::prepare(
                 &allocation.channel_1,
                 time,
                 storage_type_map,
@@ -750,23 +776,24 @@ impl Layer for MyLayer {
     ) -> Self::Attachment<'l, W, LI, SKF>
     where
         W: WorldIndexed<LI, Layer = Self>,
+        LI: LayerIndex,
         SKF: StorableKeyFn,
     {
-        LayerAttachment {
+        LayerAttachmentImpl {
             config,
             timer,
             world_architecture,
             layer_index: PhantomData,
             layer_architecture: architecture,
             residue: MyLayer {
-                channel_0: <PresentationChannel<MyMobjectPresentation0> as Channel>::attachment(
+                channel_0: <ChannelImpl<MyMobjectPresentation0> as Channel>::attachment(
                     &architecture.channel_0,
                     config,
                     timer,
                     world_architecture,
                     architecture,
                 ),
-                channel_1: <PresentationChannel<MyMobjectPresentation1> as Channel>::attachment(
+                channel_1: <ChannelImpl<MyMobjectPresentation1> as Channel>::attachment(
                     &architecture.channel_1,
                     config,
                     timer,
@@ -778,8 +805,8 @@ impl Layer for MyLayer {
     }
 }
 
-impl LayerIndexed<[(); 0]> for MyLayer {
-    type Channel = PresentationChannel<MyMobjectPresentation0>;
+impl LayerIndexed<Idx<0>> for MyLayer {
+    type Channel = ChannelImpl<MyMobjectPresentation0>;
 
     fn index<SKF>(this: &Self::Architecture<SKF>) -> &<Self::Channel as Channel>::Architecture<SKF>
     where
@@ -789,8 +816,8 @@ impl LayerIndexed<[(); 0]> for MyLayer {
     }
 }
 
-impl LayerIndexed<[(); 1]> for MyLayer {
-    type Channel = PresentationChannel<MyMobjectPresentation1>;
+impl LayerIndexed<Idx<1>> for MyLayer {
+    type Channel = ChannelImpl<MyMobjectPresentation1>;
 
     fn index<SKF>(this: &Self::Architecture<SKF>) -> &<Self::Channel as Channel>::Architecture<SKF>
     where
@@ -804,7 +831,7 @@ impl LayerIndexed<[(); 1]> for MyLayer {
 //     type Layer: Layer;
 // }
 
-// impl<SKF, W> MyLayerAttachment<'_, SKF, W>
+// impl<SKF, W> MyLayerAttachmentImpl<'_, SKF, W>
 // where
 //     SKF: StorableKeyFn,
 //     W: WorldErasure<SKF>,
@@ -872,9 +899,9 @@ impl World for MyWorld {
     >
     where
         SKF: StorableKeyFn;
-    type Attachment<'w, SKF> = WorldAttachment<'w, MyWorld, MyWorld<
-        <MyLayer as Layer>::Attachment<'w, MyWorld, [(); 0], SKF>,
-        <MyLayer as Layer>::Attachment<'w, MyWorld, [(); 1], SKF>,
+    type Attachment<'w, SKF> = WorldAttachmentImpl<'w, MyWorld, MyWorld<
+        <MyLayer as Layer>::Attachment<'w, MyWorld, Idx<0>, SKF>,
+        <MyLayer as Layer>::Attachment<'w, MyWorld, Idx<1>, SKF>,
     >, SKF>
     where
         SKF: StorableKeyFn;
@@ -992,7 +1019,7 @@ impl World for MyWorld {
     where
         SKF: StorableKeyFn,
     {
-        WorldAttachment {
+        WorldAttachmentImpl {
             config,
             timer,
             world_architecture: architecture,
@@ -1014,7 +1041,7 @@ impl World for MyWorld {
     }
 }
 
-impl WorldIndexed<[(); 0]> for MyWorld {
+impl WorldIndexed<Idx<0>> for MyWorld {
     type Layer = MyLayer;
 
     fn index<SKF>(this: &Self::Architecture<SKF>) -> &<Self::Layer as Layer>::Architecture<SKF>
@@ -1025,7 +1052,7 @@ impl WorldIndexed<[(); 0]> for MyWorld {
     }
 }
 
-impl WorldIndexed<[(); 1]> for MyWorld {
+impl WorldIndexed<Idx<1>> for MyWorld {
     type Layer = MyLayer;
 
     fn index<SKF>(this: &Self::Architecture<SKF>) -> &<Self::Layer as Layer>::Architecture<SKF>
