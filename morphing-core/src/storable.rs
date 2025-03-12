@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use dyn_clone::DynClone;
+use dyn_eq::DynEq;
+use dyn_hash::DynHash;
+
 // trait SerdeKey: 'static + Clone + Eq + Hash + Send + Sync {}
 
 // impl<T> SerdeKey for T where T: 'static + Clone + Eq + Hash + Send + Sync {}
@@ -364,23 +368,30 @@ where
 //     }
 // }
 
-pub trait StorableKeyFn: 'static + Send + Sync {
-    type Output: Clone + Eq + Hash + Send + Sync;
+// pub trait StorableKeyFn: 'static + Send + Sync {
+//     type Output: Clone + Eq + Hash + Send + Sync;
 
-    fn eval_key<S>(serializable: &S) -> Self::Output
-    where
-        S: serde::Serialize;
-}
+//     fn eval_key<S>(serializable: &S) -> Self::Output
+//     where
+//         S: serde::Serialize;
+// }
+
+pub(crate) trait DynKey: 'static + Send + Sync + DynClone + DynEq + DynHash {}
+
+impl<K> DynKey for K where K: 'static + Clone + Eq + Hash + Send + Sync {}
+
+dyn_clone::clone_trait_object!(DynKey);
+dyn_eq::eq_trait_object!(DynKey);
+dyn_hash::hash_trait_object!(DynKey);
 
 pub trait Storable: 'static + Send + Sync {
-    type StorableKey<SKF>: Clone + Eq + Hash + Send + Sync
-    where
-        SKF: StorableKeyFn;
+    type StorableKey: Clone + Eq + Hash + Send + Sync;
     type Slot: Slot;
 
-    fn key<SKF>(&self) -> Self::StorableKey<SKF>
-    where
-        SKF: StorableKeyFn;
+    fn key(
+        &self,
+        storable_key_fn: &fn(&dyn serde_traitobject::Serialize) -> Box<dyn DynKey>,
+    ) -> Self::StorableKey;
     // fn store(&self) -> <Self::Slot as Slot>::Value;
 }
 
@@ -428,30 +439,35 @@ where
     type Value = HashMap<K, S::SlotKeyGenerator>;
 }
 
-pub struct SlotKeyGeneratorTypeMap(typemap_rev::TypeMap);
+pub struct SlotKeyGeneratorTypeMap {
+    type_map: typemap_rev::TypeMap,
+    storable_key_fn: fn(&dyn serde_traitobject::Serialize) -> Box<dyn DynKey>,
+}
 
 impl SlotKeyGeneratorTypeMap {
-    pub fn new() -> Self {
-        Self(typemap_rev::TypeMap::new())
+    pub fn new(storable_key_fn: fn(&dyn serde_traitobject::Serialize) -> Box<dyn DynKey>) -> Self {
+        Self {
+            type_map: typemap_rev::TypeMap::new(),
+            storable_key_fn,
+        }
     }
 
-    pub fn allocate<S, SKF>(
+    pub fn allocate<S>(
         &mut self,
         storable: &S,
     ) -> StorageKey<
-        S::StorableKey<SKF>,
+        S::StorableKey,
         <<S::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
     >
     where
         S: Storable,
-        SKF: StorableKeyFn,
     {
-        let storable_key = storable.key();
+        let storable_key = storable.key(&self.storable_key_fn);
         StorageKey {
             storable_key: storable_key.clone(),
             slot_key: self
-                .0
-                .entry::<SlotKeyGeneratorWrapper<S::StorableKey<SKF>, S::Slot>>()
+                .type_map
+                .entry::<SlotKeyGeneratorWrapper<S::StorableKey, S::Slot>>()
                 .or_insert_with(HashMap::new)
                 .entry(storable_key)
                 .or_insert_with(<S::Slot as Slot>::SlotKeyGenerator::new)
@@ -460,7 +476,7 @@ impl SlotKeyGeneratorTypeMap {
     }
 
     pub fn expire(&mut self) {
-        self.0.clear();
+        self.type_map.clear();
     }
 }
 
@@ -498,11 +514,15 @@ where
     }
 }
 
-pub struct StorageTypeMap(typemap_rev::TypeMap<dyn Expire>);
+pub struct StorageTypeMap {
+    type_map: typemap_rev::TypeMap<dyn Expire>,
+}
 
 impl StorageTypeMap {
     pub fn new() -> Self {
-        Self(typemap_rev::TypeMap::custom())
+        Self {
+            type_map: typemap_rev::TypeMap::custom(),
+        }
     }
 
     pub fn get_or_insert_with<K, S, F>(
@@ -515,7 +535,7 @@ impl StorageTypeMap {
         S: Slot,
         F: FnOnce() -> S::Value,
     {
-        self.0
+        self.type_map
             .entry::<StorageWrapper<K, S>>()
             .or_insert_with(HashMap::new)
             .entry(storage_key.storable_key.clone())
@@ -531,7 +551,7 @@ impl StorageTypeMap {
         K: 'static + Clone + Eq + Hash + Send + Sync,
         S: Slot,
     {
-        self.0
+        self.type_map
             .get::<StorageWrapper<K, S>>()
             .unwrap()
             .get(&storage_key.storable_key)
@@ -540,7 +560,7 @@ impl StorageTypeMap {
     }
 
     pub fn expire(&mut self) {
-        self.0 = std::mem::replace(&mut self.0, typemap_rev::TypeMap::custom())
+        self.type_map = std::mem::replace(&mut self.0, typemap_rev::TypeMap::custom())
             .into_iter()
             .map(|(type_id, mut presentation_storage)| {
                 presentation_storage.expire();

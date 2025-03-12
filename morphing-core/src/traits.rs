@@ -1,15 +1,15 @@
 use std::fmt::Debug;
 
 use super::config::Config;
-use super::stage::ChannelIndex;
 use super::stage::Layer;
+use super::stage::LayerIndex;
 use super::stage::World;
+use super::stage::WorldIndexed;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
-use super::timeline::CompatibleAttachment;
-use super::timeline::MobjectQuery;
 use super::timeline::TimeMetric;
 use super::timeline::Timer;
+use super::timeline::TypeQuery;
 
 pub trait Mobject:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
@@ -30,11 +30,19 @@ pub trait MobjectBuilder<L>
 where
     L: Layer,
 {
-    type ChannelIndex: ChannelIndex;
-    type Mobject: Mobject;
-    type MobjectPresentation: MobjectPresentation<Self::Mobject>;
+    // type ChannelIndex: ChannelIndex;
+    type OutputTypeQuery<W, LI>: TypeQuery<World = W, LayerIndex = LI, Layer = L>;
+    // type Mobject: Mobject;
+    // type MobjectPresentation: MobjectPresentation<Self::Mobject>;
 
-    fn instantiate(self, config: &Config) -> Self::Mobject;
+    fn instantiate<'a, W, LI>(
+        self,
+        layer_attachment: &'a L::Attachment<'a, W, LI>,
+        config: &'a Config,
+    ) -> Alive<'a, Self::OutputTypeQuery<W, LI>, CollapsedTimelineState>
+    where
+        W: WorldIndexed<LI, Layer = L>,
+        LI: LayerIndex;
     // fn spawn<W, LI, SKF>(
     //     mobject: Box<Self::Mobject>,
     //     layer_architecture: &L::Architecture<SKF>,
@@ -65,18 +73,18 @@ where
 {
 }
 
-pub trait Update<TM, MQ>:
+pub trait Update<TM, TQ>:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
     TM: TimeMetric,
-    MQ: MobjectQuery,
+    TQ: TypeQuery,
 {
-    fn update(&self, time_metric: TM, mobject: &mut MQ::Mobject);
+    fn update(&self, time_metric: TM, mobject: &mut TQ::Mobject);
     fn prepare_presentation(
         &self,
         time_metric: TM,
-        mobject: &MQ::Mobject,
-        mobject_presentation: &mut MQ::MobjectPresentation,
+        mobject: &TQ::Mobject,
+        mobject_presentation: &mut TQ::MobjectPresentation,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -93,21 +101,19 @@ where
 //     fn act(self, mobject: &M) -> Self::Update;
 // }
 
-pub trait Construct<MQ>: 'static
+pub trait Construct<TQ>: 'static
 where
-    MQ: MobjectQuery,
+    TQ: TypeQuery,
 {
-    // type OutputMobjectQuery: MobjectQuery;
+    type OutputTypeQuery: TypeQuery<World = TQ::World>;
 
-    fn construct<'a, CA>(
+    fn construct<'a>(
         self,
-        world_attachment: &'a <MQ::World as World>::Attachment<'a, MQ::StorableKeyFn>,
+        world_attachment: &'a <TQ::World as World>::Attachment<'a>,
         config: &'a Config,
         timer: &'a Timer,
-        alive: Alive<'a, MQ, CA, CollapsedTimelineState>,
-    ) -> Alive<'a, MQ, CA, CollapsedTimelineState>
-    where
-        CA: CompatibleAttachment<MQ>;
+        alive: Alive<'a, TQ, CollapsedTimelineState>,
+    ) -> Alive<'a, TQ, CollapsedTimelineState>;
 }
 
 // TODO: alive container morphisms
