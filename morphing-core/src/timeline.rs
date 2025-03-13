@@ -702,13 +702,13 @@ pub trait ApplyRate<TM>: Sized
 where
     TM: TimeMetric,
 {
-    type Output<RA>
+    type Output<R>
     where
-        RA: Rate<TM>;
+        R: Rate<TM>;
 
-    fn apply_rate<RA>(self, rate: RA) -> Self::Output<RA>
+    fn apply_rate<R>(self, rate: R) -> Self::Output<R>
     where
-        RA: Rate<TM>;
+        R: Rate<TM>;
 }
 
 pub trait ApplyUpdate<TM, TQ>: Sized
@@ -832,15 +832,15 @@ where
     TQ: TypeQuery,
     TE: TimeEval,
 {
-    type Output<RA> =
-        Alive<'t, 'a, TQ, IndeterminedTimelineState<RateComposeTimeEval<RA, TE>>>
+    type Output<R> =
+        Alive<'t, 'a, TQ, IndeterminedTimelineState<RateComposeTimeEval<R, TE>>>
     where
-        RA: Rate<TE::OutputTimeMetric>;
+        R: Rate<TE::OutputTimeMetric>;
 
     #[must_use]
-    fn apply_rate<RA>(mut self, rate: RA) -> Self::Output<RA>
+    fn apply_rate<R>(mut self, rate: R) -> Self::Output<R>
     where
-        RA: Rate<TE::OutputTimeMetric>,
+        R: Rate<TE::OutputTimeMetric>,
     {
         let (attached_mobject, IndeterminedTimelineState { time_eval }) = self.terminate();
         attached_mobject.launch(IndeterminedTimelineState {

@@ -1,38 +1,57 @@
-use darling::FromMeta;
+// TODO: rate, world, layer, scene, wgpu_struct, wgpu_shader_types
+
+mod rate;
+mod scene;
+mod structure;
+mod wgpu;
+
 use proc_macro::TokenStream;
 
+use darling::FromMeta;
+
+fn forward_macro_impl<I, T>(
+    f: fn(I, T) -> proc_macro2::TokenStream,
+    input: TokenStream,
+    tokens: TokenStream,
+) -> TokenStream
+where
+    I: darling::FromMeta,
+    T: syn::parse::Parse,
+{
+    darling::ast::NestedMeta::parse_meta_list(input.into())
+        .map_err(darling::Error::from)
+        .and_then(|args| FromMeta::from_list(&args))
+        .map_err(darling::Error::write_errors)
+        .map(|input| {
+            syn::parse(tokens)
+                .map_or_else(syn::Error::into_compile_error, |tokens| f(input, tokens))
+        })
+        .unwrap_or_else(|token_stream| token_stream)
+        .into()
+}
+
+macro_rules! forward {
+    ($name:ident => $path:path) => {
+        #[proc_macro_attribute]
+        pub fn $name(input: TokenStream, tokens: TokenStream) -> TokenStream {
+            forward_macro_impl($path, input, tokens)
+        }
+    };
+}
+
 #[derive(FromMeta)]
-struct SceneArgs {
+pub(crate) struct SceneArgs {
     config: Option<syn::LitStr>,
 }
 
-#[proc_macro_attribute]
-pub fn scene(input: TokenStream, tokens: TokenStream) -> TokenStream {
-    let args = match darling::ast::NestedMeta::parse_meta_list(input.into()) {
-        Ok(args) => match SceneArgs::from_list(&args) {
-            Ok(args) => args,
-            Err(error) => return TokenStream::from(error.write_errors()),
-        },
-        Err(error) => return TokenStream::from(darling::Error::from(error).write_errors()),
-    };
-    let scene_fn = syn::parse_macro_input!(tokens as syn::ItemFn);
+forward!(scene => scene::scene);
 
-    let scene_name = scene_fn.sig.ident.clone();
-    let config_content = if let Some(config) = args.config {
-        quote::quote! { Some(::std::include_str!(#config)) }
-    } else {
-        quote::quote! { None }
-    };
-    quote::quote! {
-        #scene_fn
-
-        ::morphing_core::scene::inventory::submit! {
-            ::morphing_core::scene::SceneModule {
-                name: concat!(module_path!(), "::", stringify!(#scene_name)),
-                config_content: #config_content,
-                scene_fn: #scene_name,
-            }
-        }
-    }
-    .into()
+#[derive(FromMeta)]
+pub(crate) struct RateArgs {
+    normalized: darling::util::Flag,
+    denormalized: darling::util::Flag,
+    increasing: darling::util::Flag,
+    assert: Option<syn::LitStr>,
 }
+
+forward!(rate => rate::rate);

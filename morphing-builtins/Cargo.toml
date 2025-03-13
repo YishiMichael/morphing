@@ -14,6 +14,7 @@ inventory = "0.3.17"
 itertools = "0.13.0"
 lyon = { version = "1.0.1", features = ["serialization"] }
 morphing-core = { path = "../morphing-core" }
+morphing-macros = { path = "../morphing-macros" }
 nalgebra = { version = "0.33.2", features = ["serde-serialize"] }
 palette = { version = "0.7.6", features = ["serializing"] }
 serde = "1.0.217"

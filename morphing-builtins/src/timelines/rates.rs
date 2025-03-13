@@ -1,83 +1,101 @@
-use core::range::Range;
-use std::fmt::Debug;
+use std::f32::consts::FRAC_PI_2;
 
-use morphing_core::timeline::ApplyRate;
-use morphing_core::traits::Rate;
+use morphing_macros::rate;
 
-macro_rules! rate {
-    ($($vis:vis fn $name:ident($t:ident: $t_ty:ty$(, $rate_var:ident: $rate_var_ty:ty)*) -> $return_ty:ty $body:block)*) => {paste::paste! {$(
-        $vis fn $name($t: $t_ty$(, $rate_var: $rate_var_ty)*) -> $return_ty $body
-
-        #[derive(Debug, serde::Deserialize, serde::Serialize)]
-        $vis struct [<$name:camel Rate>] {
-            $($rate_var: $rate_var_ty,)*
-        }
-
-        impl Rate for [<$name:camel Rate>] {
-            fn eval(&self, $t: $t_ty) -> $return_ty {
-                $name($t$(, self.$rate_var.clone())*)
-            }
-        }
-
-        $vis trait [<$name:camel>]: ApplyRate {
-            fn $name(self$(, $rate_var: $rate_var_ty)*) -> Self::Output<[<$name:camel Rate>]> {
-                self.apply_rate([<$name:camel Rate>] {
-                    $($rate_var,)*
-                })
-            }
-        }
-
-        impl<T> [<$name:camel>] for T where T: ApplyRate {}
-    )*}};
+#[rate(normalized, denormalized, increasing)]
+fn identity(t: f32) -> f32 {
+    t
 }
 
-rate! {
-    pub fn speed(t: f32, speed: f32) -> f32 {
-        t * speed
-    }
-
-    pub fn rewind(t: f32) -> f32 {
-        -t
-    }
-
-    pub fn smooth(t: f32) -> f32 {
-        t * t * (3.0 - 2.0 * t)
-    }
-
-    pub fn smoother(t: f32) -> f32 {
-        t * t * t * (10.0 - t * (15.0 - 6.0 * t))
-    }
+#[rate(denormalized, increasing, assert = "speed.is_sign_positive()")]
+fn speed(t: f32, speed: f32) -> f32 {
+    t * speed
 }
 
-macro_rules! rate_triplets {
-    ($($vis:vis $name:ident = |$t:ident| $body:expr;)*) => {paste::paste! {rate! {$(
-        $vis fn [<$name _in>]($t: f32) -> f32 {
-            $body
-        }
+#[rate(normalized, increasing)]
+fn smooth(t: f32) -> f32 {
+    t * t * (3.0 - 2.0 * t)
+}
 
-        $vis fn [<$name _out>]($t: f32) -> f32 {
-            1.0 - [<$name _in>](1.0 - $t)
-        }
-
-        $vis fn [<$name _in_out>]($t: f32) -> f32 {
-            if $t < 0.5 {
-                0.5 * [<$name _in>](2.0 * $t)
-            } else {
-                0.5 * ([<$name _out>](2.0 * $t - 1.0) + 1.0)
-            }
-        }
-    )*}}};
+#[rate(normalized, increasing)]
+fn smoother(t: f32) -> f32 {
+    t * t * t * (10.0 - t * (15.0 - 6.0 * t))
 }
 
 // From https://docs.rs/interpolation/latest/src/interpolation/ease.rs.html
-rate_triplets! {
-    pub quadratic = |t| t * t;
-    pub cubic = |t| t * t * t;
-    pub quartic = |t| t * t * t * t;
-    pub quintic = |t| t * t * t * t * t;
-    pub sine = |t| 1.0 - (std::f32::consts::FRAC_PI_2 * (1.0 - t)).sin();
-    pub circular = |t| 1.0 - (1.0 - t * t).sqrt();
-    pub exponential = |t| 2.0f32.powf(-10.0 * (1.0 - t));
-    pub elastic = |t| (13.0 * std::f32::consts::FRAC_PI_2 * t).sin() * 2.0f32.powf(-10.0 * (1.0 - t));
-    pub back = |t| t * t * t - t * (std::f32::consts::PI * t).sin();
+
+#[rate(normalized, increasing)]
+fn quadratic(t: f32) -> f32 {
+    t * t
 }
+
+#[rate(normalized, increasing)]
+fn cubic(t: f32) -> f32 {
+    t * t * t
+}
+
+#[rate(normalized, increasing)]
+fn quartic(t: f32) -> f32 {
+    t * t * t * t
+}
+
+#[rate(normalized, increasing)]
+fn quintic(t: f32) -> f32 {
+    t * t * t * t * t
+}
+
+#[rate(normalized, increasing)]
+fn sine(t: f32) -> f32 {
+    1.0 - (FRAC_PI_2 * (1.0 - t)).sin()
+}
+
+#[rate(normalized, increasing)]
+fn circular(t: f32) -> f32 {
+    1.0 - (1.0 - t * t).sqrt()
+}
+
+#[rate(normalized, increasing)]
+fn exponential(t: f32) -> f32 {
+    2.0f32.powf(-10.0 * (1.0 - t))
+}
+
+#[rate(normalized)]
+fn elastic(t: f32) -> f32 {
+    (13.0 * FRAC_PI_2 * t).sin() * exponential(t)
+}
+
+#[rate(normalized)]
+fn back(t: f32) -> f32 {
+    t * t * t - t * (std::f32::consts::PI * t).sin()
+}
+
+macro_rules! inherit_rate {
+    ($name:ident => $name_in:ident, $name_out:ident, $name_in_out:ident) => {
+        #[rate(normalized, increasing)]
+        fn $name_in(t: f32) -> f32 {
+            $name(t)
+        }
+
+        #[rate(normalized, increasing)]
+        fn $name_out(t: f32) -> f32 {
+            1.0 - $name_in(1.0 - t)
+        }
+
+        #[rate(normalized, increasing)]
+        fn $name_in_out(t: f32) -> f32 {
+            if t < 0.5 {
+                0.5 * $name_in(2.0 * t)
+            } else {
+                0.5 * ($name_out(2.0 * t - 1.0) + 1.0)
+            }
+        }
+    };
+}
+
+inherit_rate!(quadratic => quadratic_in, quadratic_out, quadratic_in_out);
+inherit_rate!(cubic => cubic_in, cubic_out, cubic_in_out);
+inherit_rate!(quartic => quartic_in, quartic_out, quartic_in_out);
+inherit_rate!(quintic => quintic_in, quintic_out, quintic_in_out);
+inherit_rate!(sine => sine_in, sine_out, sine_in_out);
+inherit_rate!(circular => circular_in, circular_out, circular_in_out);
+inherit_rate!(exponential => exponential_in, exponential_out, exponential_in_out);
