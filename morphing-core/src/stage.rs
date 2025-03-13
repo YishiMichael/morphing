@@ -1,7 +1,6 @@
 use core::range::Range;
 use std::cell::RefCell;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use super::config::Config;
 use super::storable::SlotKeyGeneratorTypeMap;
@@ -16,11 +15,8 @@ use super::timeline::PresentationKey;
 use super::timeline::Time;
 use super::timeline::TimelineErasure;
 use super::timeline::Timer;
-use super::timeline::TypeQueried;
 use super::timeline::TypeQuery;
-use super::traits::Mobject;
 use super::traits::MobjectBuilder;
-use super::traits::MobjectPresentation;
 
 pub trait Archive {
     type Output;
@@ -66,25 +62,26 @@ pub trait Render {
     );
 }
 
-pub trait Spawn<'a, I> {
-    type TypeQuery: TypeQuery;
-
-    fn spawn(&'a self, input: I) -> Alive<'a, Self::TypeQuery, CollapsedTimelineState>;
+pub trait Spawn<'c, 't, 'a, TQ, I>
+where
+    TQ: TypeQuery,
+{
+    fn spawn(&'a self, input: I) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
 }
 
-pub trait Channel: 'static + Sized {
+pub trait Channel: 'static + Sized + Archive {
     type MobjectPresentation;
 
     fn push<T>(&self, alive_id: usize, time_interval: Range<Time>, timeline: T)
     where
         T: TimelineErasure<MobjectPresentation = Self::MobjectPresentation>;
-    fn attachment<'c, W, LI, L, CI>(
-        &'c self,
+    fn attachment<'c, 't, W, LI, L, CI>(
+        &'t self,
         config: &'c Config,
-        timer: &'c Timer,
-        world: &'c W,
-        layer: &'c L,
-    ) -> ChannelAttachment<'c, W, LI, L, CI, Self, Self::MobjectPresentation>
+        timer: &'t Timer,
+        world: &'t W,
+        layer: &'t L,
+    ) -> ChannelAttachment<'c, 't, W, LI, L, CI, Self, Self::MobjectPresentation>
     where
         W: WorldIndexed<LI, Layer = L>,
         LI: LayerIndex,
@@ -92,37 +89,37 @@ pub trait Channel: 'static + Sized {
         CI: ChannelIndex;
 }
 
-pub trait Layer: 'static + Sized {
-    type Residue<'l, W, LI>
+pub trait Layer: 'static + Sized + Archive {
+    type Residue<'c, 't, W, LI>
     where
-        W: 'l + WorldIndexed<LI, Layer = Self>,
+        W: WorldIndexed<LI, Layer = Self>,
         LI: LayerIndex,
-        Self: 'l;
+        Self: 't;
 
-    fn attachment<'l, W, LI>(
-        &'l self,
-        config: &'l Config,
-        timer: &'l Timer,
-        world: &'l W,
-    ) -> LayerAttachment<'l, W, LI, Self, Self::Residue<'l, W, LI>>
+    fn attachment<'c, 't, W, LI>(
+        &'t self,
+        config: &'c Config,
+        timer: &'t Timer,
+        world: &'t W,
+    ) -> LayerAttachment<'c, 't, W, LI, Self, Self::Residue<'c, 't, W, LI>>
     where
         W: WorldIndexed<LI, Layer = Self>,
         LI: LayerIndex;
 }
 
-pub trait World: 'static + Sized {
-    type Residue<'w>
+pub trait World: 'static + Sized + Archive {
+    type Residue<'c, 't>
     where
-        Self: 'w;
+        Self: 't;
 
-    fn attachment<'w>(
-        &'w self,
-        config: &'w Config,
-        timer: &'w Timer,
-    ) -> WorldAttachment<'w, Self, Self::Residue<'w>>;
+    fn attachment<'c, 't>(
+        &'t self,
+        config: &'c Config,
+        timer: &'t Timer,
+    ) -> WorldAttachment<'c, 't, Self, Self::Residue<'c, 't>>;
 }
 
-pub struct ChannelAttachment<'c, W, LI, L, CI, C, MP>
+pub struct ChannelAttachment<'c, 't, W, LI, L, CI, C, MP>
 where
     W: WorldIndexed<LI, Layer = L>,
     LI: LayerIndex,
@@ -130,38 +127,38 @@ where
     CI: ChannelIndex,
     C: Channel<MobjectPresentation = MP>,
 {
-    config: &'c Config,
-    timer: &'c Timer,
-    world: &'c W,
-    layer_index: PhantomData<LI>,
-    layer: &'c L,
-    channel_index: PhantomData<CI>,
-    channel: &'c C,
-    mobject_presentation: PhantomData<MP>,
+    pub config: &'c Config,
+    pub timer: &'t Timer,
+    pub world: &'t W,
+    pub layer_index: PhantomData<LI>,
+    pub layer: &'t L,
+    pub channel_index: PhantomData<CI>,
+    pub channel: &'t C,
+    pub mobject_presentation: PhantomData<MP>,
 }
 
-pub struct LayerAttachment<'l, W, LI, L, R>
+pub struct LayerAttachment<'c, 't, W, LI, L, R>
 where
     W: WorldIndexed<LI, Layer = L>,
     LI: LayerIndex,
     L: Layer,
 {
-    config: &'l Config,
-    timer: &'l Timer,
-    world: &'l W,
-    layer_index: PhantomData<LI>,
-    layer: &'l L,
-    residue: R,
+    pub config: &'c Config,
+    pub timer: &'t Timer,
+    pub world: &'t W,
+    pub layer_index: PhantomData<LI>,
+    pub layer: &'t L,
+    pub residue: R,
 }
 
-pub struct WorldAttachment<'w, W, R>
+pub struct WorldAttachment<'c, 't, W, R>
 where
     W: World,
 {
-    config: &'w Config,
-    timer: &'w Timer,
-    world: &'w W,
-    residue: R,
+    pub config: &'c Config,
+    pub timer: &'t Timer,
+    pub world: &'t W,
+    pub residue: R,
 }
 
 // pub(crate) trait ChannelAttachment<W, LI, L, CI, C, MP>: 'static
@@ -321,7 +318,22 @@ where
 {
     type Channel: Channel;
 
-    fn index(&self) -> &Self::Channel;
+    // fn index(&self) -> &Self::Channel;
+    fn index_attachment<'c, 't, 'a, W, LI>(
+        attachment: &'a LayerAttachment<'c, 't, W, LI, Self, Self::Residue<'c, 't, W, LI>>,
+    ) -> &'a ChannelAttachment<
+        'c,
+        't,
+        W,
+        LI,
+        Self,
+        CI,
+        Self::Channel,
+        <Self::Channel as Channel>::MobjectPresentation,
+    >
+    where
+        W: WorldIndexed<LI, Layer = Self>,
+        LI: LayerIndex;
 }
 
 pub trait WorldIndexed<LI>: World
@@ -330,7 +342,17 @@ where
 {
     type Layer: Layer;
 
-    fn index(&self) -> &Self::Layer;
+    // fn index(&self) -> &Self::Layer;
+    fn index_attachment<'c, 't, 'a>(
+        attachment: &'a WorldAttachment<'c, 't, Self, Self::Residue<'c, 't>>,
+    ) -> &'a LayerAttachment<
+        'c,
+        't,
+        Self,
+        LI,
+        Self::Layer,
+        <Self::Layer as Layer>::Residue<'c, 't, Self, LI>,
+    >;
 }
 
 // pub(crate) trait LayerAttachment<W, LI, L>: 'static
@@ -461,13 +483,13 @@ where
         ));
     }
 
-    fn attachment<'c, W, LI, L, CI>(
-        &'c self,
+    fn attachment<'c, 't, W, LI, L, CI>(
+        &'t self,
         config: &'c Config,
-        timer: &'c Timer,
-        world: &'c W,
-        layer: &'c L,
-    ) -> ChannelAttachment<'c, W, LI, L, CI, Self, Self::MobjectPresentation>
+        timer: &'t Timer,
+        world: &'t W,
+        layer: &'t L,
+    ) -> ChannelAttachment<'c, 't, W, LI, L, CI, Self, Self::MobjectPresentation>
     where
         W: WorldIndexed<LI, Layer = L>,
         LI: LayerIndex,
@@ -574,33 +596,39 @@ where
 //     }
 // }
 
-impl<'c, W, LI, L, CI, C, M, MP> Spawn<'c, M> for ChannelAttachment<'c, W, LI, L, CI, C, MP>
+impl<'c, 't, 'a, TQ> Spawn<'c, 't, 'a, TQ, TQ::Mobject>
+    for ChannelAttachment<
+        'c,
+        't,
+        TQ::World,
+        TQ::LayerIndex,
+        TQ::Layer,
+        TQ::ChannelIndex,
+        TQ::Channel,
+        TQ::MobjectPresentation,
+    >
 where
-    W: WorldIndexed<LI, Layer = L>,
-    LI: LayerIndex,
-    L: LayerIndexed<CI, Channel = C>,
-    CI: ChannelIndex,
-    C: Channel<MobjectPresentation = MP>,
-    M: Mobject,
-    MP: MobjectPresentation<M>,
+    TQ: TypeQuery,
 {
-    type TypeQuery = TypeQueried<W, LI, L, CI, C, M, MP>;
-
-    fn spawn(&'c self, mobject: M) -> Alive<'c, Self::TypeQuery, CollapsedTimelineState> {
-        AttachedMobject::new(Arc::new(mobject), self).launch(CollapsedTimelineState)
+    fn spawn(&'a self, mobject: TQ::Mobject) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
+        AttachedMobject::spawn(mobject, self)
     }
 }
 
-impl<'l, W, LI, L, R, MB> Spawn<'l, MB> for LayerAttachment<'l, W, LI, L, R>
+impl<'c, 't, 'a, TQ, MB> Spawn<'c, 't, 'a, TQ, MB>
+    for LayerAttachment<
+        'c,
+        't,
+        TQ::World,
+        TQ::LayerIndex,
+        TQ::Layer,
+        <TQ::Layer as Layer>::Residue<'c, 't, TQ::World, TQ::LayerIndex>,
+    >
 where
-    W: WorldIndexed<LI, Layer = L>,
-    LI: LayerIndex,
-    L: Layer<Residue<'l, W, LI> = R>,
-    MB: MobjectBuilder<L>,
+    TQ: TypeQuery,
+    MB: MobjectBuilder<TQ::Layer, OutputTypeQuery<TQ::World, TQ::LayerIndex> = TQ>,
 {
-    type TypeQuery = MB::OutputTypeQuery<W, LI>;
-
-    fn spawn(&'l self, mobject_builder: MB) -> Alive<'l, Self::TypeQuery, CollapsedTimelineState> {
+    fn spawn(&'a self, mobject_builder: MB) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
         mobject_builder.instantiate(self, self.config)
     }
 }
@@ -677,19 +705,19 @@ impl Archive for MyLayer {
 }
 
 impl Layer for MyLayer {
-    type Residue<'l, W, LI> = MyLayer<
-        ChannelAttachment<'l, W, LI, Self, Idx<0>, ChannelType<MyMobjectPresentation0>, MyMobjectPresentation0>,
-        ChannelAttachment<'l, W, LI, Self, Idx<1>, ChannelType<MyMobjectPresentation1>, MyMobjectPresentation1>,
+    type Residue<'c, 't, W, LI> = MyLayer<
+        ChannelAttachment<'c, 't, W, LI, Self, Idx<0>, ChannelType<MyMobjectPresentation0>, MyMobjectPresentation0>,
+        ChannelAttachment<'c, 't, W, LI, Self, Idx<1>, ChannelType<MyMobjectPresentation1>, MyMobjectPresentation1>,
     > where
-        W: 'l + WorldIndexed<LI, Layer = Self>,
+        W: WorldIndexed<LI, Layer = Self>,
         LI: LayerIndex;
 
-    fn attachment<'l, W, LI>(
-        &'l self,
-        config: &'l Config,
-        timer: &'l Timer,
-        world: &'l W,
-    ) -> LayerAttachment<'l, W, LI, Self, Self::Residue<'l, W, LI>>
+    fn attachment<'c, 't, W, LI>(
+        &'t self,
+        config: &'c Config,
+        timer: &'t Timer,
+        world: &'t W,
+    ) -> LayerAttachment<'c, 't, W, LI, Self, Self::Residue<'c, 't, W, LI>>
     where
         W: WorldIndexed<LI, Layer = Self>,
         LI: LayerIndex,
@@ -760,16 +788,46 @@ impl Prepare
 impl LayerIndexed<Idx<0>> for MyLayer {
     type Channel = ChannelType<MyMobjectPresentation0>;
 
-    fn index(&self) -> &Self::Channel {
-        &self.channel_0
+    fn index_attachment<'c, 't, 'a, W, LI>(
+        attachment: &'a LayerAttachment<'c, 't, W, LI, Self, Self::Residue<'c, 't, W, LI>>,
+    ) -> &'a ChannelAttachment<
+        'c,
+        't,
+        W,
+        LI,
+        Self,
+        Idx<0>,
+        Self::Channel,
+        <Self::Channel as Channel>::MobjectPresentation,
+    >
+    where
+        W: WorldIndexed<LI, Layer = Self>,
+        LI: LayerIndex,
+    {
+        &attachment.residue.channel_0
     }
 }
 
 impl LayerIndexed<Idx<1>> for MyLayer {
     type Channel = ChannelType<MyMobjectPresentation1>;
 
-    fn index(&self) -> &Self::Channel {
-        &self.channel_1
+    fn index_attachment<'c, 't, 'a, W, LI>(
+        attachment: &'a LayerAttachment<'c, 't, W, LI, Self, Self::Residue<'c, 't, W, LI>>,
+    ) -> &'a ChannelAttachment<
+        'c,
+        't,
+        W,
+        LI,
+        Self,
+        Idx<1>,
+        Self::Channel,
+        <Self::Channel as Channel>::MobjectPresentation,
+    >
+    where
+        W: WorldIndexed<LI, Layer = Self>,
+        LI: LayerIndex,
+    {
+        &attachment.residue.channel_1
     }
 }
 
@@ -870,16 +928,30 @@ impl Archive for MyWorld {
 }
 
 impl World for MyWorld {
-    type Residue<'w> = MyWorld<
-        LayerAttachment<'w, Self, Idx<0>, MyLayer, <MyLayer as Layer>::Residue<'w, Self, Idx<0>>>,
-        LayerAttachment<'w, Self, Idx<1>, MyLayer, <MyLayer as Layer>::Residue<'w, Self, Idx<1>>>,
+    type Residue<'c, 't> = MyWorld<
+        LayerAttachment<
+            'c,
+            't,
+            Self,
+            Idx<0>,
+            MyLayer,
+            <MyLayer as Layer>::Residue<'c, 't, Self, Idx<0>>,
+        >,
+        LayerAttachment<
+            'c,
+            't,
+            Self,
+            Idx<1>,
+            MyLayer,
+            <MyLayer as Layer>::Residue<'c, 't, Self, Idx<1>>,
+        >,
     >;
 
-    fn attachment<'w>(
-        &'w self,
-        config: &'w Config,
-        timer: &'w Timer,
-    ) -> WorldAttachment<'w, Self, Self::Residue<'w>> {
+    fn attachment<'c, 't>(
+        &'t self,
+        config: &'c Config,
+        timer: &'t Timer,
+    ) -> WorldAttachment<'c, 't, Self, Self::Residue<'c, 't>> {
         WorldAttachment {
             config,
             timer,
@@ -939,16 +1011,34 @@ impl Prepare
 impl WorldIndexed<Idx<0>> for MyWorld {
     type Layer = MyLayer;
 
-    fn index(&self) -> &Self::Layer {
-        &self.layer_0
+    fn index_attachment<'c, 't, 'a>(
+        attachment: &'a WorldAttachment<'c, 't, Self, Self::Residue<'c, 't>>,
+    ) -> &'a LayerAttachment<
+        'c,
+        't,
+        Self,
+        Idx<0>,
+        Self::Layer,
+        <Self::Layer as Layer>::Residue<'c, 't, Self, Idx<0>>,
+    > {
+        &attachment.residue.layer_0
     }
 }
 
 impl WorldIndexed<Idx<1>> for MyWorld {
     type Layer = MyLayer;
 
-    fn index(&self) -> &Self::Layer {
-        &self.layer_1
+    fn index_attachment<'c, 't, 'a>(
+        attachment: &'a WorldAttachment<'c, 't, Self, Self::Residue<'c, 't>>,
+    ) -> &'a LayerAttachment<
+        'c,
+        't,
+        Self,
+        Idx<1>,
+        Self::Layer,
+        <Self::Layer as Layer>::Residue<'c, 't, Self, Idx<1>>,
+    > {
+        &attachment.residue.layer_1
     }
 }
 

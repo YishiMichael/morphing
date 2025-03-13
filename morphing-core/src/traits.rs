@@ -37,11 +37,11 @@ where
     // type Mobject: Mobject;
     // type MobjectPresentation: MobjectPresentation<Self::Mobject>;
 
-    fn instantiate<'a, W, LI>(
+    fn instantiate<'c, 't, 'a, W, LI>(
         self,
-        layer_attachment: &'a LayerAttachment<'a, W, LI, L, L::Residue<'a, W, LI>>,
-        config: &'a Config,
-    ) -> Alive<'a, Self::OutputTypeQuery<W, LI>, CollapsedTimelineState>
+        layer_attachment: &'a LayerAttachment<'c, 't, W, LI, L, L::Residue<'c, 't, W, LI>>,
+        config: &'c Config,
+    ) -> Alive<'c, 't, 'a, Self::OutputTypeQuery<W, LI>, CollapsedTimelineState>
     where
         W: WorldIndexed<LI, Layer = L>,
         LI: LayerIndex;
@@ -107,15 +107,18 @@ pub trait Construct<TQ>: 'static
 where
     TQ: TypeQuery,
 {
-    type OutputTypeQuery: TypeQuery<World = TQ::World>;
-
-    fn construct<'a>(
+    fn construct<'c, 't, 'a>(
         self,
-        world_attachment: &'a WorldAttachment<'a, TQ::World, <TQ::World as World>::Residue<'a>>,
-        config: &'a Config,
-        timer: &'a Timer,
-        alive: Alive<'a, TQ, CollapsedTimelineState>,
-    ) -> Alive<'a, TQ, CollapsedTimelineState>;
+        world_attachment: &'a WorldAttachment<
+            'c,
+            't,
+            TQ::World,
+            <TQ::World as World>::Residue<'c, 't>,
+        >,
+        config: &'c Config,
+        timer: &'t Timer,
+        alive: Alive<'c, 't, 'a, TQ, CollapsedTimelineState>,
+    ) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
 }
 
 // TODO: alive container morphisms

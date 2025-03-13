@@ -4,11 +4,11 @@ use core::range::RangeFrom;
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use super::stage::Archive;
 use super::stage::Channel;
 use super::stage::ChannelAttachment;
 use super::stage::ChannelIndex;
@@ -1267,61 +1267,61 @@ pub trait TypeQuery:
     // fn attachment(&self) -> &Self::Attachment;
 }
 
-#[derive(serde::Deserialize, serde::Serialize)]
-pub struct TypeQueried<W, LI, L, CI, C, M, MP>(PhantomData<fn() -> (W, LI, L, CI, C, M, MP)>);
+// #[derive(serde::Deserialize, serde::Serialize)]
+// pub struct TypeQueried<W, LI, L, CI, C, M, MP>(PhantomData<fn() -> (W, LI, L, CI, C, M, MP)>);
 
-impl<W, LI, L, CI, C, M, MP> Default for TypeQueried<W, LI, L, CI, C, M, MP> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
+// impl<W, LI, L, CI, C, M, MP> Default for TypeQueried<W, LI, L, CI, C, M, MP> {
+//     fn default() -> Self {
+//         Self(PhantomData)
+//     }
+// }
 
-impl<W, LI, L, CI, C, M, MP> Clone for TypeQueried<W, LI, L, CI, C, M, MP> {
-    fn clone(&self) -> Self {
-        Self(PhantomData)
-    }
-}
+// impl<W, LI, L, CI, C, M, MP> Clone for TypeQueried<W, LI, L, CI, C, M, MP> {
+//     fn clone(&self) -> Self {
+//         Self(PhantomData)
+//     }
+// }
 
-impl<W, LI, L, CI, C, M, MP> Debug for TypeQueried<W, LI, L, CI, C, M, MP> {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
-}
+// impl<W, LI, L, CI, C, M, MP> Debug for TypeQueried<W, LI, L, CI, C, M, MP> {
+//     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         Ok(())
+//     }
+// }
 
-impl<W, LI, L, CI, C, M, MP> TypeQuery for TypeQueried<W, LI, L, CI, C, M, MP>
-where
-    W: WorldIndexed<LI, Layer = L>,
-    LI: LayerIndex,
-    L: LayerIndexed<CI, Channel = C>,
-    CI: ChannelIndex,
-    C: Channel<MobjectPresentation = MP>,
-    M: Mobject,
-    MP: MobjectPresentation<M>,
-{
-    type World = W;
-    type LayerIndex = LI;
-    type Layer = L;
-    type ChannelIndex = CI;
-    type Channel = C;
-    type Mobject = M;
-    type MobjectPresentation = MP;
+// impl<W, LI, L, CI, C, M, MP> TypeQuery for TypeQueried<W, LI, L, CI, C, M, MP>
+// where
+//     W: WorldIndexed<LI, Layer = L>,
+//     LI: LayerIndex,
+//     L: LayerIndexed<CI, Channel = C>,
+//     CI: ChannelIndex,
+//     C: Channel<MobjectPresentation = MP>,
+//     M: Mobject,
+//     MP: MobjectPresentation<M>,
+// {
+//     type World = W;
+//     type LayerIndex = LI;
+//     type Layer = L;
+//     type ChannelIndex = CI;
+//     type Channel = C;
+//     type Mobject = M;
+//     type MobjectPresentation = MP;
 
-    // fn mobject(&self) -> &Arc<Self::Mobject> {
-    //     &self.mobject
-    // }
+//     // fn mobject(&self) -> &Arc<Self::Mobject> {
+//     //     &self.mobject
+//     // }
 
-    // fn update<F>(self, f: F) -> Self
-    // where
-    //     F: FnOnce(&mut Self::Mobject),
-    // {
-    //     let mut mobject = Arc::unwrap_or_clone(self.mobject);
-    //     f(&mut mobject);
-    //     Self {
-    //         mobject: Arc::new(mobject),
-    //         phantom: PhantomData,
-    //     }
-    // }
-}
+//     // fn update<F>(self, f: F) -> Self
+//     // where
+//     //     F: FnOnce(&mut Self::Mobject),
+//     // {
+//     //     let mut mobject = Arc::unwrap_or_clone(self.mobject);
+//     //     f(&mut mobject);
+//     //     Self {
+//     //         mobject: Arc::new(mobject),
+//     //         phantom: PhantomData,
+//     //     }
+//     // }
+// }
 
 // pub trait CompatibleAttachment<TQ>:
 //     ChannelAttachment<
@@ -1340,32 +1340,53 @@ where
 //     // pub fn spawn_mobject<M>(&self, mobject: Box<M>) -> Alive<MobjectLocate<>>
 // }
 
-pub struct AttachedMobject<'a, TQ>
+pub struct AttachedMobject<'c, 't, 'a, TQ>
 where
     TQ: TypeQuery,
 {
     mobject: Arc<TQ::Mobject>,
-    attachment: &'a TQ::Attachment,
+    attachment: &'a ChannelAttachment<
+        'c,
+        't,
+        TQ::World,
+        TQ::LayerIndex,
+        TQ::Layer,
+        TQ::ChannelIndex,
+        TQ::Channel,
+        TQ::MobjectPresentation,
+    >,
 }
 
-impl<'a, TQ> AttachedMobject<'a, TQ>
+impl<'c, 't, 'a, TQ> AttachedMobject<'c, 't, 'a, TQ>
 where
     TQ: TypeQuery,
 {
-    pub(crate) fn new(mobject: Arc<TQ::Mobject>, attachment: &'a TQ::Attachment) -> Self {
-        Self {
-            mobject,
-            attachment,
-        }
-    }
+    // pub(crate) fn new(
+    //     mobject: Arc<TQ::Mobject>,
+    //     attachment: &'a ChannelAttachment<
+    //         'c,
+    //         't,
+    //         TQ::World,
+    //         TQ::LayerIndex,
+    //         TQ::Layer,
+    //         TQ::ChannelIndex,
+    //         TQ::Channel,
+    //         TQ::MobjectPresentation,
+    //     >,
+    // ) -> Self {
+    //     Self {
+    //         mobject,
+    //         attachment,
+    //     }
+    // }
 
-    pub(crate) fn launch<TS>(self, timeline_state: TS) -> Alive<'a, TQ, TS>
+    fn launch<TS>(self, timeline_state: TS) -> Alive<'c, 't, 'a, TQ, TS>
     where
         TS: TimelineState<TQ>,
     {
         Alive(Some(AliveInner {
-            alive_id: self.attachment.timer().generate_alive_id(),
-            spawn_time: self.attachment.timer().time(),
+            alive_id: self.attachment.timer.generate_alive_id(),
+            spawn_time: self.attachment.timer.time(),
             attached_mobject: self,
             timeline_state,
         }))
@@ -1387,7 +1408,7 @@ where
     //     >,
     // {
     //     if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
-    //         self.attachment.channel_architecture().push(
+    //         self.attachment.channel().push(
     //             alive_id,
     //             Node::Singleton((
     //                 Range {
@@ -1428,23 +1449,100 @@ where
     //     }
     // }
 
-    fn record<F>(&self, time_interval: Range<Rc<Time>>, f: F)
+    fn simple_transit<F, T>(self, alive_id: usize, time_interval: Range<Rc<Time>>, f: F) -> Self
     where
-        F: FnOnce(Arc<TQ::Mobject>, &TQ::Attachment, Range<Time>),
+        F: FnOnce(Arc<TQ::Mobject>) -> T,
+        T: TimelineErasure<MobjectPresentation = TQ::MobjectPresentation>,
     {
         if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
-            f(
-                self.mobject.clone(),
-                self.attachment,
+            self.attachment.channel.push(
+                alive_id,
                 Range {
                     start: *time_interval.start,
                     end: *time_interval.end,
                 },
-            )
+                f(self.mobject.clone()),
+            );
+        }
+        self
+    }
+
+    fn complex_transit<TE, C>(
+        self,
+        alive_id: usize,
+        time_interval: Range<Rc<Time>>,
+        time_eval: &TE,
+        construct: C,
+    ) -> Self
+    where
+        TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
+        C: Construct<TQ>,
+    {
+        let timer = Timer::new();
+        let world = TQ::World::new();
+        let mobject = {
+            let world_attachment = World::attachment(&world, self.attachment.config, &timer);
+            let mobject = construct
+                .construct(
+                    &world_attachment,
+                    self.attachment.config,
+                    &timer,
+                    AttachedMobject {
+                        mobject: self.mobject,
+                        attachment: TQ::Layer::index_attachment(TQ::World::index_attachment(
+                            &world_attachment,
+                        )),
+                    }
+                    .launch(CollapsedTimelineState),
+                )
+                .terminate()
+                .mobject;
+            mobject
+        };
+
+        if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
+            self.attachment.world.merge(
+                world.archive(),
+                alive_id,
+                time_eval,
+                Range {
+                    start: *time_interval.start,
+                    end: *time_interval.end,
+                },
+                Range {
+                    start: 0.0,
+                    end: *timer.time(),
+                },
+            );
+        }
+
+        AttachedMobject {
+            mobject,
+            attachment: self.attachment,
         }
     }
 
-    // fn refresh_mobject<F>(&mut self, f: F) -> Alive<'a, TQ, TS>
+    pub(crate) fn spawn(
+        mobject: TQ::Mobject,
+        attachment: &'a ChannelAttachment<
+            'c,
+            't,
+            TQ::World,
+            TQ::LayerIndex,
+            TQ::Layer,
+            TQ::ChannelIndex,
+            TQ::Channel,
+            TQ::MobjectPresentation,
+        >,
+    ) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
+        AttachedMobject {
+            mobject: Arc::new(mobject),
+            attachment,
+        }
+        .launch(CollapsedTimelineState)
+    }
+
+    // fn replace_mobject<F>(&mut self, f: F) -> Alive<'a, TQ, TS>
     // where
     //     TS: Clone,
     //     F: FnOnce(&mut TQ::Mobject),
@@ -1454,7 +1552,7 @@ where
     //         .launch(self.terminate().update(f), new_timeline_state)
     // }
 
-    // fn refresh_timeline_state<TSO>(&mut self, new_timeline_state: TSO) -> Alive<'a, TQ, TSO>
+    // fn replace_timeline_state<TSO>(&mut self, new_timeline_state: TSO) -> Alive<'a, TQ, TSO>
     // where
     //     TSO: TimelineState<TQ>,
     // {
@@ -1462,28 +1560,28 @@ where
     // }
 }
 
-struct AliveInner<'a, TQ, TS>
+struct AliveInner<'c, 't, 'a, TQ, TS>
 where
     TQ: TypeQuery,
     TS: TimelineState<TQ>,
 {
     alive_id: usize,
     spawn_time: Rc<Time>,
-    attached_mobject: AttachedMobject<'a, TQ>,
+    attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
     timeline_state: TS,
 }
 
-pub struct Alive<'a, TQ, TS>(Option<AliveInner<'a, TQ, TS>>)
+pub struct Alive<'c, 't, 'a, TQ, TS>(Option<AliveInner<'c, 't, 'a, TQ, TS>>)
 where
     TQ: TypeQuery,
     TS: TimelineState<TQ>;
 
-impl<'a, TQ, TS> Alive<'a, TQ, TS>
+impl<TQ, TS> Alive<'_, '_, '_, TQ, TS>
 where
     TQ: TypeQuery,
     TS: TimelineState<TQ>,
 {
-    fn terminate(&mut self) -> AttachedMobject<TS::OutputTypeQuery> {
+    fn terminate(&mut self) -> AttachedMobject<TQ> {
         // let mut recorder = self.alive_recorder.recorder.borrow_mut();
         // let entry = recorder.get_mut(self.index).unwrap();
         let inner = self.0.take().unwrap();
@@ -1491,14 +1589,14 @@ where
             inner.alive_id,
             Range {
                 start: inner.spawn_time.clone(),
-                end: inner.attached_mobject.attachment.timer().time(),
+                end: inner.attached_mobject.attachment.timer.time(),
             },
             inner.attached_mobject,
         )
     }
 }
 
-impl<TQ, TS> Drop for Alive<'_, TQ, TS>
+impl<TQ, TS> Drop for Alive<'_, '_, '_, TQ, TS>
 where
     TQ: TypeQuery,
     TS: TimelineState<TQ>,
@@ -1514,17 +1612,17 @@ pub trait TimelineState<TQ>
 where
     TQ: TypeQuery,
 {
-    type OutputTypeQuery: TypeQuery;
+    // type OutputTypeQuery: TypeQuery;
     // type OutputLayerIndex;
     // type OutputChannelIndex;
     // type OutputMobject;
 
-    fn transit(
+    fn transit<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<TQ>,
-    ) -> AttachedMobject<Self::OutputTypeQuery>;
+        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
+    ) -> AttachedMobject<'c, 't, 'a, TQ>;
 }
 
 #[derive(Clone)] // TODO: get rid of it
@@ -1535,21 +1633,17 @@ where
     TQ: TypeQuery,
 {
     // type MobjectPresentation = M::MobjectPresentation;
-    type OutputTypeQuery = TQ;
+    // type OutputTypeQuery = TQ;
 
-    fn transit(
+    fn transit<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<TQ>,
-    ) -> AttachedMobject<Self::OutputTypeQuery> {
-        attached_mobject.record(time_interval, |mobject, attachment, time_interval| {
-            attachment.channel_architecture().push(
-                alive_id,
-                Node::Singleton((time_interval, Box::new(StaticTimeline::<TQ> { mobject }))),
-            );
-        });
-        attached_mobject
+        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
+    ) -> AttachedMobject<'c, 't, 'a, TQ> {
+        attached_mobject.simple_transit(alive_id, time_interval, |mobject| StaticTimeline::<TQ> {
+            mobject,
+        })
     }
 }
 
@@ -1563,21 +1657,17 @@ where
     TE: TimeEval,
 {
     // type MobjectPresentation = M::MobjectPresentation;
-    type OutputTypeQuery = TQ;
+    // type OutputTypeQuery = TQ;
 
-    fn transit(
+    fn transit<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<TQ>,
-    ) -> AttachedMobject<Self::OutputTypeQuery> {
-        attached_mobject.record(time_interval, |mobject, attachment, time_interval| {
-            attachment.channel_architecture().push(
-                alive_id,
-                Node::Singleton((time_interval, Box::new(StaticTimeline::<TQ> { mobject }))),
-            );
-        });
-        attached_mobject
+        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
+    ) -> AttachedMobject<'c, 't, 'a, TQ> {
+        attached_mobject.simple_transit(alive_id, time_interval, |mobject| StaticTimeline::<TQ> {
+            mobject,
+        })
     }
 }
 
@@ -1593,28 +1683,19 @@ where
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, TQ>,
 {
-    type OutputTypeQuery = TQ;
+    // type OutputTypeQuery = TQ;
 
-    fn transit(
+    fn transit<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<TQ>,
-    ) -> AttachedMobject<Self::OutputTypeQuery> {
-        attached_mobject.record(time_interval, |mobject, attachment, time_interval| {
-            attachment.channel_architecture().push(
-                alive_id,
-                Node::Singleton((
-                    time_interval,
-                    Box::new(DynamicTimeline {
-                        mobject,
-                        time_eval: self.time_eval,
-                        update: self.update,
-                    }),
-                )),
-            );
-        });
-        attached_mobject
+        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
+    ) -> AttachedMobject<'c, 't, 'a, TQ> {
+        attached_mobject.simple_transit(alive_id, time_interval, |mobject| DynamicTimeline {
+            mobject,
+            time_eval: self.time_eval,
+            update: self.update,
+        })
     }
 
     // type OutputTimelineState = M, CollapsedTimelineState;
@@ -1653,54 +1734,15 @@ where
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
     C: Construct<TQ>,
 {
-    type OutputTypeQuery = C::OutputTypeQuery;
+    // type OutputTypeQuery = C::OutputTypeQuery;
 
-    fn transit(
+    fn transit<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<TQ>,
-    ) -> AttachedMobject<Self::OutputTypeQuery> {
-        let timer = Timer::new();
-        let world_architecture = TQ::World::architecture();
-        let output_mobject = {
-            let world_attachment =
-                World::attachment(&world_architecture, attachment.config(), &timer);
-            self.construct
-                .construct(
-                    &world_attachment,
-                    attachment.config(),
-                    &timer,
-                    mobject_query
-                        .mobject()
-                        .clone()
-                        .spawn(WorldIndexed::index::<TQ::LayerIndex>(&world_architecture)),
-                )
-                .terminate()
-        };
-        attachment.record_multiple(
-            alive_id,
-            time_interval,
-            &self.time_eval,
-            *timer.time(),
-            world_architecture,
-        );
-        // let world = world.as_ref();
-        // world.grow_stack();
-        // let output_mobject = self
-        //     .construct
-        //     .take()
-        //     .unwrap()
-        //     .construct(
-        //         world,
-        //         attachment.start(CollapsedTimelineState {
-        //             mobject: self.mobject.clone(),
-        //         }),
-        //     )
-        //     .end()
-        //     .mobject;
-        // world.shrink_stack(time_interval, self.time_eval.as_ref());
-        output_mobject
+        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
+    ) -> AttachedMobject<'c, 't, 'a, TQ> {
+        attached_mobject.complex_transit(alive_id, time_interval, &self.time_eval, self.construct)
     }
 
     // fn archive(
@@ -2038,12 +2080,12 @@ where
         C: Construct<TQ>;
 }
 
-impl<'a, TQ> Quantize for Alive<'a, TQ, CollapsedTimelineState>
+impl<'c, 't, 'a, TQ> Quantize for Alive<'c, 't, 'a, TQ, CollapsedTimelineState>
 where
     TQ: TypeQuery,
 {
     type Output<TE> =
-        Alive<'a, TQ, IndeterminedTimelineState<TE>>
+        Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<TE>>
     where
         TE: TimeEval;
 
@@ -2052,45 +2094,46 @@ where
     where
         TE: TimeEval,
     {
-        self.refresh_timeline_state(IndeterminedTimelineState { time_eval })
+        self.replace_timeline_state(IndeterminedTimelineState { time_eval })
     }
 }
 
-impl<'a, TQ, TE, U> Collapse for Alive<'a, TQ, UpdateTimelineState<TE, U>>
+impl<'c, 't, 'a, TQ, TE, U> Collapse for Alive<'c, 't, 'a, TQ, UpdateTimelineState<TE, U>>
 where
     TQ: TypeQuery,
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, TQ>,
 {
-    type Output = Alive<'a, TQ, CollapsedTimelineState>;
+    type Output = Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        self.refresh_timeline_state(CollapsedTimelineState)
+        self.replace_timeline_state(CollapsedTimelineState)
     }
 }
 
-impl<'a, TQ, TE, C> Collapse for Alive<'a, TQ, ConstructTimelineState<TE, C>>
+impl<'c, 't, 'a, TQ, TE, C> Collapse for Alive<'c, 't, 'a, TQ, ConstructTimelineState<TE, C>>
 where
     TQ: TypeQuery,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
     C: Construct<TQ>,
 {
-    type Output = Alive<'a, TQ, CollapsedTimelineState>;
+    type Output = Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        self.refresh_timeline_state(CollapsedTimelineState)
+        self.replace_timeline_state(CollapsedTimelineState)
     }
 }
 
-impl<'a, TQ, TE> ApplyRate<TE::OutputTimeMetric> for Alive<'a, TQ, IndeterminedTimelineState<TE>>
+impl<'c, 't, 'a, TQ, TE> ApplyRate<TE::OutputTimeMetric>
+    for Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<TE>>
 where
     TQ: TypeQuery,
     TE: TimeEval,
 {
     type Output<RA> =
-        Alive<'a, TQ, IndeterminedTimelineState<RateComposeTimeEval<RA, TE>>>
+        Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<RateComposeTimeEval<RA, TE>>>
     where
         RA: Rate<TE::OutputTimeMetric>;
 
@@ -2099,7 +2142,7 @@ where
     where
         RA: Rate<TE::OutputTimeMetric>,
     {
-        self.refresh_timeline_state(IndeterminedTimelineState {
+        self.replace_timeline_state(IndeterminedTimelineState {
             time_eval: RateComposeTimeEval {
                 rate,
                 time_eval: self.time_eval.clone(),
@@ -2108,14 +2151,14 @@ where
     }
 }
 
-impl<'a, TQ, TE> ApplyUpdate<TE::OutputTimeMetric, TQ>
-    for Alive<'a, TQ, IndeterminedTimelineState<TE>>
+impl<'c, 't, 'a, TQ, TE> ApplyUpdate<TE::OutputTimeMetric, TQ>
+    for Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<TE>>
 where
     TQ: TypeQuery,
     TE: TimeEval,
 {
     type Output<U> =
-        Alive<'a, TQ, UpdateTimelineState<TE, U>>
+        Alive<'c, 't, 'a, TQ, UpdateTimelineState<TE, U>>
     where
         U: Update<TE::OutputTimeMetric, TQ>;
 
@@ -2124,7 +2167,7 @@ where
     where
         U: Update<TE::OutputTimeMetric, TQ>,
     {
-        self.refresh_timeline_state(|timeline_state| UpdateTimelineState {
+        self.replace_timeline_state(|timeline_state| UpdateTimelineState {
             // mobject: timeline_state.mobject,
             time_eval: timeline_state.time_eval.clone(),
             update,
@@ -2132,12 +2175,13 @@ where
     }
 }
 
-impl<'a, TQ> ApplyUpdate<NormalizedTimeMetric, TQ> for Alive<'a, TQ, CollapsedTimelineState>
+impl<'c, 't, 'a, TQ> ApplyUpdate<NormalizedTimeMetric, TQ>
+    for Alive<'c, 't, 'a, TQ, CollapsedTimelineState>
 where
     TQ: TypeQuery,
 {
     type Output<U> =
-        Alive<'a, TQ, CollapsedTimelineState>
+        Alive<'c, 't, 'a, TQ, CollapsedTimelineState>
     where
         U: Update<NormalizedTimeMetric, TQ>;
 
@@ -2146,7 +2190,7 @@ where
     where
         U: Update<NormalizedTimeMetric, TQ>,
     {
-        self.refresh_mobject(|mobject| {
+        self.replace_mobject(|mobject| {
             update.update(NormalizedTimeMetric(1.0), mobject);
             // let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
             // update.update(NormalizedTimeMetric(1.0), &mut mobject);
@@ -2157,13 +2201,13 @@ where
     }
 }
 
-impl<'a, TQ, TE> ApplyConstruct<TQ> for Alive<'a, TQ, IndeterminedTimelineState<TE>>
+impl<'c, 't, 'a, TQ, TE> ApplyConstruct<TQ> for Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<TE>>
 where
     TQ: TypeQuery,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
 {
     type Output<C> =
-        Alive<'a, TQ, ConstructTimelineState<TE, C>>
+        Alive<'c, 't, 'a, TQ, ConstructTimelineState<TE, C>>
     where
         C: Construct<TQ>;
 
@@ -2172,7 +2216,7 @@ where
     where
         C: Construct<TQ>,
     {
-        self.refresh_timeline_state(|alive_context, timeline_state| {
+        self.replace_timeline_state(|alive_context, timeline_state| {
             let child_root = AliveRoot::new(alive_context.alive_context().config());
             let child_renderable = child_root.start(LayerRenderableState {
                 layer: alive_context.archive_state().layer.clone(),
