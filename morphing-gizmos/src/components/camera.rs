@@ -1,14 +1,13 @@
-use geometric_algebra::ppga3d as pga;
 use geometric_algebra::GeometricProduct;
 use geometric_algebra::One;
 
 use super::component::Component;
 use super::component::ComponentShaderTypes;
-use super::motor::Motor;
+use super::motor::Motor3D;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Camera {
-    view_motor: Motor,
+    view_motor: Motor3D,
     projection_matrix: nalgebra::Matrix4<f32>,
 }
 
@@ -90,7 +89,7 @@ impl ComponentShaderTypes for CameraShaderTypes {
         }
     }
 
-    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
+    fn new_buffers_initialized(&self, device: &wgpu::Device) -> Self::Buffers {
         use wgpu::util::DeviceExt;
         CameraBuffers {
             camera_uniform: {
@@ -127,9 +126,9 @@ impl ComponentShaderTypes for CameraShaderTypes {
 impl Default for Camera {
     fn default() -> Self {
         Self {
-            view_motor: Motor(
-                pga::Motor::one().geometric_product(pga::Translator::new(1.0, 0.0, 0.0, 5.0)),
-            ),
+            view_motor: Motor3D(geometric_algebra::ppga3d::Motor::one().geometric_product(
+                geometric_algebra::ppga3d::Translator::new(1.0, 0.0, 0.0, 5.0),
+            )),
             projection_matrix: nalgebra::Matrix4::new_perspective(
                 16.0 / 9.0,
                 40.0_f32.to_radians(),

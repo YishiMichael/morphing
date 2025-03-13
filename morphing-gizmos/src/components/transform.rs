@@ -2,11 +2,11 @@ use geometric_algebra::One;
 
 use super::component::Component;
 use super::component::ComponentShaderTypes;
-use super::motor::Motor;
+use super::motor::Motor3D;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Transform {
-    motor: Motor,
+    motor: Motor3D,
     scale: f32,
 }
 
@@ -88,7 +88,7 @@ impl ComponentShaderTypes for TransformShaderTypes {
         }
     }
 
-    fn initialize_buffers(&self, device: &wgpu::Device) -> Self::Buffers {
+    fn new_buffers_initialized(&self, device: &wgpu::Device) -> Self::Buffers {
         use wgpu::util::DeviceExt;
         TransformBuffers {
             transform_uniform: {
@@ -125,7 +125,7 @@ impl ComponentShaderTypes for TransformShaderTypes {
 impl Default for Transform {
     fn default() -> Self {
         Self {
-            motor: Motor(geometric_algebra::ppga3d::Motor::one()),
+            motor: Motor3D(geometric_algebra::ppga3d::Motor::one()),
             scale: 1.0,
         }
     }

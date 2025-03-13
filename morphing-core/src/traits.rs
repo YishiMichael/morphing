@@ -6,7 +6,6 @@ use super::stage::LayerAttachment;
 use super::stage::LayerIndex;
 use super::stage::World;
 use super::stage::WorldAttachment;
-use super::stage::WorldIndexed;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
 use super::timeline::TypeQuery;
@@ -31,14 +30,14 @@ where
 {
     type OutputTypeQuery<W, LI>: TypeQuery<World = W, LayerIndex = LI, Layer = L>;
 
-    fn instantiate<'c, 't, 'a, W, LI>(
+    fn instantiate<'t, 'a, W, LI>(
         self,
-        layer_attachment: &'a LayerAttachment<'c, 't, W, LI, L, L::Residue<'c, 't, W, LI>>,
-        config: &'c Config,
-    ) -> Alive<'c, 't, 'a, Self::OutputTypeQuery<W, LI>, CollapsedTimelineState>
+        layer_attachment: &'a LayerAttachment<'t, W, LI, L, L::Residue<'t, W, LI>>,
+        config: &'t Config,
+    ) -> Alive<'t, 'a, Self::OutputTypeQuery<W, LI>, CollapsedTimelineState>
     where
-        W: WorldIndexed<LI, Layer = L>,
-        LI: LayerIndex;
+        W: World,
+        LI: LayerIndex<W, Layer = L>;
 }
 
 pub trait Rate<TM>:
@@ -89,18 +88,13 @@ pub trait Construct<TQ>: 'static
 where
     TQ: TypeQuery,
 {
-    fn construct<'c, 't, 'a>(
+    fn construct<'t, 'a>(
         self,
-        world_attachment: &'a WorldAttachment<
-            'c,
-            't,
-            TQ::World,
-            <TQ::World as World>::Residue<'c, 't>,
-        >,
-        config: &'c Config,
+        world_attachment: &'a WorldAttachment<'t, TQ::World, <TQ::World as World>::Residue<'t>>,
+        config: &'t Config,
         timer: &'t Timer,
-        alive: Alive<'c, 't, 'a, TQ, CollapsedTimelineState>,
-    ) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
+        alive: Alive<'t, 'a, TQ, CollapsedTimelineState>,
+    ) -> Alive<'t, 'a, TQ, CollapsedTimelineState>;
 }
 
 // TODO: alive container morphisms

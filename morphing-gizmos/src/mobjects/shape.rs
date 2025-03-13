@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::sync::OnceLock;
 
 use encase::ShaderType;
-use iced::widget::shader::wgpu::util::DeviceExt;
 use lyon::tessellation::{
     BuffersBuilder, FillOptions, FillVertex, FillVertexConstructor, StrokeOptions, StrokeVertex,
     StrokeVertexConstructor,
@@ -10,6 +9,7 @@ use lyon::tessellation::{
 use morphing_core::config::Config;
 use morphing_core::traits::Mobject;
 use morphing_core::traits::MobjectBuilder;
+use wgpu::util::DeviceExt;
 
 use super::super::components::camera::{Camera, CameraShaderTypes};
 use super::super::components::color::Palette;
@@ -55,92 +55,86 @@ impl StrokeVertexConstructor<Vertex> for VertexConstructor {
     }
 }
 
-static PLANAR_TRNANGLES_PIPELINE: OnceLock<iced::widget::shader::wgpu::RenderPipeline> =
-    OnceLock::new();
+static PLANAR_TRNANGLES_PIPELINE: OnceLock<wgpu::RenderPipeline> = OnceLock::new();
 
 pub struct PlanarTrianglesPresentation {
-    pipeline: &'static iced::widget::shader::wgpu::RenderPipeline,
-    transform_bind_group: iced::widget::shader::wgpu::BindGroup,
-    paint_bind_group: iced::widget::shader::wgpu::BindGroup,
-    camera_bind_group: iced::widget::shader::wgpu::BindGroup,
-    vertex_buffer: iced::widget::shader::wgpu::Buffer,
-    index_buffer: iced::widget::shader::wgpu::Buffer,
+    pipeline: &'static wgpu::RenderPipeline,
+    transform_bind_group: wgpu::BindGroup,
+    paint_bind_group: wgpu::BindGroup,
+    camera_bind_group: wgpu::BindGroup,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
 }
 
 impl PlanarTrianglesPresentation {
-    fn pipeline(
-        device: &iced::widget::shader::wgpu::Device,
-    ) -> &'static iced::widget::shader::wgpu::RenderPipeline {
+    fn pipeline(device: &wgpu::Device) -> &'static wgpu::RenderPipeline {
         PLANAR_TRNANGLES_PIPELINE.get_or_init(|| {
-            let shader_module =
-                device.create_shader_module(iced::widget::shader::wgpu::ShaderModuleDescriptor {
-                    label: None,
-                    source: iced::widget::shader::wgpu::ShaderSource::Wgsl(Cow::Borrowed(
-                        include_str!("../shaders/planar_triangles.wgsl"),
-                    )),
-                });
-            let pipeline_layout = device.create_pipeline_layout(
-                &iced::widget::shader::wgpu::PipelineLayoutDescriptor {
-                    label: None,
-                    bind_group_layouts: &[
-                        TransformShaderTypes::bind_group_layout(device),
-                        PaintShaderTypes::bind_group_layout(device),
-                        CameraShaderTypes::bind_group_layout(device),
-                    ],
-                    push_constant_ranges: &[],
-                },
-            );
-            device.create_render_pipeline(&iced::widget::shader::wgpu::RenderPipelineDescriptor {
+            let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "../shaders/planar_triangles.wgsl"
+                ))),
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[
+                    TransformShaderTypes::bind_group_layout(device),
+                    PaintShaderTypes::bind_group_layout(device),
+                    CameraShaderTypes::bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
                 layout: Some(&pipeline_layout),
-                vertex: iced::widget::shader::wgpu::VertexState {
+                vertex: wgpu::VertexState {
                     module: &shader_module,
                     entry_point: "vs_main",
-                    buffers: &[iced::widget::shader::wgpu::VertexBufferLayout {
+                    buffers: &[wgpu::VertexBufferLayout {
                         array_stride: Vertex::min_size().get(),
-                        step_mode: iced::widget::shader::wgpu::VertexStepMode::Vertex,
-                        attributes: &[iced::widget::shader::wgpu::VertexAttribute {
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[wgpu::VertexAttribute {
                             offset: Vertex::METADATA.offset(0),
                             shader_location: 0,
-                            format: iced::widget::shader::wgpu::VertexFormat::Float32x2,
+                            format: wgpu::VertexFormat::Float32x2,
                         }],
                     }],
                 },
-                fragment: Some(iced::widget::shader::wgpu::FragmentState {
+                fragment: Some(wgpu::FragmentState {
                     module: &shader_module,
                     entry_point: "fs_main",
-                    targets: &[Some(iced::widget::shader::wgpu::ColorTargetState {
-                        format: iced::widget::shader::wgpu::TextureFormat::Bgra8UnormSrgb, // TODO: check if color channels messed up?
-                        blend: Some(iced::widget::shader::wgpu::BlendState {
-                            color: iced::widget::shader::wgpu::BlendComponent {
-                                src_factor: iced::widget::shader::wgpu::BlendFactor::One,
-                                dst_factor: iced::widget::shader::wgpu::BlendFactor::One,
-                                operation: iced::widget::shader::wgpu::BlendOperation::Add,
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb, // TODO: check if color channels messed up?
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
                             },
-                            alpha: iced::widget::shader::wgpu::BlendComponent {
-                                src_factor: iced::widget::shader::wgpu::BlendFactor::One,
-                                dst_factor: iced::widget::shader::wgpu::BlendFactor::One,
-                                operation: iced::widget::shader::wgpu::BlendOperation::Add,
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
                             },
                         }),
-                        write_mask: iced::widget::shader::wgpu::ColorWrites::ALL,
+                        write_mask: wgpu::ColorWrites::ALL,
                     })],
                 }),
-                primitive: iced::widget::shader::wgpu::PrimitiveState {
-                    topology: iced::widget::shader::wgpu::PrimitiveTopology::TriangleList,
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
                     strip_index_format: None,
-                    front_face: iced::widget::shader::wgpu::FrontFace::Ccw,
-                    cull_mode: Some(iced::widget::shader::wgpu::Face::Back),
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
                     // Setting this to anything other than Fill requires Features::POLYGON_MODE_LINE
                     // or Features::POLYGON_MODE_POINT
-                    polygon_mode: iced::widget::shader::wgpu::PolygonMode::Fill,
+                    polygon_mode: wgpu::PolygonMode::Fill,
                     // Requires Features::DEPTH_CLIP_CONTROL
                     unclipped_depth: false,
                     // Requires Features::CONSERVATIVE_RASTERIZATION
                     conservative: false,
                 },
                 depth_stencil: None,
-                multisample: iced::widget::shader::wgpu::MultisampleState {
+                multisample: wgpu::MultisampleState {
                     count: 1,
                     mask: !0,
                     alpha_to_coverage_enabled: false,
@@ -152,16 +146,13 @@ impl PlanarTrianglesPresentation {
 }
 
 impl MobjectPresentation for PlanarTrianglesPresentation {
-    fn draw<'rp>(&'rp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'rp>) {
+    fn draw<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>) {
         render_pass.set_pipeline(self.pipeline);
         render_pass.set_bind_group(0, &self.transform_bind_group, &[]);
         render_pass.set_bind_group(1, &self.paint_bind_group, &[]);
         render_pass.set_bind_group(2, &self.camera_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.set_index_buffer(
-            self.index_buffer.slice(..),
-            iced::widget::shader::wgpu::IndexFormat::Uint32,
-        );
+        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.draw(0..3, 0..1);
     }
 }
@@ -187,7 +178,7 @@ impl IntoIterator for VecPlanarTrianglesPresentation {
 }
 
 impl MobjectPresentation for VecPlanarTrianglesPresentation {
-    fn draw<'rp>(&'rp self, render_pass: &mut iced::widget::shader::wgpu::RenderPass<'rp>) {
+    fn draw<'rp>(&'rp self, render_pass: &mut wgpu::RenderPass<'rp>) {
         for planar_triangles_presentation in &self.0 {
             planar_triangles_presentation.draw(render_pass);
         }
@@ -197,10 +188,7 @@ impl MobjectPresentation for VecPlanarTrianglesPresentation {
 impl Mobject for ShapeMobject {
     type MobjectPresentation = VecPlanarTrianglesPresentation;
 
-    fn presentation(
-        &self,
-        device: &iced::widget::shader::wgpu::Device,
-    ) -> Self::MobjectPresentation {
+    fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation {
         std::iter::empty()
             .chain(self.fill.iter().map(|fill| {
                 let lyon_path = self.path.to_lyon_path();
@@ -253,24 +241,20 @@ impl Mobject for ShapeMobject {
                 let vertex_buffer = {
                     let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
                     buffer.write(&vertex_buffers.vertices).unwrap();
-                    device.create_buffer_init(
-                        &iced::widget::shader::wgpu::util::BufferInitDescriptor {
-                            label: None,
-                            contents: buffer.as_ref(),
-                            usage: iced::widget::shader::wgpu::BufferUsages::VERTEX,
-                        },
-                    )
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: None,
+                        contents: buffer.as_ref(),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    })
                 };
                 let index_buffer = {
                     let mut buffer = encase::StorageBuffer::new(Vec::<u8>::new());
                     buffer.write(&vertex_buffers.indices).unwrap();
-                    device.create_buffer_init(
-                        &iced::widget::shader::wgpu::util::BufferInitDescriptor {
-                            label: None,
-                            contents: buffer.as_ref(),
-                            usage: iced::widget::shader::wgpu::BufferUsages::INDEX,
-                        },
-                    )
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: None,
+                        contents: buffer.as_ref(),
+                        usage: wgpu::BufferUsages::INDEX,
+                    })
                 }; // TODO
 
                 PlanarTrianglesPresentation {
@@ -287,20 +271,20 @@ impl Mobject for ShapeMobject {
 
     // let mut encoder = renderer
     //     .device
-    //     .create_command_encoder(&iced::widget::shader::wgpu::CommandEncoderDescriptor { label: None });
+    //     .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     // let frame = renderer.surface.get_current_texture().unwrap();
     // let frame_view = frame
     //     .texture
-    //     .create_view(&iced::widget::shader::wgpu::TextureViewDescriptor::default());
+    //     .create_view(&wgpu::TextureViewDescriptor::default());
     // {
-    //     let mut frame_pass = encoder.begin_render_pass(&iced::widget::shader::wgpu::RenderPassDescriptor {
+    //     let mut frame_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
     //         label: None,
-    //         color_attachments: &[Some(iced::widget::shader::wgpu::RenderPassColorAttachment {
+    //         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
     //             view: &frame_view,
     //             resolve_target: None,
-    //             ops: iced::widget::shader::wgpu::Operations {
-    //                 load: iced::widget::shader::wgpu::LoadOp::Clear(iced::widget::shader::wgpu::Color::BLACK),
-    //                 store: iced::widget::shader::wgpu::StoreOp::Store,
+    //             ops: wgpu::Operations {
+    //                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+    //                 store: wgpu::StoreOp::Store,
     //             },
     //         })],
     //         depth_stencil_attachment: None,
@@ -312,7 +296,7 @@ impl Mobject for ShapeMobject {
     //     frame_pass.set_bind_group(1, paint_bind_group, &[]);
     //     frame_pass.set_bind_group(2, camera_bind_group, &[]);
     //     frame_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-    //     frame_pass.set_index_buffer(index_buffer.slice(..), iced::widget::shader::wgpu::IndexFormat::Uint32);
+    //     frame_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
     //     frame_pass.draw(0..3, 0..1);
     // }
 

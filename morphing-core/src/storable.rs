@@ -6,17 +6,6 @@ use dyn_clone::DynClone;
 use dyn_eq::DynEq;
 use dyn_hash::DynHash;
 
-// trait SerdeKey: 'static + Clone + Eq + Hash + Send + Sync {}
-
-// impl<T> SerdeKey for T where T: 'static + Clone + Eq + Hash + Send + Sync {}
-
-// pub(crate) trait KeyFn: 'static + Default + Send + Sync {
-//     type Input: 'static;
-//     type Output: 'static;
-
-//     fn eval_key(&self, input: &Self::Input) -> Self::Output;
-// }
-
 pub trait SlotKeyGenerator: 'static + Send + Sync {
     type SlotKey: 'static + Clone;
 
@@ -157,13 +146,6 @@ impl<S> Slot for SwapSlot<S>
 where
     S: Slot,
 {
-    // type Presentation = PS::Presentation;
-    // type StorageIdInput = PS::StorageIdInput;
-    // type KeyGenerator = PS::KeyGenerator;
-    // type Value = PS::Value;
-    // type PrepareRef<'s> = PS::PrepareRef<'s>;
-    // type RenderRef<'s> = PS::RenderRef<'s>;
-
     type Value = S::Value;
     type SlotKeyGenerator = S::SlotKeyGenerator;
 
@@ -200,182 +182,6 @@ where
     }
 }
 
-// #[derive(Default)]
-// pub(crate) struct FnKeyGenerator<KF, KG> {
-//     key_fn: KF,
-//     key_generator: KG,
-// }
-
-// impl<KF, KG> KeyGenerator for FnKeyGenerator<KF, KG>
-// where
-//     KF: KeyFn,
-//     KG: KeyGenerator<Input = ()>,
-// {
-//     type Input = KF::Input;
-//     type Output = (KF::Output, KG::Output);
-
-//     fn generate_key(&mut self, input: &Self::Input) -> Self::Output {
-//         (
-//             self.key_fn.eval_key(input),
-//             self.key_generator.generate_key(()),
-//         )
-//     }
-// }
-
-// pub trait StorableMap: 'static + Send + Sync {
-//     // type Presentation: Storable;
-//     // type StorageIdInput;
-//     // type KeyGenerator: KeyGenerator;
-//     // type StorageId;
-//     // type Value;
-//     // type PrepareRef<'s>;
-//     // type RenderRef<'s>;
-//     type Key: 'static + Clone + Send + Sync;
-//     type Value: 'static + Send + Sync;
-
-//     fn new() -> Self;
-//     fn get(&self, key: &Self::Key) -> Option<&Self::Value>;
-//     fn entry(&mut self, key: Self::Key) -> Entry<Self::Key, Self::Value>;
-//     // where
-//     //     F: FnOnce() -> Self::Presentation;
-//     // fn get(&self, storage_id: &Self::StorageId) -> Option<&Self::Target>;
-//     // fn allocate(&mut self, key: K, presentation: Self::Target) -> Self::StorageId;
-//     fn expire(&mut self);
-// }
-
-// pub(crate) struct MapStorage<K, V>(HashMap<K, V>);
-
-// impl<K, V> StorableMap for MapStorage<K, V>
-// where
-//     K: 'static + Clone + Eq + Hash + Send + Sync,
-//     V: 'static + Send + Sync,
-// {
-//     // type Presentation = P;
-//     // type StorageIdInput = ();
-//     // type KeyGenerator = ReadKeyGenerator;
-//     // type Value = V;
-//     // type PrepareRef<'s> = &'s mut Arc<P>;
-//     // type RenderRef<'s> = &'s Arc<P>;
-
-//     type Key = K;
-//     type Value = V;
-
-//     fn new() -> Self {
-//         Self(HashMap::new())
-//     }
-
-//     fn get(&self, key: &Self::Key) -> Option<&Self::Value> {
-//         self.0.get(key)
-//     }
-
-//     fn entry(&mut self, key: Self::Key) -> Entry<Self::Key, Self::Value> {
-//         self.0.entry(key)
-//     }
-
-//     // fn allocate(&mut self, _key: (), presentation: Self::Target) -> Self::StorageId {
-//     //     self.0.insert(presentation);
-//     //     ()
-//     // }
-
-//     fn expire(&mut self) {
-//         self.0.clear();
-//         // std::mem::replace(&mut self.inactive, std::mem::take(&mut self.active));
-//     }
-// }
-
-// pub(crate) struct ReadWriteStorage<K, P>(HashMap<K, Arc<RwLock<P>>>);
-
-// impl<K, P> Storage<K> for ReadWriteStorage<K, P>
-// where
-//     P: Storable,
-// {
-//     // type Presentation = P;
-//     // type StorageIdInput = ();
-//     type KeyGenerator = ReadWriteKeyGenerator;
-//     type Value = Arc<RwLock<P>>;
-//     // type PrepareRef<'s> = &'s mut P;
-//     // type RenderRef<'s> = &'s P;
-
-//     fn new() -> Self {
-//         Self(Vec::new())
-//     }
-
-//     fn get_mut(&mut self, key: &Self::StorageId) -> &mut Option<Self::Value> {
-//         self.0.get_mut(*key)
-//     }
-
-//     fn get_ref(&self, key: &Self::StorageId) -> &Option<Self::Value> {
-//         self.0.get(*key)
-//     }
-
-//     // fn get(&self, storage_id: &Self::StorageId) -> Option<&Self::Target> {
-//     //     self.0.get(storage_id).unwrap()
-//     // }
-
-//     // fn allocate(&mut self, _input: (), presentation: Self::Target) -> Self::StorageId {
-//     //     let storage_id = self.0.len();
-//     //     self.0.push(presentation);
-//     //     storage_id
-//     // }
-
-//     fn expire(&mut self) {
-//         self.0.clear();
-//         // std::mem::replace(&mut self.inactive, std::mem::take(&mut self.active));
-//     }
-// }
-
-// pub(crate) struct MapStorage<K, PS>(HashMap<K, PS>);
-
-// impl<K, VK, PS> PresentationStorage<(K, VK)> for MapStorage<K, PS>
-// where
-//     K: 'static + Clone + Eq + Hash + Send + Sync,
-//     PS: PresentationStorage<VK>,
-// {
-//     // type Presentation = PS::Presentation;
-//     // type StorageIdInput = (K, PS::StorageIdInput);
-//     type StorageId = (K, PS::StorageId);
-//     type Target = PS::Target;
-//     // type PrepareRef<'s> = PS::PrepareRef<'s>;
-//     // type RenderRef<'s> = PS::RenderRef<'s>;
-
-//     fn new() -> Self {
-//         Self(HashMap::new())
-//     }
-
-//     fn get_mut(&mut self, storage_id: &Self::StorageId) -> &mut Option<Self::Target> {
-//         self.0
-//             .get_mut(&storage_id.0)
-//             .unwrap()
-//             .get_mut(&storage_id.1)
-//     }
-
-//     fn get_ref(&self, storage_id: &Self::StorageId) -> &Option<Self::Target> {
-//         self.0.get(&storage_id.0).unwrap().get_ref(&storage_id.1)
-//     }
-
-//     fn allocate(&mut self, key: (K, VK), presentation: Self::Target) -> Self::StorageId {
-//         (
-//             key.0.clone(),
-//             self.0
-//                 .entry(key.0)
-//                 .or_insert_with(PS::new)
-//                 .allocate(key.1, presentation),
-//         )
-//     }
-
-//     fn expire(&mut self) {
-//         self.0.values_mut().for_each(PS::expire);
-//     }
-// }
-
-// pub trait StorableKeyFn: 'static + Send + Sync {
-//     type Output: Clone + Eq + Hash + Send + Sync;
-
-//     fn eval_key<S>(serializable: &S) -> Self::Output
-//     where
-//         S: serde::Serialize;
-// }
-
 pub trait DynKey: 'static + Send + Sync + DynClone + DynEq + DynHash {}
 
 impl<K> DynKey for K where K: 'static + Clone + Eq + Hash + Send + Sync {}
@@ -392,42 +198,13 @@ pub trait Storable: 'static + Send + Sync {
         &self,
         storable_key_fn: &fn(&dyn serde_traitobject::Serialize) -> Box<dyn DynKey>,
     ) -> Self::StorableKey;
-    // fn store(&self) -> <Self::Slot as Slot>::Value;
 }
-
-// impl<PS> PresentationStoragePrimitive for Box<dyn PresentationStoragePrimitive<PresentationStorage = PS>>
-// where
-//     PS: PresentationStorage,
-// {
-//     type PresentationStorage = PS;
-
-//     fn storage_id_input(&self) -> PS::StorageIdInput {
-//         self.as_ref().storage_id_input()
-//     }
-// }
 
 #[derive(Clone)]
 pub struct StorageKey<K, SK> {
     storable_key: K,
     slot_key: SK,
 }
-
-// pub struct PresentationStorageEntry<PSP>
-// where
-//     PSP: PresentationStoragePrimitive,
-// {
-//     storage_id: Option<<PSP::PresentationStorage as PresentationStorage<PSP::Key>>::StorageId>,
-//     primitive: PSP,
-// }
-
-// impl<S> Allocated<S>
-// where
-//     S: Storable,
-// {
-//     pub(crate) fn storable(&self) -> &S {
-//         &self.storable
-//     }
-// }
 
 struct SlotKeyGeneratorWrapper<K, S>(K, S);
 

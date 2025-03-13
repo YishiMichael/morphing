@@ -1,6 +1,7 @@
 use core::range::Range;
 use std::any::TypeId;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -11,9 +12,7 @@ use super::stage::ChannelIndex;
 use super::stage::Layer;
 use super::stage::LayerAttachment;
 use super::stage::LayerIndex;
-use super::stage::LayerIndexed;
 use super::stage::World;
-use super::stage::WorldIndexed;
 use super::storable::DynKey;
 use super::storable::SharableSlot;
 use super::storable::Slot;
@@ -327,25 +326,49 @@ where
     }
 }
 
-pub trait TypeQuery:
-    'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
-{
-    type World: WorldIndexed<Self::LayerIndex, Layer = Self::Layer>;
-    type LayerIndex: LayerIndex;
-    type Layer: LayerIndexed<Self::ChannelIndex, Channel = Self::Channel>;
-    type ChannelIndex: ChannelIndex;
+pub trait TypeQuery: 'static + Debug + Send + Sync {
+    type World: World;
+    type LayerIndex: LayerIndex<Self::World, Layer = Self::Layer>;
+    type Layer: Layer;
+    type ChannelIndex: ChannelIndex<Self::Layer, Channel = Self::Channel>;
     type Channel: Channel<MobjectPresentation = Self::MobjectPresentation>;
     type Mobject: Mobject;
     type MobjectPresentation: MobjectPresentation<Self::Mobject>;
 }
 
-pub struct AttachedMobject<'c, 't, 'a, TQ>
+pub struct TypeQueried<W, LI, L, CI, C, M, MP>(PhantomData<fn() -> (W, LI, L, CI, C, M, MP)>);
+
+impl<W, LI, L, CI, C, M, MP> Debug for TypeQueried<W, LI, L, CI, C, M, MP> {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
+}
+
+impl<W, LI, L, CI, C, M, MP> TypeQuery for TypeQueried<W, LI, L, CI, C, M, MP>
+where
+    W: World,
+    LI: LayerIndex<W, Layer = L>,
+    L: Layer,
+    CI: ChannelIndex<L, Channel = C>,
+    C: Channel<MobjectPresentation = MP>,
+    M: Mobject,
+    MP: MobjectPresentation<M>,
+{
+    type World = W;
+    type LayerIndex = LI;
+    type Layer = L;
+    type ChannelIndex = CI;
+    type Channel = C;
+    type Mobject = M;
+    type MobjectPresentation = MP;
+}
+
+pub struct AttachedMobject<'t, 'a, TQ>
 where
     TQ: TypeQuery,
 {
     mobject: Arc<TQ::Mobject>,
     attachment: &'a ChannelAttachment<
-        'c,
         't,
         TQ::World,
         TQ::LayerIndex,
@@ -356,11 +379,11 @@ where
     >,
 }
 
-impl<'c, 't, 'a, TQ> AttachedMobject<'c, 't, 'a, TQ>
+impl<'t, 'a, TQ> AttachedMobject<'t, 'a, TQ>
 where
     TQ: TypeQuery,
 {
-    fn launch<TS>(self, timeline_state: TS) -> Alive<'c, 't, 'a, TQ, TS>
+    fn launch<TS>(self, timeline_state: TS) -> Alive<'t, 'a, TQ, TS>
     where
         TS: TimelineState<TQ>,
     {
@@ -435,9 +458,9 @@ where
                     &timer,
                     AttachedMobject {
                         mobject: self.mobject,
-                        attachment: TQ::Layer::index_attachment(TQ::World::index_attachment(
-                            &world_attachment,
-                        )),
+                        attachment: TQ::ChannelIndex::index_attachment(
+                            TQ::LayerIndex::index_attachment(&world_attachment),
+                        ),
                     }
                     .launch(CollapsedTimelineState),
                 )
@@ -466,28 +489,28 @@ where
     }
 }
 
-struct AliveInner<'c, 't, 'a, TQ, TS>
+struct AliveInner<'t, 'a, TQ, TS>
 where
     TQ: TypeQuery,
     TS: TimelineState<TQ>,
 {
     alive_id: usize,
     spawn_time: Rc<Time>,
-    attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
+    attached_mobject: AttachedMobject<'t, 'a, TQ>,
     timeline_state: TS,
 }
 
-pub struct Alive<'c, 't, 'a, TQ, TS>(Option<AliveInner<'c, 't, 'a, TQ, TS>>)
+pub struct Alive<'t, 'a, TQ, TS>(Option<AliveInner<'t, 'a, TQ, TS>>)
 where
     TQ: TypeQuery,
     TS: TimelineState<TQ>;
 
-impl<'c, 't, 'a, TQ, TS> Alive<'c, 't, 'a, TQ, TS>
+impl<'t, 'a, TQ, TS> Alive<'t, 'a, TQ, TS>
 where
     TQ: TypeQuery,
     TS: TimelineState<TQ>,
 {
-    fn terminate(&mut self) -> (AttachedMobject<'c, 't, 'a, TQ>, TS::ResidueTimelineState) {
+    fn terminate(&mut self) -> (AttachedMobject<'t, 'a, TQ>, TS::ResidueTimelineState) {
         let inner = self.0.take().unwrap();
         inner.timeline_state.transit_with_residue(
             inner.alive_id,
@@ -500,7 +523,7 @@ where
     }
 }
 
-impl<TQ, TS> Drop for Alive<'_, '_, '_, TQ, TS>
+impl<TQ, TS> Drop for Alive<'_, '_, TQ, TS>
 where
     TQ: TypeQuery,
     TS: TimelineState<TQ>,
@@ -518,12 +541,12 @@ where
 {
     type ResidueTimelineState: TimelineState<TQ>;
 
-    fn transit_with_residue<'c, 't, 'a>(
+    fn transit_with_residue<'t, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState);
+        attached_mobject: AttachedMobject<'t, 'a, TQ>,
+    ) -> (AttachedMobject<'t, 'a, TQ>, Self::ResidueTimelineState);
 }
 
 pub struct CollapsedTimelineState;
@@ -534,12 +557,12 @@ where
 {
     type ResidueTimelineState = CollapsedTimelineState;
 
-    fn transit_with_residue<'c, 't, 'a>(
+    fn transit_with_residue<'t, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState) {
+        attached_mobject: AttachedMobject<'t, 'a, TQ>,
+    ) -> (AttachedMobject<'t, 'a, TQ>, Self::ResidueTimelineState) {
         (
             attached_mobject.transit_simple(alive_id, time_interval, |mobject| StaticTimeline::<
                 TQ,
@@ -562,12 +585,12 @@ where
 {
     type ResidueTimelineState = IndeterminedTimelineState<TE>;
 
-    fn transit_with_residue<'c, 't, 'a>(
+    fn transit_with_residue<'t, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState) {
+        attached_mobject: AttachedMobject<'t, 'a, TQ>,
+    ) -> (AttachedMobject<'t, 'a, TQ>, Self::ResidueTimelineState) {
         (
             attached_mobject.transit_simple(alive_id, time_interval, |mobject| StaticTimeline::<
                 TQ,
@@ -594,12 +617,12 @@ where
 {
     type ResidueTimelineState = CollapsedTimelineState;
 
-    fn transit_with_residue<'c, 't, 'a>(
+    fn transit_with_residue<'t, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState) {
+        attached_mobject: AttachedMobject<'t, 'a, TQ>,
+    ) -> (AttachedMobject<'t, 'a, TQ>, Self::ResidueTimelineState) {
         let attached_mobject_updated = attached_mobject.update_cloned(|mobject| {
             self.update.update(
                 self.time_eval.time_eval(
@@ -634,12 +657,12 @@ where
 {
     type ResidueTimelineState = CollapsedTimelineState;
 
-    fn transit_with_residue<'c, 't, 'a>(
+    fn transit_with_residue<'t, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
-        attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState) {
+        attached_mobject: AttachedMobject<'t, 'a, TQ>,
+    ) -> (AttachedMobject<'t, 'a, TQ>, Self::ResidueTimelineState) {
         (
             attached_mobject.transit_complex(
                 alive_id,
@@ -652,11 +675,11 @@ where
     }
 }
 
-pub trait Spawn<'c, 't, 'a, TQ, I>
+pub trait Spawn<'t, 'a, TQ, I>
 where
     TQ: TypeQuery,
 {
-    fn spawn(&'a self, input: I) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
+    fn spawn(&'a self, input: I) -> Alive<'t, 'a, TQ, CollapsedTimelineState>;
 }
 
 pub trait Quantize: Sized {
@@ -715,9 +738,8 @@ where
         C: Construct<TQ>;
 }
 
-impl<'c, 't, 'a, TQ> Spawn<'c, 't, 'a, TQ, TQ::Mobject>
+impl<'t, 'a, TQ> Spawn<'t, 'a, TQ, TQ::Mobject>
     for ChannelAttachment<
-        'c,
         't,
         TQ::World,
         TQ::LayerIndex,
@@ -729,7 +751,7 @@ impl<'c, 't, 'a, TQ> Spawn<'c, 't, 'a, TQ, TQ::Mobject>
 where
     TQ: TypeQuery,
 {
-    fn spawn(&'a self, mobject: TQ::Mobject) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
+    fn spawn(&'a self, mobject: TQ::Mobject) -> Alive<'t, 'a, TQ, CollapsedTimelineState> {
         AttachedMobject {
             mobject: Arc::new(mobject),
             attachment: self,
@@ -738,30 +760,29 @@ where
     }
 }
 
-impl<'c, 't, 'a, TQ, MB> Spawn<'c, 't, 'a, TQ, MB>
+impl<'t, 'a, TQ, MB> Spawn<'t, 'a, TQ, MB>
     for LayerAttachment<
-        'c,
         't,
         TQ::World,
         TQ::LayerIndex,
         TQ::Layer,
-        <TQ::Layer as Layer>::Residue<'c, 't, TQ::World, TQ::LayerIndex>,
+        <TQ::Layer as Layer>::Residue<'t, TQ::World, TQ::LayerIndex>,
     >
 where
     TQ: TypeQuery,
     MB: MobjectBuilder<TQ::Layer, OutputTypeQuery<TQ::World, TQ::LayerIndex> = TQ>,
 {
-    fn spawn(&'a self, mobject_builder: MB) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
+    fn spawn(&'a self, mobject_builder: MB) -> Alive<'t, 'a, TQ, CollapsedTimelineState> {
         mobject_builder.instantiate(self, self.config)
     }
 }
 
-impl<'c, 't, 'a, TQ> Quantize for Alive<'c, 't, 'a, TQ, CollapsedTimelineState>
+impl<'t, 'a, TQ> Quantize for Alive<'t, 'a, TQ, CollapsedTimelineState>
 where
     TQ: TypeQuery,
 {
     type Output<TE> =
-        Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<TE>>
+        Alive<'t, 'a, TQ, IndeterminedTimelineState<TE>>
     where
         TE: TimeEval;
 
@@ -775,13 +796,13 @@ where
     }
 }
 
-impl<'c, 't, 'a, TQ, TE, U> Collapse for Alive<'c, 't, 'a, TQ, UpdateTimelineState<TE, U>>
+impl<'t, 'a, TQ, TE, U> Collapse for Alive<'t, 'a, TQ, UpdateTimelineState<TE, U>>
 where
     TQ: TypeQuery,
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, TQ>,
 {
-    type Output = Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
+    type Output = Alive<'t, 'a, TQ, CollapsedTimelineState>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
@@ -790,13 +811,13 @@ where
     }
 }
 
-impl<'c, 't, 'a, TQ, TE, C> Collapse for Alive<'c, 't, 'a, TQ, ConstructTimelineState<TE, C>>
+impl<'t, 'a, TQ, TE, C> Collapse for Alive<'t, 'a, TQ, ConstructTimelineState<TE, C>>
 where
     TQ: TypeQuery,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
     C: Construct<TQ>,
 {
-    type Output = Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
+    type Output = Alive<'t, 'a, TQ, CollapsedTimelineState>;
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
@@ -805,14 +826,14 @@ where
     }
 }
 
-impl<'c, 't, 'a, TQ, TE> ApplyRate<TE::OutputTimeMetric>
-    for Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<TE>>
+impl<'t, 'a, TQ, TE> ApplyRate<TE::OutputTimeMetric>
+    for Alive<'t, 'a, TQ, IndeterminedTimelineState<TE>>
 where
     TQ: TypeQuery,
     TE: TimeEval,
 {
     type Output<RA> =
-        Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<RateComposeTimeEval<RA, TE>>>
+        Alive<'t, 'a, TQ, IndeterminedTimelineState<RateComposeTimeEval<RA, TE>>>
     where
         RA: Rate<TE::OutputTimeMetric>;
 
@@ -828,14 +849,14 @@ where
     }
 }
 
-impl<'c, 't, 'a, TQ, TE> ApplyUpdate<TE::OutputTimeMetric, TQ>
-    for Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<TE>>
+impl<'t, 'a, TQ, TE> ApplyUpdate<TE::OutputTimeMetric, TQ>
+    for Alive<'t, 'a, TQ, IndeterminedTimelineState<TE>>
 where
     TQ: TypeQuery,
     TE: TimeEval,
 {
     type Output<U> =
-        Alive<'c, 't, 'a, TQ, UpdateTimelineState<TE, U>>
+        Alive<'t, 'a, TQ, UpdateTimelineState<TE, U>>
     where
         U: Update<TE::OutputTimeMetric, TQ>;
 
@@ -849,13 +870,12 @@ where
     }
 }
 
-impl<'c, 't, 'a, TQ> ApplyUpdate<NormalizedTimeMetric, TQ>
-    for Alive<'c, 't, 'a, TQ, CollapsedTimelineState>
+impl<'t, 'a, TQ> ApplyUpdate<NormalizedTimeMetric, TQ> for Alive<'t, 'a, TQ, CollapsedTimelineState>
 where
     TQ: TypeQuery,
 {
     type Output<U> =
-        Alive<'c, 't, 'a, TQ, CollapsedTimelineState>
+        Alive<'t, 'a, TQ, CollapsedTimelineState>
     where
         U: Update<NormalizedTimeMetric, TQ>;
 
@@ -873,13 +893,13 @@ where
     }
 }
 
-impl<'c, 't, 'a, TQ, TE> ApplyConstruct<TQ> for Alive<'c, 't, 'a, TQ, IndeterminedTimelineState<TE>>
+impl<'t, 'a, TQ, TE> ApplyConstruct<TQ> for Alive<'t, 'a, TQ, IndeterminedTimelineState<TE>>
 where
     TQ: TypeQuery,
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
 {
     type Output<C> =
-        Alive<'c, 't, 'a, TQ, ConstructTimelineState<TE, C>>
+        Alive<'t, 'a, TQ, ConstructTimelineState<TE, C>>
     where
         C: Construct<TQ>;
 
