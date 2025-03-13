@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+morphing-builtins = { path = "../../morphing-builtins" }
 morphing-core = { path = "../../morphing-core" }
-morphing-gizmos = { path = "../../morphing-gizmos" }
 nalgebra = "0.33.2"

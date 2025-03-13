@@ -1,5 +1,5 @@
 [package]
-name = "morphing-gizmos"
+name = "morphing-builtins"
 version = "0.1.0"
 authors = ["YishiMichael"]
 edition = "2021"
@@ -16,7 +16,6 @@ lyon = { version = "1.0.1", features = ["serialization"] }
 morphing-core = { path = "../morphing-core" }
 nalgebra = { version = "0.33.2", features = ["serde-serialize"] }
 palette = { version = "0.7.6", features = ["serializing"] }
-paste = "1.0.15"
 serde = "1.0.217"
 serde_traitobject = "0.2.8"
 strum = { version = "0.27.0", features = ["derive"] }

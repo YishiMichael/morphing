@@ -7,8 +7,8 @@ pub mod mobjects;
 pub mod timelines;
 
 inventory::submit! {
-    ConfigFallbackContent(include_str!("general_config.toml"))
+    ConfigFallbackContent(include_str!("configs/general.toml"))
 }
 inventory::submit! {
-    ConfigFallbackContent(include_str!("typst_config.toml"))
+    ConfigFallbackContent(include_str!("configs/typst.toml"))
 }
