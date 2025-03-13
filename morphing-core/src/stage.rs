@@ -5,18 +5,13 @@ use std::marker::PhantomData;
 use super::config::Config;
 use super::storable::SlotKeyGeneratorTypeMap;
 use super::storable::StorageTypeMap;
-use super::timeline::Alive;
 use super::timeline::AllocatedTimelineErasure;
-use super::timeline::AttachedMobject;
-use super::timeline::CollapsedTimelineState;
-use super::timeline::IncreasingTimeEval;
-use super::timeline::NormalizedTimeMetric;
 use super::timeline::PresentationKey;
-use super::timeline::Time;
 use super::timeline::TimelineErasure;
-use super::timeline::Timer;
-use super::timeline::TypeQuery;
-use super::traits::MobjectBuilder;
+use super::timer::IncreasingTimeEval;
+use super::timer::NormalizedTimeMetric;
+use super::timer::Time;
+use super::timer::Timer;
 
 pub trait Archive {
     type Output;
@@ -60,13 +55,6 @@ pub trait Render {
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
     );
-}
-
-pub trait Spawn<'c, 't, 'a, TQ, I>
-where
-    TQ: TypeQuery,
-{
-    fn spawn(&'a self, input: I) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
 }
 
 pub trait Channel: 'static + Sized + Archive {
@@ -161,145 +149,6 @@ where
     pub residue: R,
 }
 
-// pub(crate) trait ChannelAttachment<W, LI, L, CI, C, MP>: 'static
-// where
-//     W: WorldIndexed<LI, Layer = L>,
-//     LI: LayerIndex,
-//     L: LayerIndexed<CI, Channel = C>,
-//     CI: ChannelIndex,
-//     C: Channel<MobjectPresentation = MP>,
-// {
-//     fn config(&self) -> &Config;
-//     fn timer(&self) -> &Timer;
-//     fn world_architecture(&self) -> &W::Architecture;
-//     fn channel_architecture(&self) -> &C::Architecture;
-//     // fn spawn<M>(
-//     //     &self,
-//     //     mobject: M,
-//     // ) -> Alive<TypeQueried<W, LI, L, CI, C, M, MP, SKF, Self>, CollapsedTimelineState>
-//     // where
-//     //     M: Mobject,
-//     //     MP: MobjectPresentation<M>;
-// }
-
-// pub trait Channel: 'static {
-//     type MobjectPresentation: Send + Sync;
-
-//     type Architecture: Channel<Self::MobjectPresentation>;
-//     type Archive;
-//     type Allocation;
-//     type Prepare;
-//     type Attachment<'c, W, LI, L, CI>: ChannelAttachment<
-//         W,
-//         LI,
-//         L,
-//         CI,
-//         Self,
-//         Self::MobjectPresentation,
-//     >
-//     where
-//         W: WorldIndexed<LI, Layer = L>,
-//         LI: LayerIndex,
-//         L: LayerIndexed<CI, Channel = Self>,
-//         CI: ChannelIndex;
-
-//     fn architecture() -> Self::Architecture;
-
-// }
-
-// pub trait Layer: 'static {
-//     type Architecture;
-//     type Archive;
-//     type Allocation;
-//     type Prepare;
-//     type Attachment<'l, W, LI>: LayerAttachment<W, LI, Self>
-//     where
-//         W: WorldIndexed<LI, Layer = Self>,
-//         LI: LayerIndex;
-
-//     fn architecture() -> Self::Architecture;
-//     fn merge<TE>(
-//         architecture: &Self::Architecture,
-//         output: Self::Output,
-//         alive_id: usize,
-//         time_eval: &TE,
-//         parent_time_interval: Range<Time>,
-//         child_time_interval: Range<Time>,
-//     ) where
-//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-//     fn archive(architecture: Self::Architecture) -> Self::Archive;
-//     fn allocation(
-//         output: Self::Output,
-//         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-//     ) -> Self::Allocation;
-//     fn prepare(
-//         allocation: &Self::Allocation,
-//         time: Time,
-//         storage_type_map: &mut StorageTypeMap,
-//         device: &wgpu::Device,
-//         queue: &wgpu::Queue,
-//         format: wgpu::TextureFormat,
-//     ) -> Self::Prepare;
-//     fn render(
-//         prepare: &Self::Prepare,
-//         storage_type_map: &StorageTypeMap,
-//         encoder: &mut wgpu::CommandEncoder,
-//         target: &wgpu::TextureView,
-//     );
-//     fn attachment<'l, W, LI>(
-//         architecture: &'l Self::Architecture,
-//         config: &'l Config,
-//         timer: &'l Timer,
-//         world_architecture: &'l W::Architecture,
-//     ) -> Self::Attachment<'l, W, LI>
-//     where
-//         W: WorldIndexed<LI, Layer = Self>,
-//         LI: LayerIndex;
-// }
-
-// pub trait World: 'static {
-//     type Architecture;
-//     type Archive;
-//     type Allocation;
-//     type Prepare;
-//     type Attachment<'w>;
-
-//     fn architecture() -> Self::Architecture;
-//     fn merge<TE>(
-//         architecture: &Self::Architecture,
-//         output: Self::Output,
-//         alive_id: usize,
-//         time_eval: &TE,
-//         parent_time_interval: Range<Time>,
-//         child_time_interval: Range<Time>,
-//     ) where
-//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-//     fn archive(architecture: Self::Architecture) -> Self::Archive;
-//     fn allocation(
-//         output: Self::Output,
-//         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-//     ) -> Self::Allocation;
-//     fn prepare(
-//         allocation: &Self::Allocation,
-//         time: Time,
-//         storage_type_map: &mut StorageTypeMap,
-//         device: &wgpu::Device,
-//         queue: &wgpu::Queue,
-//         format: wgpu::TextureFormat,
-//     ) -> Self::Prepare;
-//     fn render(
-//         prepare: &Self::Prepare,
-//         storage_type_map: &StorageTypeMap,
-//         encoder: &mut wgpu::CommandEncoder,
-//         target: &wgpu::TextureView,
-//     );
-//     fn attachment<'w>(
-//         architecture: &'w Self::Architecture,
-//         config: &'w Config,
-//         timer: &'w Timer,
-//     ) -> Self::Attachment<'w>;
-// }
-
 pub trait ChannelIndex: 'static {}
 
 pub trait LayerIndex: 'static {}
@@ -310,15 +159,12 @@ impl<const IDX: usize> ChannelIndex for Idx<IDX> {}
 
 impl<const IDX: usize> LayerIndex for Idx<IDX> {}
 
-// pub trait Channel<MP>: Channel {}
-
 pub trait LayerIndexed<CI>: Layer
 where
     CI: ChannelIndex,
 {
     type Channel: Channel;
 
-    // fn index(&self) -> &Self::Channel;
     fn index_attachment<'c, 't, 'a, W, LI>(
         attachment: &'a LayerAttachment<'c, 't, W, LI, Self, Self::Residue<'c, 't, W, LI>>,
     ) -> &'a ChannelAttachment<
@@ -342,7 +188,6 @@ where
 {
     type Layer: Layer;
 
-    // fn index(&self) -> &Self::Layer;
     fn index_attachment<'c, 't, 'a>(
         attachment: &'a WorldAttachment<'c, 't, Self, Self::Residue<'c, 't>>,
     ) -> &'a LayerAttachment<
@@ -355,23 +200,7 @@ where
     >;
 }
 
-// pub(crate) trait LayerAttachment<W, LI, L>: 'static
-// where
-//     W: WorldIndexed<LI, Layer = L>,
-//     LI: LayerIndex,
-//     L: Layer,
-// {
-//     fn config(&self) -> &Config;
-//     // fn spawn<M>(
-//     //     &self,
-//     //     mobject: M,
-//     // ) -> Alive<TypeQueried<W, LI, L, CI, C, M, MP, SKF, Self>, CollapsedTimelineState>
-//     // where
-//     //     M: Mobject,
-//     //     MP: MobjectPresentation<M>;
-// }
-
-enum Node<V> {
+pub enum Node<V> {
     Singleton(V),
     Multiton(Vec<V>),
 }
@@ -398,12 +227,6 @@ pub type ChannelType<MP> = RefCell<
         )>,
     )>,
 >;
-
-// pub struct ChannelType<MP>(
-//     ,
-// )
-// where
-//     MP: 'static + Send + Sync;
 
 impl<MP> Archive for ChannelType<MP>
 where
@@ -569,75 +392,9 @@ where
     }
 }
 
-// impl<W, LI, L, CI, C, MP> ChannelAttachment<W, LI, L, CI, C, MP>
-//     for ChannelAttachmentImpl<'_, W, LI, L, CI, C, MP>
-// where
-//     W: WorldIndexed<LI, Layer = L>,
-//     LI: LayerIndex,
-//     L: LayerIndexed<CI, Channel = C>,
-//     CI: ChannelIndex,
-//     C: Channel<MobjectPresentation = MP>,
-//     MP: 'static + Send + Sync,
-// {
-//     fn config(&self) -> &Config {
-//         self.config
-//     }
-
-//     fn timer(&self) -> &Timer {
-//         self.timer
-//     }
-
-//     fn world_architecture(&self) -> &W::Architecture {
-//         self.world_architecture
-//     }
-
-//     fn channel_architecture(&self) -> &C::Architecture {
-//         self.channel_architecture
-//     }
-// }
-
-impl<'c, 't, 'a, TQ> Spawn<'c, 't, 'a, TQ, TQ::Mobject>
-    for ChannelAttachment<
-        'c,
-        't,
-        TQ::World,
-        TQ::LayerIndex,
-        TQ::Layer,
-        TQ::ChannelIndex,
-        TQ::Channel,
-        TQ::MobjectPresentation,
-    >
-where
-    TQ: TypeQuery,
-{
-    fn spawn(&'a self, mobject: TQ::Mobject) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
-        AttachedMobject::spawn(mobject, self)
-    }
-}
-
-impl<'c, 't, 'a, TQ, MB> Spawn<'c, 't, 'a, TQ, MB>
-    for LayerAttachment<
-        'c,
-        't,
-        TQ::World,
-        TQ::LayerIndex,
-        TQ::Layer,
-        <TQ::Layer as Layer>::Residue<'c, 't, TQ::World, TQ::LayerIndex>,
-    >
-where
-    TQ: TypeQuery,
-    MB: MobjectBuilder<TQ::Layer, OutputTypeQuery<TQ::World, TQ::LayerIndex> = TQ>,
-{
-    fn spawn(&'a self, mobject_builder: MB) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
-        mobject_builder.instantiate(self, self.config)
-    }
-}
-
-// impl<MP> Channel<MP> for ChannelType<MP> where MP: 'static + Send + Sync {}
-
 // test code
-struct MyMobjectPresentation0;
-struct MyMobjectPresentation1;
+pub struct MyMobjectPresentation0;
+pub struct MyMobjectPresentation1;
 
 /*
 #[derive(Layer)]
@@ -831,28 +588,6 @@ impl LayerIndexed<Idx<1>> for MyLayer {
     }
 }
 
-// pub trait WorldIndexed<const LI: usize>: World {
-//     type Layer: Layer;
-// }
-
-// impl<SKF, W> MyLayerAttachmentImpl<'_, SKF, W>
-// where
-//     ,
-//     W: WorldErasure,
-// {
-//     #[must_use]
-//     fn spawn<L, MB>(
-//         &self,
-//         mobject_builder: MB,
-//     ) -> Alive<SKF, W, MB::Instantiation, CollapsedAnimationState>
-//     where
-//         L: LayerErasure<SKF, Attachment = Self>,
-//         MB: MobjectBuilder<SKF, L>,
-//     {
-//         mobject_builder.instantiate(self)
-//     }
-// }
-
 // hand-written
 impl Render
     for MyLayer<
@@ -1041,101 +776,3 @@ impl WorldIndexed<Idx<1>> for MyWorld {
         &attachment.residue.layer_1
     }
 }
-
-// #[derive(Debug)]
-// struct MySerializableKeyFn;
-
-// impl StorableKeyFn for MySerializableKeyFn {
-//     type Output = ();
-
-//     fn eval_key<S>(_serializable: &S) -> Self::Output
-//     where
-//         S: serde::Serialize,
-//     {
-//         ()
-//     }
-// }
-
-// impl World for MyWorld<'_> {
-//     type SerializableKeyFn = MySerializableKeyFn;
-
-//     fn architecture(config: &Config, timer_stack: &TimerStack) -> Rc<Self> {
-//         Rc::new_cyclic(|world| Self {
-//             layer_0: MyWorld::architecture(config, timer_stack, world.clone()),
-//             layer_1: MyWorld::architecture(config, timer_stack, world.clone()),
-//         })
-//     }
-
-//     fn grow_stack(&self) {
-//         self.layer_0.grow_stack();
-//         self.layer_1.grow_stack();
-//     }
-//     fn shrink_stack<TE>(&self, time_interval: Range<Time>, time_eval: &TE)
-//     where
-//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-//     {
-//         self.layer_0.shrink_stack(time_interval.clone(), time_eval);
-//         self.layer_1.shrink_stack(time_interval.clone(), time_eval);
-//     }
-
-//     fn collect(self) -> Vec<Box<dyn LayerPreallocated>> {
-//         Vec::from([
-//             Box::architecture(self.layer_0.collect()) as Box<dyn LayerPreallocated>,
-//             Box::architecture(self.layer_1.collect()) as Box<dyn LayerPreallocated>,
-//         ])
-//     }
-// }
-// end test code
-
-// trait StageMapper<O>
-// where
-//     O: Object,
-// {
-//     type Target;
-// }
-
-// struct AttachedStage;
-// struct ArchivedStage;
-// struct AllocatedStage;
-// struct PreparedStage;
-// struct AttachmentStage<'c, C>(&'c C);
-
-// impl<O> StageMapper<O> for AttachedStage
-// where
-//     O: Object,
-// {
-//     type Target = O::Attached;
-// }
-
-// impl<O> StageMapper<O> for ArchivedStage
-// where
-//     O: Object,
-// {
-//     type Target = O::Archived;
-// }
-
-// impl<O> StageMapper<O> for AllocatedStage
-// where
-//     O: Object,
-// {
-//     type Target = O::Allocated;
-// }
-
-// impl<O> StageMapper<O> for PreparedStage
-// where
-//     O: Object,
-// {
-//     type Target = O::Prepared;
-// }
-
-// impl<'c, O, C> StageMapper<O> for AttachmentStage<'c, C>
-// where
-//     O: 'c + Object,
-// {
-//     type Target = O::Attachment<'c, C>;
-// }
-
-// struct At<O, SM>(SM::Target)
-// where
-//     O: Object,
-//     SM: StageMapper<O>;

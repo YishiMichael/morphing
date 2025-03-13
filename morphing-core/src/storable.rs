@@ -17,14 +17,14 @@ use dyn_hash::DynHash;
 //     fn eval_key(&self, input: &Self::Input) -> Self::Output;
 // }
 
-pub(crate) trait SlotKeyGenerator: 'static + Send + Sync {
+pub trait SlotKeyGenerator: 'static + Send + Sync {
     type SlotKey: 'static + Clone;
 
     fn new() -> Self;
     fn generate_slot_key(&mut self) -> Self::SlotKey;
 }
 
-pub(crate) struct SharableSlotKeyGenerator;
+pub struct SharableSlotKeyGenerator;
 
 impl SlotKeyGenerator for SharableSlotKeyGenerator {
     type SlotKey = ();
@@ -38,7 +38,7 @@ impl SlotKeyGenerator for SharableSlotKeyGenerator {
     }
 }
 
-pub(crate) struct VecSlotKeyGenerator(usize);
+pub struct VecSlotKeyGenerator(usize);
 
 impl SlotKeyGenerator for VecSlotKeyGenerator {
     type SlotKey = usize;
@@ -54,7 +54,7 @@ impl SlotKeyGenerator for VecSlotKeyGenerator {
     }
 }
 
-pub(crate) trait Slot: 'static + Send + Sync {
+pub trait Slot: 'static + Send + Sync {
     type Value;
     type SlotKeyGenerator: SlotKeyGenerator;
 
@@ -73,7 +73,7 @@ pub(crate) trait Slot: 'static + Send + Sync {
     fn expire(&mut self);
 }
 
-pub(crate) struct SharableSlot<V>(Option<Arc<V>>);
+pub struct SharableSlot<V>(Option<Arc<V>>);
 
 impl<V> Slot for SharableSlot<V>
 where
@@ -109,7 +109,7 @@ where
     }
 }
 
-pub(crate) struct VecSlot<V>(Vec<Option<V>>);
+pub struct VecSlot<V>(Vec<Option<V>>);
 
 impl<V> Slot for VecSlot<V>
 where
@@ -148,7 +148,7 @@ where
     }
 }
 
-pub(crate) struct SwapSlot<S> {
+pub struct SwapSlot<S> {
     active: S,
     inactive: S,
 }
@@ -376,7 +376,7 @@ where
 //         S: serde::Serialize;
 // }
 
-pub(crate) trait DynKey: 'static + Send + Sync + DynClone + DynEq + DynHash {}
+pub trait DynKey: 'static + Send + Sync + DynClone + DynEq + DynHash {}
 
 impl<K> DynKey for K where K: 'static + Clone + Eq + Hash + Send + Sync {}
 
@@ -500,7 +500,7 @@ where
     S: Slot,
 {
     fn expire(&mut self) {
-        self.values_mut().map(Slot::expire);
+        self.values_mut().for_each(Slot::expire);
     }
 }
 
@@ -560,7 +560,7 @@ impl StorageTypeMap {
     }
 
     pub fn expire(&mut self) {
-        self.type_map = std::mem::replace(&mut self.0, typemap_rev::TypeMap::custom())
+        self.type_map = std::mem::replace(&mut self.type_map, typemap_rev::TypeMap::custom())
             .into_iter()
             .map(|(type_id, mut presentation_storage)| {
                 presentation_storage.expire();

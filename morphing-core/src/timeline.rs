@@ -1,10 +1,6 @@
-use core::range::IterRangeFrom;
 use core::range::Range;
-use core::range::RangeFrom;
 use std::any::TypeId;
-use std::cell::RefCell;
 use std::fmt::Debug;
-use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -12,6 +8,8 @@ use super::stage::Archive;
 use super::stage::Channel;
 use super::stage::ChannelAttachment;
 use super::stage::ChannelIndex;
+use super::stage::Layer;
+use super::stage::LayerAttachment;
 use super::stage::LayerIndex;
 use super::stage::LayerIndexed;
 use super::stage::World;
@@ -26,68 +24,21 @@ use super::storable::StorageKey;
 use super::storable::StorageTypeMap;
 use super::storable::SwapSlot;
 use super::storable::VecSlot;
+use super::timer::DenormalizedTimeEval;
+use super::timer::IncreasingTimeEval;
+use super::timer::NormalizedTimeEval;
+use super::timer::NormalizedTimeMetric;
+use super::timer::RateComposeTimeEval;
+use super::timer::Time;
+use super::timer::TimeEval;
+use super::timer::TimeMetric;
+use super::timer::Timer;
 use super::traits::Construct;
-use super::traits::IncreasingRate;
 use super::traits::Mobject;
+use super::traits::MobjectBuilder;
 use super::traits::MobjectPresentation;
 use super::traits::Rate;
 use super::traits::Update;
-
-// #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
-// pub struct StaticTimelineId(pub u64);
-
-// #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, serde::Deserialize, serde::Serialize)]
-// pub struct DynamicTimelineId(pub u64);
-
-// impl TimelineId {
-//     fn new(timeline: &serde_traitobject::Arc<dyn Timeline>) -> Self {
-//         // Hash `Arc<T>` instead of `T`.
-//         // Presentation maps inside `storage` are identified only by `T::Presentation` type, without `T`.
-//         Self(seahash::hash(
-//             &ron::ser::to_string(timeline).unwrap().into_bytes(),
-//         ))
-//     }
-
-//     fn prepare_presentation<P, C, F>(
-//         self,
-//         storage: &mut iced::widget::shader::Storage,
-//         device: &wgpu::Device,
-//         presentation_constructor: C,
-//         prepare: F,
-//     ) where
-//         P: 'static + Send,
-//         C: FnOnce(&wgpu::Device) -> P,
-//         F: FnOnce(&mut P),
-//     {
-//         prepare(
-//             &mut match storage.get_mut::<dashmap::DashMap<Self, P>>() {
-//                 Some(presentation_map) => presentation_map,
-//                 None => {
-//                     storage.store::<dashmap::DashMap<Self, P>>(dashmap::DashMap::new());
-//                     storage.get_mut::<dashmap::DashMap<Self, P>>().unwrap()
-//                 }
-//             }
-//             .entry(self)
-//             .or_insert_with(|| presentation_constructor(device)),
-//         )
-//     }
-
-//     fn render_presentation<P, F>(self, storage: &iced::widget::shader::Storage, render: F)
-//     where
-//         P: 'static,
-//         F: FnOnce(&P),
-//     {
-//         render(
-//             &storage
-//                 .get::<dashmap::DashMap<Self, P>>()
-//                 .unwrap()
-//                 .get(&self)
-//                 .unwrap(),
-//         )
-//     }
-// }
-
-pub type Time = f32;
 
 pub enum PresentationKey<MP>
 where
@@ -111,7 +62,7 @@ impl<MP> PresentationKey<MP>
 where
     MP: 'static + Send + Sync,
 {
-    fn read<'mp>(&self, storage_type_map: &'mp StorageTypeMap) -> &'mp MP {
+    pub fn read<'mp>(&self, storage_type_map: &'mp StorageTypeMap) -> &'mp MP {
         match self {
             Self::Static(key) => storage_type_map
                 .get::<_, SwapSlot<SharableSlot<MP>>>(key)
@@ -125,14 +76,11 @@ where
     }
 }
 
-trait Timeline:
+pub trait Timeline:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize + Storable
 {
     type MobjectPresentation: Send + Sync;
-    // type SerdeKey: 'static + Eq + Hash + Send + Sync;
-    // type MobjectPresentationStorage: PresentationStorage;
 
-    // fn serde_key(&self) -> Self::SerdeKey;
     fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value;
     fn erase_presentation_key(
         &self,
@@ -152,57 +100,13 @@ trait Timeline:
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     );
-    // fn erased(&self) -> Box<dyn Timeline<PresentationStorage = Self::PresentationStorage>>;
-
-    // let slot_map = storage
-    //     .entry::<AllocatedTimeline<Self::SerdeKey, Self::MobjectPresentationStorage>>()
-    //     .or_insert_with(HashMap::new);
-    // let serde_key = self.serde_key();
-    // let slot_id = slot_map
-    //     .entry(serde_key.clone())
-    //     .or_insert_with(Self::MobjectPresentationStorage::new)
-    //     .allocate();
-    // AllocatedTimeline {
-    //     serde_key,
-    //     slot_id,
-    //     timeline: self as Box<
-    //         dyn Timeline<
-    //             SerdeKey = Self::SerdeKey,
-    //             MobjectPresentationStorage = Self::MobjectPresentationStorage,
-    //         >,
-    //     >,
-    // }
 }
-
-// struct StaticTimelineKeyFn<M, MKF>(PhantomData<(M, MKF)>);
-
-// impl<M, MKF> Default for StaticTimelineKeyFn<M, MKF> {
-//     fn default() -> Self {
-//         Self(PhantomData)
-//     }
-// }
-
-// impl<M, MKF> KeyFn for StaticTimelineKeyFn<M, MKF>
-// where
-//     M: Mobject,
-//     MKF: MobjectKeyFn,
-// {
-//     type Input = M;
-//     type Output = MKF::Output;
-
-//     fn eval_key(&self, input: &Self::Input) -> Self::Output {
-//         MKF::eval_key(input)
-//     }
-// }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct StaticTimeline<TQ>
 where
     TQ: TypeQuery,
 {
-    // mobject_serde_key: serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    // slot_id: SI,
-    // time_interval: Range<Time>,
     mobject: Arc<TQ::Mobject>,
 }
 
@@ -222,20 +126,6 @@ where
             storable_key_fn(self.mobject.as_ref()),
         )
     }
-
-    // type PresentationStorage = MapStorage<
-    //     serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    //     SwapStorage<ReadStorage<M::MobjectPresentation>>,
-    // >;
-
-    // fn storage_id_input(
-    //     &self,
-    // ) -> <Self::PresentationStorage as PresentationStorage>::StorageIdInput {
-    //     (
-    //         serde_hashkey::to_key_with_ordered_float(self.mobject.as_ref()).unwrap(),
-    //         (),
-    //     )
-    // }
 }
 
 impl<TQ> Timeline for StaticTimeline<TQ>
@@ -243,14 +133,6 @@ where
     TQ: TypeQuery,
 {
     type MobjectPresentation = TQ::MobjectPresentation;
-    // type PresentationKey =
-    //     PresentationKey<TQ::MobjectPresentation, <TQ::StorableKeyFn as StorableKeyFn>::Output>;
-    // type SerdeKey = serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>;
-    // type MobjectPresentationStorage = ;
-
-    // fn serde_key(&self) -> Self::SerdeKey {
-    //     serde_hashkey::to_key_with_ordered_float(self.mobject.as_ref()).unwrap()
-    // }
 
     fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value {
         Arc::new(TQ::MobjectPresentation::presentation(
@@ -281,68 +163,13 @@ where
         _format: wgpu::TextureFormat,
     ) {
     }
-
-    // fn erased(&self) -> Box<dyn Timeline<PresentationStorage = Self::PresentationStorage>> {
-    //     Box::new(StaticTimeline {
-    //         mobject: self.mobject.clone(),
-    //     })
-    // }
-
-    // fn prepare(
-    //     &self,
-    //     _time: Time,
-    //     _time_interval: Range<Time>,
-    //     storage: &mut S,
-    //     device: &wgpu::Device,
-    //     _queue: &wgpu::Queue,
-    //     _format: wgpu::TextureFormat,
-    //     // activate: Option<()>,
-    // ) {
-    //     storage
-    //         .static_set(&self.id)
-    //         .get_or_insert_with(|| Arc::new(self.mobject.presentation(device)));
-    // }
-
-    // fn render(&self, storage: &S, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
-    //     storage.static_get(&self.id).map(|mobject_presentation| {
-    //         mobject_presentation.render(encoder, target);
-    //     });
-    // }
 }
-
-// struct DynamicTimelineKeyFn<TM, M, U, MKF, UKF>(PhantomData<(TM, M, U, MKF, UKF)>);
-
-// impl<TM, M, U, MKF, UKF> Default for DynamicTimelineKeyFn<TM, M, U, MKF, UKF> {
-//     fn default() -> Self {
-//         Self(PhantomData)
-//     }
-// }
-
-// impl<TM, M, U, MKF, UKF> KeyFn for DynamicTimelineKeyFn<TM, M, U, MKF, UKF>
-// where
-//     TM: TimeMetric,
-//     M: Mobject,
-//     U: Update<TM, M>,
-//     MKF: MobjectKeyFn,
-//     UKF: UpdateKeyFn,
-// {
-//     type Input = (M, U);
-//     type Output = (MKF::Output, UKF::Output);
-
-//     fn eval_key(&self, input: &Self::Input) -> Self::Output {
-//         (MKF::eval_key(input.0), UKF::eval_key(input.1))
-//     }
-// }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct DynamicTimeline<TQ, TE, U>
 where
     TQ: TypeQuery,
 {
-    // mobject_serde_key: serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    // update_serde_key: serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    // slot_id: SI,
-    // time_interval: Range<Time>,
     mobject: Arc<TQ::Mobject>,
     time_eval: TE,
     update: U,
@@ -367,26 +194,6 @@ where
             storable_key_fn(&self.update),
         )
     }
-
-    // type PresentationStorage = MapStorage<
-    //     (
-    //         serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    //         serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    //     ),
-    //     SwapStorage<ReadWriteStorage<M::MobjectPresentation>>,
-    // >;
-
-    // fn storage_id_input(
-    //     &self,
-    // ) -> <Self::PresentationStorage as PresentationStorage>::StorageIdInput {
-    //     (
-    //         (
-    //             serde_hashkey::to_key_with_ordered_float(self.mobject.as_ref()).unwrap(),
-    //             serde_hashkey::to_key_with_ordered_float(self.update.as_ref()).unwrap(),
-    //         ),
-    //         (),
-    //     )
-    // }
 }
 
 impl<TQ, TE, U> Timeline for DynamicTimeline<TQ, TE, U>
@@ -395,24 +202,6 @@ where
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, TQ>,
 {
-    // type SerdeKey = (
-    //     serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    //     serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    // );
-    // type MobjectPresentationStorage = MapStorage<
-    //     (
-    //         serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    //         serde_hashkey::Key<serde_hashkey::OrderedFloatPolicy>,
-    //     ),
-    //     SwapStorage<ReadWriteStorage<M::MobjectPresentation>>,
-    // >;
-
-    // fn serde_key(&self) -> Self::SerdeKey {
-    //     (
-    //         serde_hashkey::to_key_with_ordered_float(self.mobject.as_ref()).unwrap(),
-    //         serde_hashkey::to_key_with_ordered_float(self.update.as_ref()).unwrap(),
-    //     )
-    // }
     type MobjectPresentation = TQ::MobjectPresentation;
 
     fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value {
@@ -449,80 +238,7 @@ where
             format,
         );
     }
-
-    // fn erased(&self) -> Box<dyn Timeline<PresentationStorage = Self::PresentationStorage>> {
-    //     Box::new(DynamicTimeline {
-    //         mobject: self.mobject.clone(),
-    //         time_eval: self.time_eval.clone(),
-    //         update: self.update.clone(),
-    //     })
-    // }
-
-    // fn render(&self, storage: &S, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
-    //     storage.dynamic_get(&self.id).map(|mobject_presentation| {
-    //         mobject_presentation.render(encoder, target);
-    //     });
-    // }
 }
-
-// #[derive(Debug)]
-// struct AllocatedTimeline<SK, MPS>
-// where
-//     SK: SerdeKey,
-//     MPS: MobjectPresentationStorage,
-// {
-//     // time_interval: Range<Time>,
-//     serde_key: SK,        //T::SerdeKey,
-//     slot_id: MPS::SlotId, //<T::MobjectPresentationStorage as MobjectPresentationStorage>::SlotId,
-//     timeline: Box<dyn Timeline<SerdeKey = SK, MobjectPresentationStorage = MPS>>,
-// }
-
-// impl<SK, MPS> typemap_rev::TypeMapKey for AllocatedTimeline<SK, MPS>
-// where
-//     SK: SerdeKey,
-//     MPS: MobjectPresentationStorage,
-// {
-//     type Value = HashMap<SK, MPS>;
-// }
-
-// impl<SK, MPS> AllocatedTimeline<SK, MPS>
-// where
-//     SK: SerdeKey,
-//     MPS: MobjectPresentationStorage,
-// {
-//     fn get_prepare_ref<'a, F>(
-//         &'a self,
-//         storage: &'a mut typemap_rev::TypeMap,
-//         f: F,
-//     ) -> MPS::PrepareRef<'a>
-//     where
-//         F: FnOnce() -> MPS::MobjectPresentation,
-//     {
-//         storage
-//             .get_mut::<Self>()
-//             .unwrap()
-//             .get_mut(&self.serde_key)
-//             .unwrap()
-//             .get_prepare_ref(&self.slot_id, f)
-//     }
-
-//     fn get_render_ref<'a>(&'a self, storage: &'a mut typemap_rev::TypeMap) -> MPS::RenderRef<'a> {
-//         storage
-//             .get::<Self>()
-//             .unwrap()
-//             .get(&self.serde_key)
-//             .unwrap()
-//             .get_render_ref(&self.slot_id)
-//     }
-// }
-
-// #[derive(serde::Deserialize, serde::Serialize)]
-// struct Preallocated<T>
-// where
-//     T: Timeline,
-// {
-//     timeline: T,
-// }
 
 pub trait TimelineErasure:
     'static + serde_traitobject::Deserialize + serde_traitobject::Serialize
@@ -573,7 +289,7 @@ where
         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Box<dyn AllocatedTimelineErasure<MobjectPresentation = Self::MobjectPresentation>> {
         Box::new(AllocatedTimeline {
-            storage_key: Arc::new(slot_key_generator_type_map.allocate(&self)),
+            storage_key: Arc::new(slot_key_generator_type_map.allocate(self.as_ref())),
             timeline: self,
         })
     }
@@ -583,14 +299,6 @@ impl<T> AllocatedTimelineErasure for AllocatedTimeline<T>
 where
     T: Timeline,
 {
-    // fn fetch_presentation(
-    //     &self,
-    //     storage_type_map: &StorageTypeMap,
-    // ) -> PresentationCell<Self::MobjectPresentation> {
-    //     self.storable_primitive()
-    //         .fetch_presentation(storage_type_map.get_ref(self).as_ref().unwrap())
-    // }
-
     type MobjectPresentation = T::MobjectPresentation;
 
     fn prepare(
@@ -619,630 +327,8 @@ where
     }
 }
 
-// impl<V> Node<V> {
-//     pub(crate) fn map_ref<F, FO>(&self, f: F) -> Node<FO>
-//     where
-//         F: FnMut(&V) -> FO,
-//     {
-//         match self {
-//             Self::None => Self::None,
-//             Self::Singleton(v) => Self::Singleton(f(v)),
-//             Self::Multiton(vs) => Self::Multiton(vs.iter().map(f).collect()),
-//         }
-//     }
-
-//     pub(crate) fn map<F, FO>(self, f: F) -> Node<FO>
-//     where
-//         F: FnMut(V) -> FO,
-//     {
-//         match self {
-//             Self::None => Self::None,
-//             Self::Singleton(v) => Self::Singleton(f(v)),
-//             Self::Multiton(vs) => Self::Multiton(vs.into_iter().map(f).collect()),
-//         }
-//     }
-// }
-
-// trait Structure {}
-
-// pub trait Node<SKF>
-// where
-//     SKF: StorableKeyFn,
-// {
-//     // type StorableKeyFn: StorableKeyFn;
-//     type Attachment<'s, W>
-//     where
-//         Self: 's,
-//         W: 's + WorldErasure<SKF>;
-
-//     fn new() -> Self;
-//     fn merge<TE>(
-//         &self,
-//         child: Self,
-//         time_interval: &Range<Time>,
-//         time_eval: &TE,
-//         child_time_interval: &Range<Time>,
-//     ) where
-//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-//     fn attachment<'s, W>(&'s self, context: &'s Context<SKF, W>) -> Self::Attachment<'s, W>
-//     where
-//         W: WorldErasure<SKF>;
-// }
-
-// pub trait ChannelErasure<SKF>: Node<SKF>
-// where
-//     SKF: StorableKeyFn,
-// {
-//     type MobjectPresentation;
-
-//     fn allocate(
-//         self: Self,
-//         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-//     ) -> ChannelAllocated<Self::MobjectPresentation, SKF>;
-// }
-
-// pub trait ChannelAllocatedErasure<SKF>
-// where
-//     SKF: StorableKeyFn,
-// {
-//     type MobjectPresentation: Send + Sync;
-
-//     fn prepare(
-//         &self,
-//         time: Time,
-//         storage_type_map: &mut StorageTypeMap,
-//         device: &wgpu::Device,
-//         queue: &wgpu::Queue,
-//         format: wgpu::TextureFormat,
-//     ) -> Vec<PresentationKey<Self::MobjectPresentation, SKF>>;
-// }
-
-// pub trait LayerErasure<SKF>: Node<SKF>
-// where
-//     SKF: StorableKeyFn,
-// {
-//     type Allocated: LayerAllocatedErasure<SKF>;
-
-//     fn allocate(
-//         self: Self,
-//         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-//     ) -> Self::Allocated;
-// }
-
-// pub trait LayerAllocatedErasure<SKF> {
-//     type Render: Render;
-
-//     fn prepare(
-//         &self,
-//         time: Time,
-//         storage_type_map: &mut StorageTypeMap,
-//         device: &wgpu::Device,
-//         queue: &wgpu::Queue,
-//         format: wgpu::TextureFormat,
-//     ) -> Self::Render;
-// }
-
-// pub trait WorldErasure<SKF>: Node<SKF>
-// where
-//     SKF: StorableKeyFn,
-// {
-//     type Allocated: WorldAllocatedErasure<SKF>;
-
-//     fn allocate(
-//         self: Self,
-//         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-//     ) -> Self::Allocated;
-// }
-
-// pub trait WorldAllocatedErasure<SKF> {
-//     fn prepare(
-//         &self,
-//         time: Time,
-//         storage_type_map: &mut StorageTypeMap,
-//         device: &wgpu::Device,
-//         queue: &wgpu::Queue,
-//         format: wgpu::TextureFormat,
-//     ) -> Vec<Box<dyn Render>>;
-// }
-
-// struct Channel<SKF, MP>(
-//     RefCell<
-//         Vec<(
-//             Range<Time>,
-//             Box<dyn TimelineErasure<SKF, MobjectPresentation = MP>>,
-//         )>,
-//     >,
-// );
-
-// struct ChannelAttachment<'c, SKF, W, MP>
-// where
-//     SKF: StorableKeyFn,
-//     W: WorldErasure<SKF>,
-// {
-//     context: &'c Context<'c, SKF, W>,
-//     channel: &'c Channel<SKF, MP>,
-// }
-
-// impl<SKF, MP> Node<SKF> for Channel<SKF, MP>
-// where
-//     SKF: StorableKeyFn,
-// {
-//     type Attachment<'c, W> = ChannelAttachment<'c, SKF, W, MP>
-//     where
-//         Self: 'c, W: 'c + WorldErasure<SKF>;
-
-//     fn new() -> Self {
-//         Self(RefCell::new(Vec::new()))
-//     }
-
-//     fn merge<TE>(
-//         &self,
-//         child: Self,
-//         time_interval: &Range<Time>,
-//         time_eval: &TE,
-//         child_time_interval: &Range<Time>,
-//     ) where
-//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-//     {
-//         self.0
-//             .borrow_mut()
-//             .extend(
-//                 child
-//                     .0
-//                     .into_inner()
-//                     .into_iter()
-//                     .map(|(entry_time_interval, timeline)| {
-//                         (
-//                             time_interval.start
-//                                 + (time_interval.end - time_interval.start)
-//                                     * *time_eval.time_eval(
-//                                         entry_time_interval.start,
-//                                         child_time_interval.clone(),
-//                                     )
-//                                 ..time_interval.start
-//                                     + (time_interval.end - time_interval.start)
-//                                         * *time_eval.time_eval(
-//                                             entry_time_interval.end,
-//                                             child_time_interval.clone(),
-//                                         ),
-//                             timeline,
-//                         )
-//                     }),
-//             );
-//     }
-
-//     fn attachment<'c, W>(&'c self, context: &'c Context<'c, SKF, W>) -> Self::Attachment<'c, W>
-//     where
-//         W: WorldErasure<SKF>,
-//     {
-//         ChannelAttachment {
-//             context,
-//             channel: self,
-//         }
-//     }
-// }
-
-// impl<SKF, MP> ChannelErasure<SKF> for Channel<SKF, MP>
-// where
-//     SKF: StorableKeyFn,
-// {
-//     type MobjectPresentation = MP;
-
-//     fn allocate(
-//         self: Self,
-//         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-//     ) -> ChannelAllocated<Self::MobjectPresentation, SKF> {
-//         ChannelAllocated(
-//             self.0
-//                 .into_inner()
-//                 .into_iter()
-//                 .map(|(time_interval, timeline)| {
-//                     (
-//                         time_interval,
-//                         timeline.allocate(slot_key_generator_type_map),
-//                     )
-//                 })
-//                 .collect(),
-//         )
-//     }
-// }
-
-// struct ChannelAllocated<SKF, MP>(
-//     Vec<(
-//         Range<Time>,
-//         Box<dyn AllocatedTimelineErasure<SKF, MobjectPresentation = MP>>,
-//     )>,
-// );
-
-// impl<SKF, MP> ChannelAllocatedErasure<SKF> for ChannelAllocated<SKF, MP>
-// where
-//     SKF: StorableKeyFn,
-//     MP: Send + Sync,
-// {
-//     type MobjectPresentation = MP;
-
-//     fn prepare(
-//         &self,
-//         time: Time,
-//         storage_type_map: &mut StorageTypeMap,
-//         device: &wgpu::Device,
-//         queue: &wgpu::Queue,
-//         format: wgpu::TextureFormat,
-//     ) -> Vec<PresentationKey<Self::MobjectPresentation, SKF>> {
-//         self.0
-//             .iter()
-//             .filter_map(|(time_interval, timeline)| {
-//                 time_interval.contains(&time).then(|| {
-//                     timeline.prepare(
-//                         time,
-//                         time_interval.clone(),
-//                         storage_type_map,
-//                         device,
-//                         queue,
-//                         format,
-//                     )
-//                 })
-//             })
-//             .collect()
-//     }
-// }
-
-// impl<SKF, W, MP> ChannelAttachment<'_, SKF, W, MP>
-// where
-//     SKF: StorableKeyFn,
-//     W: WorldErasure<SKF>,
-// {
-//     fn push<T>(&self, time_interval: Range<Rc<Time>>, timeline: T)
-//     where
-//         T: Timeline<MobjectPresentation = MP>,
-//     {
-//         if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
-//             self.channel.0.borrow_mut().push((
-//                 *time_interval.start..*time_interval.end,
-//                 Box::new(timeline),
-//             ))
-//         }
-//     }
-
-//     fn start<M, TS>(&self, mobject: Arc<M>, timeline_state: TS) -> Alive<SKF, W, M, TS>
-//     where
-//         M: Mobject<MobjectPresentation = MP>,
-//         TS: TimelineState<SKF, W, M>,
-//     {
-//         Alive {
-//             attachment: self,
-//             // index: usize,
-//             spawn_time: self.context.timer.time(),
-//             mobject,
-//             timeline_state: Some(timeline_state),
-//         }
-//     }
-
-//     pub fn config(&self) -> &Config {
-//         self.context.config
-//     }
-
-//     #[must_use]
-//     pub fn spawn<M>(&self, mobject: M) -> Alive<SKF, W, M, CollapsedTimelineState>
-//     where
-//         M: Mobject<MobjectPresentation = MP>,
-//     {
-//         self.start(Arc::new(mobject), CollapsedTimelineState)
-//     }
-// }
-
-// #[derive(serde::Deserialize, serde::Serialize)]
-// pub struct PreallocatedTimelineEntry<SKF, MP>
-// where
-//     MP: 'static,
-//     SKF: 'static,
-// {
-//     time_interval: Range<Time>,
-//     timeline: serde_traitobject::Box<
-//         dyn PreallocatedTimeline<MobjectPresentation = MP, StorableKeyFn = SKF>,
-//     >,
-// }
-
-// pub struct AllocatedTimelineEntry<SKF, MP> {
-//     time_interval: Range<Time>,
-//     timeline: Box<dyn AllocatedTimeline<MobjectPresentation = MP, StorableKeyFn = SKF>>,
-// }
-
-// impl<SKF, MP> PreallocatedTimelineEntry<SKF, MP> {
-//     fn allocate(
-//         self,
-//         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-//     ) -> AllocatedTimelineEntry<SKF, MP> {
-//         AllocatedTimelineEntry {
-//             time_interval: self.time_interval,
-//             timeline: self
-//                 .timeline
-//                 .into_box()
-//                 .allocate(slot_key_generator_type_map),
-//         }
-//     }
-// }
-
-// struct TimelineEntriesSink<'v>(Option<&'v mut Vec<WithTimeInterval<Box<dyn AllocatedTimeline>>>>);
-
-// impl Extend<Box<dyn AllocatedTimeline>> for TimelineEntriesSink<'_> {
-//     fn extend<I>(&mut self, iter: I)
-//     where
-//         I: IntoIterator<Item = Box<dyn AllocatedTimeline>>,
-//     {
-//         if let Some(timeline_entries) = self.0.as_mut() {
-//             timeline_entries.extend(iter)
-//         }
-//     }
-// }
-
-// trait TimelineState {
-//     fn flush_timelines(
-//         &mut self,
-//         time_interval: Range<Time>,
-//     ) -> Vec<WithTimeInterval<Box<dyn TimelineErasure>>>;
-// }
-
-pub struct Timer {
-    alive_id_generator: RefCell<IterRangeFrom<usize>>,
-    time: RefCell<Rc<Time>>,
-}
-
-impl Timer {
-    fn new() -> Self {
-        Self {
-            alive_id_generator: RefCell::new(RangeFrom { start: 0 }.into_iter()),
-            time: RefCell::new(Rc::new(0.0)),
-        }
-    }
-
-    pub(crate) fn generate_alive_id(&self) -> usize {
-        self.alive_id_generator.borrow_mut().next().unwrap()
-    }
-
-    pub(crate) fn time(&self) -> Rc<Time> {
-        self.time.borrow().clone()
-    }
-
-    pub fn wait(&self, time: Time) {
-        self.time.replace_with(|rc_time| Rc::new(**rc_time + time));
-    }
-}
-
-// struct Context<'c, SKF, W> {
-//     config: &'c Config,
-//     timer: Timer,
-//     world: W,
-//     phantom: PhantomData<SKF>,
-// }
-
-// impl<'c, SKF, W> Context<'c, SKF, W>
-// where
-//     SKF: StorableKeyFn,
-//     W: World,
-// {
-// fn new(config: &'c Config) -> Self {
-//     Self {
-//         config,
-//         timer: Timer::new(),
-//         world: W::new(),
-//         phantom: PhantomData,
-//     }
-// }
-
-// fn balance<F>(&self, f: F) where F: FnOnce(&Config, &Timer, &W) {
-//     let timer = Timer::new();
-//     let world = W::new();
-//     f(&self.config, &timer, &world);
-//     self.world.merge(world, time_interval, time_eval);
-// }
-
-// fn grow_stack(&self) -> &(Timer, W) {
-//     self.timer_world_stack.borrow_mut().push((
-//         Timer::new(),
-//         W::new(),
-//     ));
-//     self.timer_world_stack.borrow()
-// }
-
-// fn shrink_stack<TE>(&self, time_interval: &Range<Time>, time_eval: &TE)
-// where
-//     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-// {
-//     let mut timer_world_stack = self.timer_world_stack.borrow_mut();
-//     let (timer, world) = timer_world_stack.pop().unwrap();
-//     timer_world_stack.last_mut().1.shrink_stack(time_interval, time_eval, &0.0..timer.time());
-// }
-
-// fn collect(self) -> Vec<PreallocatedTimelineEntry<MP>> {
-//     let timer_world_stack = self.timer_world_stack.into_inner();
-//     assert!(timer_world_stack.tail.is_empty());
-//     timer_world_stack.head
-// }
-
-// fn timer_world_ref(&self) -> &(Timer, W) {
-//     self.timer_world_stack.borrow().last()
-// }
-
-// fn timer_world_mut(&self) -> &mut (Timer, W) {
-//     self.timer_world_stack.borrow_mut().last_mut()
-// }
-// }
-
-// #[derive(Default)]
-// struct TimerStack(RefCell<nonempty::NonEmpty<Timer>>);
-
-// impl TimerStack {
-//     fn time(&self) -> Time {
-//         self.0.borrow().last().time()
-//     }
-
-//     fn grow_stack(&mut self) {
-//         self.0.borrow_mut().push(Timer::default());
-//     }
-
-//     fn shrink_stack(&mut self) {
-//         self.0.borrow_mut().push(Timer {
-//             time: RefCell::new(Rc::new(0.0)),
-//         });
-//     }
-// }
-
-// struct Channel(Vec<>)
-
-// pub struct LayerField<'lf, W, MP>
-// where
-//     MP: 'static,
-// {
-//     config: &'lf Config,
-//     timer_stack: &'lf TimerStack,
-//     world: Weak<W>,
-//     // layer: Weak<L>,
-//     // timer: &'lf Timer,
-//     // depth: &'lf RefCell<usize>,
-//     timeline_entries_stack: RefCell<nonempty::NonEmpty<Vec<PreallocatedTimelineEntry<MP>>>>,
-// }
-
-// impl<'lf, W, MP> LayerField<'lf, W, MP>
-// where
-//     SKF: StorableKeyFn,
-//     W: WorldErasure<SKF>,
-//     MP: 'static,
-// {
-//     pub fn new(config: &'lf Config, timer_stack: &'lf TimerStack, world: Weak<W>) -> Self {
-//         Self {
-//             config,
-//             timer_stack,
-//             world,
-//             timeline_entries_stack: RefCell::new(nonempty::NonEmpty::singleton(Vec::new())),
-//         }
-//     }
-
-//     pub fn grow_stack(&self) {
-//         self.timeline_entries_stack.borrow_mut().push(Vec::new());
-//     }
-
-//     pub fn shrink_stack<TE>(&self, time_interval: Range<Time>, time_eval: &TE)
-//     where
-//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-//     {
-//         let child_time_interval = 0.0..self.timer_stack.time();
-//         let mut timeline_entries_stack = self.timeline_entries_stack.borrow_mut();
-//         let timeline_entries = timeline_entries_stack.pop().unwrap();
-//         timeline_entries_stack
-//             .last_mut()
-//             .extend(
-//                 timeline_entries
-//                     .into_iter()
-//                     .map(|timeline_entry| PreallocatedTimelineEntry {
-//                         time_interval: time_interval.start
-//                             + (time_interval.end - time_interval.start)
-//                                 * *time_eval.time_eval(
-//                                     timeline_entry.time_interval.start,
-//                                     child_time_interval.clone(),
-//                                 )
-//                             ..time_interval.start
-//                                 + (time_interval.end - time_interval.start)
-//                                     * *time_eval.time_eval(
-//                                         timeline_entry.time_interval.end,
-//                                         child_time_interval.clone(),
-//                                     ),
-//                         timeline: timeline_entry.timeline,
-//                     }),
-//             );
-//     }
-
-//     pub fn collect(self) -> Vec<PreallocatedTimelineEntry<MP>> {
-//         let timeline_entries_stack = self.timeline_entries_stack.into_inner();
-//         assert!(timeline_entries_stack.tail.is_empty());
-//         timeline_entries_stack.head
-//     }
-
-//     fn world(&self) -> Rc<W> {
-//         self.world.upgrade().unwrap()
-//     }
-
-//     // fn layer(&self) -> Rc<L> {
-//     //     self.layer.upgrade().unwrap()
-//     // }
-
-//     fn push<T>(&self, time_interval: Range<Time>, timeline: T)
-//     where
-//         T: Timeline<MobjectPresentation = MP>,
-//         Box<T>: Storable,
-//     {
-//         if time_interval.start < time_interval.end {
-//             self.timeline_entries_stack
-//                 .borrow_mut()
-//                 .last_mut()
-//                 .push(PreallocatedTimelineEntry {
-//                     time_interval,
-//                     timeline: serde_traitobject::Box::new(timeline),
-//                 });
-//         }
-//     }
-
-//     fn start<TS>(&self, timeline_state: TS) -> Alive<W, TS>
-//     where
-//         TS: TimelineState<MobjectPresentation = MP>,
-//     {
-//         Alive {
-//             attachment: self,
-//             // index: usize,
-//             spawn_time: self.timer_stack.time(),
-//             timeline_state: Some(timeline_state),
-//         }
-//     }
-
-//     #[must_use]
-//     pub fn spawn<M>(&self, mobject: M) -> Alive<W, M, CollapsedTimelineState>
-//     where
-//         M: Mobject<MobjectPresentation = MP>,
-//     {
-//         self.start(CollapsedTimelineState {
-//             mobject: Arc::new(mobject),
-//         })
-//     }
-// }
-
-// pub trait LayerEntry: serde_traitobject::Deserialize + serde_traitobject::Serialize {
-//     fn new(config: &Config, timer_stack: &TimerStack) -> Self;
-//     fn merge<TE>(&mut self, laye_entry: Self, time_interval: Range<Time>, time_eval: &TE)
-//     where
-//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-//     fn prepare(
-//         &self,
-//         time: Time,
-//         storage_type_map: &mut StorageTypeMap,
-//         device: &wgpu::Device,
-//         queue: &wgpu::Queue,
-//         format: wgpu::TextureFormat,
-//     ) -> Box<dyn Render>;
-// }
-
-// pub trait World {
-//     type StorableKeyFn: StorableKeyFn;
-
-//     fn new(config: &Config, timer_stack: &TimerStack) -> Rc<Self>;
-//     fn grow_stack(&self);
-//     fn shrink_stack<TE>(&self, time_interval: Range<Time>, time_eval: &TE)
-//     where
-//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-//     fn collect(self) -> Vec<Box<dyn LayerPreallocated>>;
-// }
-
-// pub trait WorldEntry {
-//     type StorableKeyFn: StorableKeyFn;
-
-//     fn new(config: &Config, timer_stack: &TimerStack) -> Self;
-//     fn merge<TE>(&mut self, world_entry: Self, time_interval: Range<Time>, time_eval: &TE)
-//     where
-//         TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>;
-//     fn collect(self) -> Vec<Box<dyn LayerEntry>>;
-// }
-
 pub trait TypeQuery:
-    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
+    'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
     type World: WorldIndexed<Self::LayerIndex, Layer = Self::Layer>;
     type LayerIndex: LayerIndex;
@@ -1251,94 +337,7 @@ pub trait TypeQuery:
     type Channel: Channel<MobjectPresentation = Self::MobjectPresentation>;
     type Mobject: Mobject;
     type MobjectPresentation: MobjectPresentation<Self::Mobject>;
-    // type Attachment: ChannelAttachment<
-    //     Self::World,
-    //     Self::LayerIndex,
-    //     Self::Layer,
-    //     Self::ChannelIndex,
-    //     Self::Channel,
-    //     Self::MobjectPresentation,
-    // >;
-
-    // fn mobject(&self) -> &Arc<Self::Mobject>;
-    // fn update<F>(self, f: F) -> Self
-    // where
-    //     F: FnOnce(&mut Self::Mobject);
-    // fn attachment(&self) -> &Self::Attachment;
 }
-
-// #[derive(serde::Deserialize, serde::Serialize)]
-// pub struct TypeQueried<W, LI, L, CI, C, M, MP>(PhantomData<fn() -> (W, LI, L, CI, C, M, MP)>);
-
-// impl<W, LI, L, CI, C, M, MP> Default for TypeQueried<W, LI, L, CI, C, M, MP> {
-//     fn default() -> Self {
-//         Self(PhantomData)
-//     }
-// }
-
-// impl<W, LI, L, CI, C, M, MP> Clone for TypeQueried<W, LI, L, CI, C, M, MP> {
-//     fn clone(&self) -> Self {
-//         Self(PhantomData)
-//     }
-// }
-
-// impl<W, LI, L, CI, C, M, MP> Debug for TypeQueried<W, LI, L, CI, C, M, MP> {
-//     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         Ok(())
-//     }
-// }
-
-// impl<W, LI, L, CI, C, M, MP> TypeQuery for TypeQueried<W, LI, L, CI, C, M, MP>
-// where
-//     W: WorldIndexed<LI, Layer = L>,
-//     LI: LayerIndex,
-//     L: LayerIndexed<CI, Channel = C>,
-//     CI: ChannelIndex,
-//     C: Channel<MobjectPresentation = MP>,
-//     M: Mobject,
-//     MP: MobjectPresentation<M>,
-// {
-//     type World = W;
-//     type LayerIndex = LI;
-//     type Layer = L;
-//     type ChannelIndex = CI;
-//     type Channel = C;
-//     type Mobject = M;
-//     type MobjectPresentation = MP;
-
-//     // fn mobject(&self) -> &Arc<Self::Mobject> {
-//     //     &self.mobject
-//     // }
-
-//     // fn update<F>(self, f: F) -> Self
-//     // where
-//     //     F: FnOnce(&mut Self::Mobject),
-//     // {
-//     //     let mut mobject = Arc::unwrap_or_clone(self.mobject);
-//     //     f(&mut mobject);
-//     //     Self {
-//     //         mobject: Arc::new(mobject),
-//     //         phantom: PhantomData,
-//     //     }
-//     // }
-// }
-
-// pub trait CompatibleAttachment<TQ>:
-//     ChannelAttachment<
-//     TQ::World,
-//     TQ::LayerIndex,
-//     TQ::Layer,
-//     TQ::ChannelIndex,
-//     TQ::Channel,
-//     TQ::MobjectPresentation,
-//     TQ::StorableKeyFn,
-// >
-// where
-//     TQ: TypeQuery,
-// {
-
-//     // pub fn spawn_mobject<M>(&self, mobject: Box<M>) -> Alive<MobjectLocate<>>
-// }
 
 pub struct AttachedMobject<'c, 't, 'a, TQ>
 where
@@ -1361,25 +360,6 @@ impl<'c, 't, 'a, TQ> AttachedMobject<'c, 't, 'a, TQ>
 where
     TQ: TypeQuery,
 {
-    // pub(crate) fn new(
-    //     mobject: Arc<TQ::Mobject>,
-    //     attachment: &'a ChannelAttachment<
-    //         'c,
-    //         't,
-    //         TQ::World,
-    //         TQ::LayerIndex,
-    //         TQ::Layer,
-    //         TQ::ChannelIndex,
-    //         TQ::Channel,
-    //         TQ::MobjectPresentation,
-    //     >,
-    // ) -> Self {
-    //     Self {
-    //         mobject,
-    //         attachment,
-    //     }
-    // }
-
     fn launch<TS>(self, timeline_state: TS) -> Alive<'c, 't, 'a, TQ, TS>
     where
         TS: TimelineState<TQ>,
@@ -1392,64 +372,30 @@ where
         }))
     }
 
-    // pub(crate) fn alive_context(&self) -> &'ac AC {
-    //     &self.alive_context
-    // }
+    fn update<F>(self, f: F) -> Self
+    where
+        F: FnOnce(&mut TQ::Mobject),
+    {
+        let mut mobject = Arc::unwrap_or_clone(self.mobject);
+        f(&mut mobject);
+        AttachedMobject {
+            mobject: Arc::new(mobject),
+            attachment: self.attachment,
+        }
+    }
 
-    // pub(crate) fn archive_state(&self) -> &AS {
-    //     self.archive_state.as_ref().unwrap()
-    // }
+    fn update_cloned<F>(&self, f: F) -> Self
+    where
+        F: FnOnce(&mut TQ::Mobject),
+    {
+        Self {
+            mobject: self.mobject.clone(),
+            attachment: self.attachment,
+        }
+        .update(f)
+    }
 
-    // fn record<T>(&self, alive_id: usize, time_interval: Range<Rc<Time>>, timeline: T)
-    // where
-    //     T: Timeline<
-    //         MobjectPresentation = TQ::MobjectPresentation,
-    //         StorableKeyFn = TQ::StorableKeyFn,
-    //     >,
-    // {
-    //     if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
-    //         self.attachment.channel().push(
-    //             alive_id,
-    //             Node::Singleton((
-    //                 Range {
-    //                     start: *time_interval.start,
-    //                     end: *time_interval.end,
-    //                 },
-    //                 Box::new(timeline),
-    //             )),
-    //         );
-    //     }
-    // }
-
-    // fn record_multiple<TE>(
-    //     &self,
-    //     alive_id: usize,
-    //     time_interval: Range<Rc<Time>>,
-    //     time_eval: &TE,
-    //     world_time: Time,
-    //     world_architecture: <TQ::World as World>::Architecture<TQ::StorableKeyFn>,
-    // ) where
-    //     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
-    // {
-    //     if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
-    //         TQ::World::merge(
-    //             self.attachment.world_architecture(),
-    //             TQ::World::archive(world_architecture),
-    //             alive_id,
-    //             time_eval,
-    //             Range {
-    //                 start: *time_interval.start,
-    //                 end: *time_interval.end,
-    //             },
-    //             Range {
-    //                 start: 0.0,
-    //                 end: world_time,
-    //             },
-    //         );
-    //     }
-    // }
-
-    fn simple_transit<F, T>(self, alive_id: usize, time_interval: Range<Rc<Time>>, f: F) -> Self
+    fn transit_simple<F, T>(self, alive_id: usize, time_interval: Range<Rc<Time>>, f: F) -> Self
     where
         F: FnOnce(Arc<TQ::Mobject>) -> T,
         T: TimelineErasure<MobjectPresentation = TQ::MobjectPresentation>,
@@ -1467,7 +413,7 @@ where
         self
     }
 
-    fn complex_transit<TE, C>(
+    fn transit_complex<TE, C>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
@@ -1480,9 +426,9 @@ where
     {
         let timer = Timer::new();
         let world = TQ::World::new();
-        let mobject = {
+        let attached_mobject = {
             let world_attachment = World::attachment(&world, self.attachment.config, &timer);
-            let mobject = construct
+            let (attached_mobject, CollapsedTimelineState) = construct
                 .construct(
                     &world_attachment,
                     self.attachment.config,
@@ -1495,11 +441,12 @@ where
                     }
                     .launch(CollapsedTimelineState),
                 )
-                .terminate()
-                .mobject;
-            mobject
+                .terminate();
+            AttachedMobject {
+                mobject: attached_mobject.mobject,
+                attachment: self.attachment,
+            }
         };
-
         if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
             self.attachment.world.merge(
                 world.archive(),
@@ -1515,49 +462,8 @@ where
                 },
             );
         }
-
-        AttachedMobject {
-            mobject,
-            attachment: self.attachment,
-        }
+        attached_mobject
     }
-
-    pub(crate) fn spawn(
-        mobject: TQ::Mobject,
-        attachment: &'a ChannelAttachment<
-            'c,
-            't,
-            TQ::World,
-            TQ::LayerIndex,
-            TQ::Layer,
-            TQ::ChannelIndex,
-            TQ::Channel,
-            TQ::MobjectPresentation,
-        >,
-    ) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
-        AttachedMobject {
-            mobject: Arc::new(mobject),
-            attachment,
-        }
-        .launch(CollapsedTimelineState)
-    }
-
-    // fn replace_mobject<F>(&mut self, f: F) -> Alive<'a, TQ, TS>
-    // where
-    //     TS: Clone,
-    //     F: FnOnce(&mut TQ::Mobject),
-    // {
-    //     let new_timeline_state = self.pair.as_ref().unwrap().1.clone();
-    //     self.attachment
-    //         .launch(self.terminate().update(f), new_timeline_state)
-    // }
-
-    // fn replace_timeline_state<TSO>(&mut self, new_timeline_state: TSO) -> Alive<'a, TQ, TSO>
-    // where
-    //     TSO: TimelineState<TQ>,
-    // {
-    //     self.attachment.launch(self.terminate(), new_timeline_state)
-    // }
 }
 
 struct AliveInner<'c, 't, 'a, TQ, TS>
@@ -1576,16 +482,14 @@ where
     TQ: TypeQuery,
     TS: TimelineState<TQ>;
 
-impl<TQ, TS> Alive<'_, '_, '_, TQ, TS>
+impl<'c, 't, 'a, TQ, TS> Alive<'c, 't, 'a, TQ, TS>
 where
     TQ: TypeQuery,
     TS: TimelineState<TQ>,
 {
-    fn terminate(&mut self) -> AttachedMobject<TQ> {
-        // let mut recorder = self.alive_recorder.recorder.borrow_mut();
-        // let entry = recorder.get_mut(self.index).unwrap();
+    fn terminate(&mut self) -> (AttachedMobject<'c, 't, 'a, TQ>, TS::ResidueTimelineState) {
         let inner = self.0.take().unwrap();
-        inner.timeline_state.transit(
+        inner.timeline_state.transit_with_residue(
             inner.alive_id,
             Range {
                 start: inner.spawn_time.clone(),
@@ -1608,42 +512,42 @@ where
     }
 }
 
-pub trait TimelineState<TQ>
+pub trait TimelineState<TQ>: 'static
 where
     TQ: TypeQuery,
 {
-    // type OutputTypeQuery: TypeQuery;
-    // type OutputLayerIndex;
-    // type OutputChannelIndex;
-    // type OutputMobject;
+    type ResidueTimelineState: TimelineState<TQ>;
 
-    fn transit<'c, 't, 'a>(
+    fn transit_with_residue<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
         attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> AttachedMobject<'c, 't, 'a, TQ>;
+    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState);
 }
 
-#[derive(Clone)] // TODO: get rid of it
 pub struct CollapsedTimelineState;
 
 impl<TQ> TimelineState<TQ> for CollapsedTimelineState
 where
     TQ: TypeQuery,
 {
-    // type MobjectPresentation = M::MobjectPresentation;
-    // type OutputTypeQuery = TQ;
+    type ResidueTimelineState = CollapsedTimelineState;
 
-    fn transit<'c, 't, 'a>(
+    fn transit_with_residue<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
         attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> AttachedMobject<'c, 't, 'a, TQ> {
-        attached_mobject.simple_transit(alive_id, time_interval, |mobject| StaticTimeline::<TQ> {
-            mobject,
-        })
+    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState) {
+        (
+            attached_mobject.transit_simple(alive_id, time_interval, |mobject| StaticTimeline::<
+                TQ,
+            > {
+                mobject,
+            }),
+            CollapsedTimelineState,
+        )
     }
 }
 
@@ -1656,23 +560,28 @@ where
     TQ: TypeQuery,
     TE: TimeEval,
 {
-    // type MobjectPresentation = M::MobjectPresentation;
-    // type OutputTypeQuery = TQ;
+    type ResidueTimelineState = IndeterminedTimelineState<TE>;
 
-    fn transit<'c, 't, 'a>(
+    fn transit_with_residue<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
         attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> AttachedMobject<'c, 't, 'a, TQ> {
-        attached_mobject.simple_transit(alive_id, time_interval, |mobject| StaticTimeline::<TQ> {
-            mobject,
-        })
+    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState) {
+        (
+            attached_mobject.transit_simple(alive_id, time_interval, |mobject| StaticTimeline::<
+                TQ,
+            > {
+                mobject,
+            }),
+            IndeterminedTimelineState {
+                time_eval: self.time_eval,
+            },
+        )
     }
 }
 
 pub struct UpdateTimelineState<TE, U> {
-    // mobject: Arc<M>,
     time_eval: TE,
     update: U,
 }
@@ -1683,44 +592,33 @@ where
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, TQ>,
 {
-    // type OutputTypeQuery = TQ;
+    type ResidueTimelineState = CollapsedTimelineState;
 
-    fn transit<'c, 't, 'a>(
+    fn transit_with_residue<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
         attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> AttachedMobject<'c, 't, 'a, TQ> {
-        attached_mobject.simple_transit(alive_id, time_interval, |mobject| DynamicTimeline {
+    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState) {
+        let attached_mobject_updated = attached_mobject.update_cloned(|mobject| {
+            self.update.update(
+                self.time_eval.time_eval(
+                    *time_interval.end,
+                    Range {
+                        start: *time_interval.start,
+                        end: *time_interval.end,
+                    },
+                ),
+                mobject,
+            )
+        });
+        attached_mobject.transit_simple(alive_id, time_interval, |mobject| DynamicTimeline {
             mobject,
             time_eval: self.time_eval,
             update: self.update,
-        })
+        });
+        (attached_mobject_updated, CollapsedTimelineState)
     }
-
-    // type OutputTimelineState = M, CollapsedTimelineState;
-
-    // fn into_next(
-    //     self,
-    //     supervisor: &Supervisor,
-    //     time_interval: Range<Rc<Time>>,
-    //     mut timeline_entries_sink: TimelineEntriesSink,
-    // ) -> Self::OutputTimelineState {
-    //     timeline_entries_sink.extend_one(supervisor.new_dynamic_timeline_entry(
-    //         time_interval.clone(),
-    //         self.mobject.clone(),
-    //         self.time_eval.clone(),
-    //         self.update.clone(),
-    //     ));
-    //     let mut mobject = Arc::unwrap_or_clone(self.mobject);
-    //     self.update.update(
-    //         self.time_eval.time_eval(time_interval.end, time_interval),
-    //         &mut mobject,
-    //     );
-    //     CollapsedTimelineState {
-    //         mobject: Arc::new(mobject),
-    //     }
-    // }
 }
 
 pub struct ConstructTimelineState<TE, C> {
@@ -1734,294 +632,31 @@ where
     TE: IncreasingTimeEval<OutputTimeMetric = NormalizedTimeMetric>,
     C: Construct<TQ>,
 {
-    // type OutputTypeQuery = C::OutputTypeQuery;
+    type ResidueTimelineState = CollapsedTimelineState;
 
-    fn transit<'c, 't, 'a>(
+    fn transit_with_residue<'c, 't, 'a>(
         self,
         alive_id: usize,
         time_interval: Range<Rc<Time>>,
         attached_mobject: AttachedMobject<'c, 't, 'a, TQ>,
-    ) -> AttachedMobject<'c, 't, 'a, TQ> {
-        attached_mobject.complex_transit(alive_id, time_interval, &self.time_eval, self.construct)
-    }
-
-    // fn archive(
-    //     &mut self,
-    //     time_interval: Range<Time>,
-    //     _local_archive: Self::LocalArchive,
-    //     global_archive: &Self::GlobalArchive,
-    // ) {
-    //     let (child_time_interval, renderables) = &mut self.root_archive;
-    //     let rescale_time_interval = |entry_time_interval: &mut Range<Time>| {
-    //         *entry_time_interval = time_interval.start
-    //             + (time_interval.end - time_interval.start)
-    //                 * *self
-    //                     .time_eval
-    //                     .time_eval(entry_time_interval.start, child_time_interval.clone())
-    //             ..time_interval.start
-    //                 + (time_interval.end - time_interval.start)
-    //                     * *self
-    //                         .time_eval
-    //                         .time_eval(entry_time_interval.end, child_time_interval.clone())
-    //     };
-    //     for RenderableEntry {
-    //         time_interval,
-    //         timeline_entries,
-    //         ..
-    //     } in renderables.as_mut_slice()
-    //     {
-    //         rescale_time_interval(time_interval);
-    //         for TimelineEntry { time_interval, .. } in timeline_entries.as_mut_slice() {
-    //             rescale_time_interval(time_interval);
-    //         }
-    //     }
-    //     global_archive.borrow_mut().1.extend(renderables.drain(..));
-    // }
-
-    // type OutputTimelineState = CollapsedTimelineState<C::OutputMobject>;
-
-    // fn into_next(
-    //     self,
-    //     supervisor: &Supervisor,
-    //     time_interval: Range<Time>,
-    //     mut timeline_entries_sink: TimelineEntriesSink,
-    // ) -> Self::OutputTimelineState {
-    //     let child_supervisor = Supervisor::new(supervisor.config);
-    //     let output_timeline_state = child_supervisor
-    //         .end(&self.construct.construct(
-    //             child_supervisor.start(AliveContent {
-    //                 spawn_time: child_supervisor.time.borrow().clone(),
-    //                 timeline_state: CollapsedTimelineState {
-    //                     mobject: self.mobject,
-    //                 },
-    //             }),
-    //             &child_supervisor,
-    //         ))
-    //         .timeline_state;
-    //     let children_time_interval = child_supervisor.time_interval();
-    //     timeline_entries_sink.extend(child_supervisor.iter_timeline_entries().map(
-    //         |mut timeline_entry| {
-    //             timeline_entry.time_interval = time_interval.start
-    //                 + (time_interval.end - time_interval.start)
-    //                     * *self.time_eval.time_eval(
-    //                         timeline_entry.time_interval.start,
-    //                         children_time_interval.clone(),
-    //                     )
-    //                 ..time_interval.start
-    //                     + (time_interval.end - time_interval.start)
-    //                         * *self.time_eval.time_eval(
-    //                             timeline_entry.time_interval.end,
-    //                             children_time_interval.clone(),
-    //                         );
-    //             timeline_entry
-    //         },
-    //     ));
-    //     output_timeline_state
-    // }
-
-    // fn into_next(
-    //     self,
-    //     time_interval: Range<f32>,
-    //     _mobject: Arc<M>,
-    //     _storage: &S,
-    // ) -> Vec<TimelineEntry> {
-    //     let mut timeline_entries = self.children_timeline_entries;
-    //     timeline_entries.iter_mut().for_each(|timeline_entry| {
-    //         timeline_entry.rescale_time_interval(
-    //             &self.time_eval,
-    //             &self.children_time_interval,
-    //             &time_interval,
-    //         )
-    //     });
-    //     timeline_entries
-    // }
-}
-
-// fn new_render_pass<'ce>(
-//     encoder: &'ce mut wgpu::CommandEncoder,
-//     target: &'ce wgpu::TextureView,
-//     // clip_bounds: &iced::Rectangle<u32>,
-//     load: wgpu::LoadOp<wgpu::Color>,
-// ) -> wgpu::RenderPass<'ce> {
-//     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-//         label: None,
-//         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-//             view: target,
-//             resolve_target: None,
-//             ops: wgpu::Operations {
-//                 load,
-//                 store: wgpu::StoreOp::Store,
-//             },
-//         })],
-//         depth_stencil_attachment: None,
-//         timestamp_writes: None,
-//         occlusion_query_set: None,
-//     })
-// }
-
-// struct WithSpawnTime<D> {
-//     spawn_time: Rc<Time>,
-//     data: D,
-// }
-
-// impl<D> WithSpawnTime<D> {
-//     fn map<F, FO>(self, f: F) -> WithSpawnTime<FO>
-//     where
-//         F: FnOnce(D) -> FO,
-//     {
-//         WithSpawnTime {
-//             spawn_time: self.spawn_time,
-//             data: f(self.data),
-//         }
-//     }
-// }
-
-// impl<L> AliveContent<World<'_>> for WithSpawnTime<Rc<L>>
-// where
-//     W: World,
-// {
-//     type Next = ();
-//     type Input = L;
-//     type Output = Vec<Rc<dyn Layer>>;
-
-//     fn new(input: Self::Input, context: &World<'_>) -> Self {
-//         let layer = Rc::new(input);
-//         context.layers.borrow_mut().push(layer);
-//         Self {
-//             spawn_time: context.time.borrow().clone(),
-//             data: layer,
-//         }
-//     }
-
-//     fn iterate(self, context: &World<'_>) -> (Self::Output, Self::Next) {
-//         (context.layers.borrow().clone(), ())
-//     }
-// }
-
-// impl<L, TS> AliveContent<L> for WithSpawnTime<TS>
-// where
-//     W: World,
-//     TS: TimelineState,
-// {
-// }
-
-// pub struct Supervisor<'c> {
-//     config: &'c Config,
-//     // storage: &'s Storage,
-//     time: RefCell<Arc<Time>>,
-//     timeline_slots: RefCell<Vec<Result<Vec<Box<dyn AllocatedTimeline>>, Arc<dyn Any>>>>,
-// }
-
-// impl<L, MB> IntoArchiveState<AliveRenderable<'_, '_, LayerRenderableState<L>>> for MB
-// where
-//     W: World,
-//     MB: MobjectBuilder<L>,
-// {
-//     type ArchiveState = CollapsedTimelineState<MB::Instantiation>;
-
-//     fn into_archive_state(
-//         self,
-//         alive_context: &AliveRenderable<'_, '_, LayerRenderableState<L>>,
-//     ) -> Self::ArchiveState {
-//         CollapsedTimelineState {
-//             mobject: Arc::new(self.instantiate(
-//                 &alive_context.archive_state().layer,
-//                 alive_context.alive_context().config(),
-//             )),
-//         }
-//     }
-// }
-
-// pub type Alive<'a2, 'a1, 'a0, RAS, TAS> = Alive<'a2, AliveRenderable<'a1, 'a0, RAS>, TAS>;
-
-pub trait TimeMetric: 'static {}
-
-pub struct NormalizedTimeMetric(f32);
-
-impl Deref for NormalizedTimeMetric {
-    type Target = f32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl TimeMetric for NormalizedTimeMetric {}
-
-pub struct DenormalizedTimeMetric(f32);
-
-impl Deref for DenormalizedTimeMetric {
-    type Target = f32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl TimeMetric for DenormalizedTimeMetric {}
-
-pub trait TimeEval:
-    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
-{
-    type OutputTimeMetric: TimeMetric;
-
-    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric;
-}
-
-pub trait IncreasingTimeEval: TimeEval {}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct NormalizedTimeEval;
-
-impl TimeEval for NormalizedTimeEval {
-    type OutputTimeMetric = NormalizedTimeMetric;
-
-    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric {
-        NormalizedTimeMetric(
-            (time - time_interval.start) / (time_interval.end - time_interval.start),
+    ) -> (AttachedMobject<'c, 't, 'a, TQ>, Self::ResidueTimelineState) {
+        (
+            attached_mobject.transit_complex(
+                alive_id,
+                time_interval,
+                &self.time_eval,
+                self.construct,
+            ),
+            CollapsedTimelineState,
         )
     }
 }
 
-impl IncreasingTimeEval for NormalizedTimeEval {}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct DenormalizedTimeEval;
-
-impl TimeEval for DenormalizedTimeEval {
-    type OutputTimeMetric = DenormalizedTimeMetric;
-
-    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric {
-        DenormalizedTimeMetric(time - time_interval.start)
-    }
-}
-
-impl IncreasingTimeEval for DenormalizedTimeEval {}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct RateComposeTimeEval<RA, TE> {
-    rate: RA,
-    time_eval: TE,
-}
-
-impl<RA, TE> TimeEval for RateComposeTimeEval<RA, TE>
+pub trait Spawn<'c, 't, 'a, TQ, I>
 where
-    RA: Rate<TE::OutputTimeMetric>,
-    TE: TimeEval,
+    TQ: TypeQuery,
 {
-    type OutputTimeMetric = RA::OutputTimeMetric;
-
-    fn time_eval(&self, time: Time, time_interval: Range<Time>) -> Self::OutputTimeMetric {
-        self.rate
-            .eval(self.time_eval.time_eval(time, time_interval))
-    }
-}
-
-impl<RA, TE> IncreasingTimeEval for RateComposeTimeEval<RA, TE>
-where
-    RA: IncreasingRate<TE::OutputTimeMetric>,
-    TE: IncreasingTimeEval,
-{
+    fn spawn(&'a self, input: I) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState>;
 }
 
 pub trait Quantize: Sized {
@@ -2080,6 +715,47 @@ where
         C: Construct<TQ>;
 }
 
+impl<'c, 't, 'a, TQ> Spawn<'c, 't, 'a, TQ, TQ::Mobject>
+    for ChannelAttachment<
+        'c,
+        't,
+        TQ::World,
+        TQ::LayerIndex,
+        TQ::Layer,
+        TQ::ChannelIndex,
+        TQ::Channel,
+        TQ::MobjectPresentation,
+    >
+where
+    TQ: TypeQuery,
+{
+    fn spawn(&'a self, mobject: TQ::Mobject) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
+        AttachedMobject {
+            mobject: Arc::new(mobject),
+            attachment: self,
+        }
+        .launch(CollapsedTimelineState)
+    }
+}
+
+impl<'c, 't, 'a, TQ, MB> Spawn<'c, 't, 'a, TQ, MB>
+    for LayerAttachment<
+        'c,
+        't,
+        TQ::World,
+        TQ::LayerIndex,
+        TQ::Layer,
+        <TQ::Layer as Layer>::Residue<'c, 't, TQ::World, TQ::LayerIndex>,
+    >
+where
+    TQ: TypeQuery,
+    MB: MobjectBuilder<TQ::Layer, OutputTypeQuery<TQ::World, TQ::LayerIndex> = TQ>,
+{
+    fn spawn(&'a self, mobject_builder: MB) -> Alive<'c, 't, 'a, TQ, CollapsedTimelineState> {
+        mobject_builder.instantiate(self, self.config)
+    }
+}
+
 impl<'c, 't, 'a, TQ> Quantize for Alive<'c, 't, 'a, TQ, CollapsedTimelineState>
 where
     TQ: TypeQuery,
@@ -2094,7 +770,8 @@ where
     where
         TE: TimeEval,
     {
-        self.replace_timeline_state(IndeterminedTimelineState { time_eval })
+        let (attached_mobject, CollapsedTimelineState) = self.terminate();
+        attached_mobject.launch(IndeterminedTimelineState { time_eval })
     }
 }
 
@@ -2108,7 +785,8 @@ where
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        self.replace_timeline_state(CollapsedTimelineState)
+        let (attached_mobject, CollapsedTimelineState) = self.terminate();
+        attached_mobject.launch(CollapsedTimelineState)
     }
 }
 
@@ -2122,7 +800,8 @@ where
 
     #[must_use]
     fn collapse(mut self) -> Self::Output {
-        self.replace_timeline_state(CollapsedTimelineState)
+        let (attached_mobject, CollapsedTimelineState) = self.terminate();
+        attached_mobject.launch(CollapsedTimelineState)
     }
 }
 
@@ -2142,11 +821,9 @@ where
     where
         RA: Rate<TE::OutputTimeMetric>,
     {
-        self.replace_timeline_state(IndeterminedTimelineState {
-            time_eval: RateComposeTimeEval {
-                rate,
-                time_eval: self.time_eval.clone(),
-            },
+        let (attached_mobject, IndeterminedTimelineState { time_eval }) = self.terminate();
+        attached_mobject.launch(IndeterminedTimelineState {
+            time_eval: RateComposeTimeEval { rate, time_eval },
         })
     }
 }
@@ -2167,11 +844,8 @@ where
     where
         U: Update<TE::OutputTimeMetric, TQ>,
     {
-        self.replace_timeline_state(|timeline_state| UpdateTimelineState {
-            // mobject: timeline_state.mobject,
-            time_eval: timeline_state.time_eval.clone(),
-            update,
-        })
+        let (attached_mobject, IndeterminedTimelineState { time_eval }) = self.terminate();
+        attached_mobject.launch(UpdateTimelineState { time_eval, update })
     }
 }
 
@@ -2190,14 +864,12 @@ where
     where
         U: Update<NormalizedTimeMetric, TQ>,
     {
-        self.replace_mobject(|mobject| {
-            update.update(NormalizedTimeMetric(1.0), mobject);
-            // let mut mobject = Arc::unwrap_or_clone(timeline_state.mobject);
-            // update.update(NormalizedTimeMetric(1.0), &mut mobject);
-            // CollapsedTimelineState {
-            //     mobject: Arc::new(mobject),
-            // }
-        })
+        let (attached_mobject, CollapsedTimelineState) = self.terminate();
+        attached_mobject
+            .update(|mobject| {
+                update.update(NormalizedTimeMetric(1.0), mobject);
+            })
+            .launch(CollapsedTimelineState)
     }
 }
 
@@ -2216,25 +888,10 @@ where
     where
         C: Construct<TQ>,
     {
-        self.replace_timeline_state(|alive_context, timeline_state| {
-            let child_root = AliveRoot::new(alive_context.alive_context().config());
-            let child_renderable = child_root.start(LayerRenderableState {
-                layer: alive_context.archive_state().layer.clone(),
-            });
-            let child_timeline = child_renderable.start(CollapsedTimelineState {
-                mobject: timeline_state.mobject.clone(),
-            });
-            let mobject = construct
-                .construct(&child_root, &child_renderable, child_timeline)
-                .archive_state()
-                .mobject
-                .clone();
-            drop(child_renderable);
-            ConstructTimelineState {
-                mobject,
-                time_eval: timeline_state.time_eval.clone(),
-                root_archive: child_root.into_archive(),
-            }
+        let (attached_mobject, IndeterminedTimelineState { time_eval }) = self.terminate();
+        attached_mobject.launch(ConstructTimelineState {
+            time_eval,
+            construct,
         })
     }
 }
@@ -2258,14 +915,3 @@ where
         self.quantize(DenormalizedTimeEval)
     }
 }
-
-// pub(crate) struct Storage(typemap_rev::TypeMap);
-
-// impl Storage {
-//     // fn get_static<M>(&self) -> &M::MobjectPresentation
-//     // where
-//     //     M: Mobject,
-//     // {
-//     //     self.0.get::<StaticTimeline<M>>()
-//     // }
-// }

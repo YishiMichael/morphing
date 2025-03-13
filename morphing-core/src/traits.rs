@@ -9,16 +9,13 @@ use super::stage::WorldAttachment;
 use super::stage::WorldIndexed;
 use super::timeline::Alive;
 use super::timeline::CollapsedTimelineState;
-use super::timeline::TimeMetric;
-use super::timeline::Timer;
 use super::timeline::TypeQuery;
+use super::timer::TimeMetric;
+use super::timer::Timer;
 
 pub trait Mobject:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
-    // type MobjectPresentation: 'static + Send + Sync;
-
-    // fn presentation(&self, device: &wgpu::Device) -> Self::MobjectPresentation;
 }
 
 pub trait MobjectPresentation<M>: 'static + Send + Sync
@@ -32,10 +29,7 @@ pub trait MobjectBuilder<L>
 where
     L: Layer,
 {
-    // type ChannelIndex: ChannelIndex;
     type OutputTypeQuery<W, LI>: TypeQuery<World = W, LayerIndex = LI, Layer = L>;
-    // type Mobject: Mobject;
-    // type MobjectPresentation: MobjectPresentation<Self::Mobject>;
 
     fn instantiate<'c, 't, 'a, W, LI>(
         self,
@@ -45,18 +39,6 @@ where
     where
         W: WorldIndexed<LI, Layer = L>,
         LI: LayerIndex;
-    // fn spawn<W, LI, SKF>(
-    //     mobject: Box<Self::Mobject>,
-    //     layer_architecture: &L::Architecture<SKF>,
-    // ) -> Alive<
-    //     '_,
-    //     MobjectQueried<W, LI, Self::ChannelIndex, Self::Mobject>,
-    //     CollapsedTimelineState,
-    //     SKF,
-    // >
-    // where
-    //     MobjectQueried<W, LI, Self::ChannelIndex, Self::Mobject>: MobjectQuery,
-    //     SKF: StorableKeyFn;
 }
 
 pub trait Rate<TM>:
