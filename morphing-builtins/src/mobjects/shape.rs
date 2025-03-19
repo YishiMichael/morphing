@@ -30,15 +30,10 @@ pub struct ShapeMobject {
     pub(crate) stroke: Option<Stroke>,
 }
 
-#[derive(ShaderType)]
-struct Vertex {
-    position: nalgebra::Vector2<f32>,
-}
-
 struct VertexConstructor;
 
 impl FillVertexConstructor<Vertex> for VertexConstructor {
-    fn new_vertex(&mut self, vertex: FillVertex) -> Vertex {
+    fn new_vertex(&mut self, vertex: lyon::tessellation::FillVertex) -> Vertex {
         let (x, y) = vertex.position().into();
         Vertex {
             position: nalgebra::Vector2::new(x, y),
@@ -47,7 +42,7 @@ impl FillVertexConstructor<Vertex> for VertexConstructor {
 }
 
 impl StrokeVertexConstructor<Vertex> for VertexConstructor {
-    fn new_vertex(&mut self, vertex: StrokeVertex) -> Vertex {
+    fn new_vertex(&mut self, vertex: lyon::tessellation::StrokeVertex) -> Vertex {
         let (x, y) = vertex.position().into();
         Vertex {
             position: nalgebra::Vector2::new(x, y),

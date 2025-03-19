@@ -3,7 +3,9 @@
 use morphing_core::config::ConfigFallbackContent;
 
 pub mod components;
+pub mod layers;
 pub mod mobjects;
+pub mod presentations;
 pub mod timelines;
 
 inventory::submit! {

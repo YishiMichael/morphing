@@ -33,6 +33,7 @@ struct TypstWorldInput {
     font_paths: Vec<PathBuf>,
 }
 
+#[derive(Debug)]
 struct TypstWorld {
     library: typst::utils::LazyHash<typst::Library>,
     book: typst::utils::LazyHash<typst::text::FontBook>,

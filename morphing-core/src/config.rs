@@ -79,7 +79,7 @@ impl Config {
     where
         CF: Clone + ConfigField,
     {
-        self.operate::<CF, _, _>(CF::clone)
+        self.operate(CF::clone)
     }
 }
 

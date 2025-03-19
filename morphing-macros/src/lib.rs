@@ -1,4 +1,4 @@
-// TODO: rate, world, layer, scene, wgpu_struct, wgpu_shader_types
+// TODO: rate, world, layer, scene, wgpu_struct, wgpu_shader_types, pipeline?,
 
 mod rate;
 mod scene;
@@ -9,7 +9,7 @@ use proc_macro::TokenStream;
 
 use darling::FromMeta;
 
-fn forward_macro_impl<I, T>(
+fn delegate_macro<I, T>(
     f: fn(I, T) -> proc_macro2::TokenStream,
     input: TokenStream,
     tokens: TokenStream,
@@ -30,11 +30,11 @@ where
         .into()
 }
 
-macro_rules! forward {
+macro_rules! delegate {
     ($name:ident => $path:path) => {
         #[proc_macro_attribute]
         pub fn $name(input: TokenStream, tokens: TokenStream) -> TokenStream {
-            forward_macro_impl($path, input, tokens)
+            delegate_macro($path, input, tokens)
         }
     };
 }
@@ -44,7 +44,7 @@ pub(crate) struct SceneArgs {
     config: Option<syn::LitStr>,
 }
 
-forward!(scene => scene::scene);
+delegate!(scene => scene::scene);
 
 #[derive(FromMeta)]
 pub(crate) struct RateArgs {
@@ -54,4 +54,14 @@ pub(crate) struct RateArgs {
     assert: Option<syn::LitStr>,
 }
 
-forward!(rate => rate::rate);
+delegate!(rate => rate::rate);
+
+#[derive(FromMeta)]
+pub(crate) struct WorldArgs;
+
+// delegate!(world => structure::world);
+
+#[derive(FromMeta)]
+pub(crate) struct LayerArgs;
+
+// delegate!(layer => structure::layer);

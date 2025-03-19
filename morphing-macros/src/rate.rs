@@ -1,7 +1,11 @@
 use super::RateArgs;
 
+// External crate dependencies:
+// - serde
+// - morphing_core
 pub(crate) fn rate(args: RateArgs, item_fn: syn::ItemFn) -> proc_macro2::TokenStream {
-    let fn_name = item_fn.sig.ident.clone();
+    let fn_name = &item_fn.sig.ident;
+    let vis = &item_fn.vis;
     let struct_name = quote::format_ident!("__{}_Rate", fn_name);
     let trait_name = quote::format_ident!("__{}_Trait", fn_name);
 
@@ -13,7 +17,7 @@ pub(crate) fn rate(args: RateArgs, item_fn: syn::ItemFn) -> proc_macro2::TokenSt
         .filter_map(|fn_arg| {
             if let syn::FnArg::Typed(syn::PatType { pat, ty, .. }) = fn_arg {
                 if let syn::Pat::Ident(ident) = &**pat {
-                    Some((&ident.ident, ty.clone()))
+                    Some((&ident.ident, &**ty))
                 } else {
                     None
                 }
@@ -67,7 +71,7 @@ pub(crate) fn rate(args: RateArgs, item_fn: syn::ItemFn) -> proc_macro2::TokenSt
         .unwrap_or_default();
     let trait_definition = quote::quote! {
         #[allow(non_camel_case_types)]
-        pub trait #trait_name<TM>: ::morphing_core::timeline::ApplyRate<TM>
+        #vis trait #trait_name<TM>: ::morphing_core::timeline::ApplyRate<TM>
         where
             TM: ::morphing_core::timer::TimeMetric,
             #struct_name: ::morphing_core::traits::Rate<TM>,

@@ -12,12 +12,28 @@ use super::timeline::TypeQuery;
 use super::timer::TimeMetric;
 use super::timer::Timer;
 
+pub trait Component: serde::de::DeserializeOwned + serde::Serialize {
+    type ShaderTypes: ComponentShaderTypes;
+
+    fn to_shader_types(&self) -> Self::ShaderTypes;
+}
+
+pub trait ComponentShaderTypes {
+    type Buffers;
+
+    fn bind_group_layout(device: &wgpu::Device) -> &'static wgpu::BindGroupLayout;
+    fn bind_group_from_buffers(device: &wgpu::Device, buffers: &Self::Buffers) -> wgpu::BindGroup;
+    fn new_buffers(&self, device: &wgpu::Device) -> Self::Buffers;
+    fn new_buffers_initialized(&self, device: &wgpu::Device) -> Self::Buffers;
+    fn write_buffers(&self, queue: &wgpu::Queue, buffers: &mut Self::Buffers);
+}
+
 pub trait Mobject:
     'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 {
 }
 
-pub trait MobjectPresentation<M>: 'static + Send + Sync
+pub trait Presentation<M>: 'static + Send + Sync
 where
     M: Mobject,
 {
@@ -28,11 +44,14 @@ pub trait MobjectBuilder<L>
 where
     L: Layer,
 {
-    type OutputTypeQuery<W, LI>: TypeQuery<World = W, LayerIndex = LI, Layer = L>;
+    type OutputTypeQuery<W, LI>: TypeQuery<World = W, LayerIndex = LI, Layer = L>
+    where
+        W: World,
+        LI: LayerIndex<W, Layer = L>;
 
     fn instantiate<'t, 'a, W, LI>(
         self,
-        layer_attachment: &'a LayerAttachment<'t, W, LI, L, L::Residue<'t, W, LI>>,
+        layer_attachment_residue: &'a L::Residue<'t, W, LI>,
         config: &'t Config,
     ) -> Alive<'t, 'a, Self::OutputTypeQuery<W, LI>, CollapsedTimelineState>
     where
@@ -67,11 +86,11 @@ where
         &self,
         time_metric: TM,
         mobject: &TQ::Mobject,
-        mobject_presentation: &mut TQ::MobjectPresentation,
+        presentation: &mut TQ::Presentation,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ); // mobject_presentation write-only
+    ); // presentation write-only
 }
 
 // pub trait Act<TM, M>: Clone

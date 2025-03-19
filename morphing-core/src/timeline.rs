@@ -35,7 +35,7 @@ use super::timer::Timer;
 use super::traits::Construct;
 use super::traits::Mobject;
 use super::traits::MobjectBuilder;
-use super::traits::MobjectPresentation;
+use super::traits::Presentation;
 use super::traits::Rate;
 use super::traits::Update;
 
@@ -78,23 +78,23 @@ where
 pub trait Timeline:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize + Storable
 {
-    type MobjectPresentation: Send + Sync;
+    type Presentation: Send + Sync;
 
     fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value;
     fn erase_presentation_key(
         &self,
-        mobject_presentation_key: Arc<
+        presentation_key: Arc<
             StorageKey<
                 Self::StorableKey,
                 <<Self::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
             >,
         >,
-    ) -> PresentationKey<Self::MobjectPresentation>;
+    ) -> PresentationKey<Self::Presentation>;
     fn prepare_presentation(
         &self,
         time: Time,
         time_interval: Range<Time>,
-        mobject_presentation: &mut <Self::Slot as Slot>::Value,
+        presentation: &mut <Self::Slot as Slot>::Value,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -114,7 +114,7 @@ where
     TQ: TypeQuery,
 {
     type StorableKey = (TypeId, Box<dyn DynKey>);
-    type Slot = SwapSlot<SharableSlot<TQ::MobjectPresentation>>;
+    type Slot = SwapSlot<SharableSlot<TQ::Presentation>>;
 
     fn key(
         &self,
@@ -131,10 +131,10 @@ impl<TQ> Timeline for StaticTimeline<TQ>
 where
     TQ: TypeQuery,
 {
-    type MobjectPresentation = TQ::MobjectPresentation;
+    type Presentation = TQ::Presentation;
 
     fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value {
-        Arc::new(TQ::MobjectPresentation::presentation(
+        Arc::new(TQ::Presentation::presentation(
             self.mobject.as_ref(),
             device,
         ))
@@ -142,21 +142,21 @@ where
 
     fn erase_presentation_key(
         &self,
-        mobject_presentation_key: Arc<
+        presentation_key: Arc<
             StorageKey<
                 Self::StorableKey,
                 <<Self::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
             >,
         >,
-    ) -> PresentationKey<Self::MobjectPresentation> {
-        PresentationKey::Static(mobject_presentation_key)
+    ) -> PresentationKey<Self::Presentation> {
+        PresentationKey::Static(presentation_key)
     }
 
     fn prepare_presentation(
         &self,
         _time: Time,
         _time_interval: Range<Time>,
-        _mobject_presentation: &mut <Self::Slot as Slot>::Value,
+        _presentation: &mut <Self::Slot as Slot>::Value,
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
@@ -181,7 +181,7 @@ where
     U: Update<TE::OutputTimeMetric, TQ>,
 {
     type StorableKey = (TypeId, Box<dyn DynKey>, Box<dyn DynKey>);
-    type Slot = SwapSlot<VecSlot<TQ::MobjectPresentation>>;
+    type Slot = SwapSlot<VecSlot<TQ::Presentation>>;
 
     fn key(
         &self,
@@ -201,29 +201,29 @@ where
     TE: TimeEval,
     U: Update<TE::OutputTimeMetric, TQ>,
 {
-    type MobjectPresentation = TQ::MobjectPresentation;
+    type Presentation = TQ::Presentation;
 
     fn init_presentation(&self, device: &wgpu::Device) -> <Self::Slot as Slot>::Value {
-        TQ::MobjectPresentation::presentation(self.mobject.as_ref(), device)
+        TQ::Presentation::presentation(self.mobject.as_ref(), device)
     }
 
     fn erase_presentation_key(
         &self,
-        mobject_presentation_key: Arc<
+        presentation_key: Arc<
             StorageKey<
                 Self::StorableKey,
                 <<Self::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
             >,
         >,
-    ) -> PresentationKey<Self::MobjectPresentation> {
-        PresentationKey::Dynamic(mobject_presentation_key)
+    ) -> PresentationKey<Self::Presentation> {
+        PresentationKey::Dynamic(presentation_key)
     }
 
     fn prepare_presentation(
         &self,
         time: Time,
         time_interval: Range<Time>,
-        mobject_presentation: &mut <Self::Slot as Slot>::Value,
+        presentation: &mut <Self::Slot as Slot>::Value,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
@@ -231,7 +231,7 @@ where
         self.update.prepare_presentation(
             self.time_eval.time_eval(time, time_interval),
             self.mobject.as_ref(),
-            mobject_presentation,
+            presentation,
             device,
             queue,
             format,
@@ -242,16 +242,16 @@ where
 pub trait TimelineErasure:
     'static + serde_traitobject::Deserialize + serde_traitobject::Serialize
 {
-    type MobjectPresentation;
+    type Presentation;
 
     fn allocate(
         self: Box<Self>,
         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Box<dyn AllocatedTimelineErasure<MobjectPresentation = Self::MobjectPresentation>>;
+    ) -> Box<dyn AllocatedTimelineErasure<Presentation = Self::Presentation>>;
 }
 
 pub trait AllocatedTimelineErasure {
-    type MobjectPresentation: Send + Sync;
+    type Presentation: Send + Sync;
 
     fn prepare(
         &self,
@@ -261,7 +261,7 @@ pub trait AllocatedTimelineErasure {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> PresentationKey<Self::MobjectPresentation>;
+    ) -> PresentationKey<Self::Presentation>;
 }
 
 struct AllocatedTimeline<T>
@@ -281,12 +281,12 @@ impl<T> TimelineErasure for T
 where
     T: Timeline,
 {
-    type MobjectPresentation = T::MobjectPresentation;
+    type Presentation = T::Presentation;
 
     fn allocate(
         self: Box<Self>,
         slot_key_generator_type_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Box<dyn AllocatedTimelineErasure<MobjectPresentation = Self::MobjectPresentation>> {
+    ) -> Box<dyn AllocatedTimelineErasure<Presentation = Self::Presentation>> {
         Box::new(AllocatedTimeline {
             storage_key: Arc::new(slot_key_generator_type_map.allocate(self.as_ref())),
             timeline: self,
@@ -298,7 +298,7 @@ impl<T> AllocatedTimelineErasure for AllocatedTimeline<T>
 where
     T: Timeline,
 {
-    type MobjectPresentation = T::MobjectPresentation;
+    type Presentation = T::Presentation;
 
     fn prepare(
         &self,
@@ -308,15 +308,15 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> PresentationKey<Self::MobjectPresentation> {
-        let mobject_presentation = storage_type_map
+    ) -> PresentationKey<Self::Presentation> {
+        let presentation = storage_type_map
             .get_or_insert_with::<_, T::Slot, _>(&self.storage_key, || {
                 self.timeline.init_presentation(device)
             });
         self.timeline.prepare_presentation(
             time,
             time_interval,
-            mobject_presentation,
+            presentation,
             device,
             queue,
             format,
@@ -331,9 +331,9 @@ pub trait TypeQuery: 'static + Debug + Send + Sync {
     type LayerIndex: LayerIndex<Self::World, Layer = Self::Layer>;
     type Layer: Layer;
     type ChannelIndex: ChannelIndex<Self::Layer, Channel = Self::Channel>;
-    type Channel: Channel<MobjectPresentation = Self::MobjectPresentation>;
+    type Channel: Channel<Presentation = Self::Presentation>;
     type Mobject: Mobject;
-    type MobjectPresentation: MobjectPresentation<Self::Mobject>;
+    type Presentation: Presentation<Self::Mobject>;
 }
 
 pub struct TypeQueried<W, LI, L, CI, C, M, MP>(PhantomData<fn() -> (W, LI, L, CI, C, M, MP)>);
@@ -350,9 +350,9 @@ where
     LI: LayerIndex<W, Layer = L>,
     L: Layer,
     CI: ChannelIndex<L, Channel = C>,
-    C: Channel<MobjectPresentation = MP>,
+    C: Channel<Presentation = MP>,
     M: Mobject,
-    MP: MobjectPresentation<M>,
+    MP: Presentation<M>,
 {
     type World = W;
     type LayerIndex = LI;
@@ -360,7 +360,7 @@ where
     type ChannelIndex = CI;
     type Channel = C;
     type Mobject = M;
-    type MobjectPresentation = MP;
+    type Presentation = MP;
 }
 
 pub struct AttachedMobject<'t, 'a, TQ>
@@ -375,7 +375,7 @@ where
         TQ::Layer,
         TQ::ChannelIndex,
         TQ::Channel,
-        TQ::MobjectPresentation,
+        TQ::Presentation,
     >,
 }
 
@@ -421,7 +421,7 @@ where
     fn transit_simple<F, T>(self, alive_id: usize, time_interval: Range<Rc<Time>>, f: F) -> Self
     where
         F: FnOnce(Arc<TQ::Mobject>) -> T,
-        T: TimelineErasure<MobjectPresentation = TQ::MobjectPresentation>,
+        T: TimelineErasure<Presentation = TQ::Presentation>,
     {
         if !Rc::ptr_eq(&time_interval.start, &time_interval.end) {
             self.attachment.channel.push(
@@ -746,7 +746,7 @@ impl<'t, 'a, TQ> Spawn<'t, 'a, TQ, TQ::Mobject>
         TQ::Layer,
         TQ::ChannelIndex,
         TQ::Channel,
-        TQ::MobjectPresentation,
+        TQ::Presentation,
     >
 where
     TQ: TypeQuery,
@@ -773,7 +773,7 @@ where
     MB: MobjectBuilder<TQ::Layer, OutputTypeQuery<TQ::World, TQ::LayerIndex> = TQ>,
 {
     fn spawn(&'a self, mobject_builder: MB) -> Alive<'t, 'a, TQ, CollapsedTimelineState> {
-        mobject_builder.instantiate(self, self.config)
+        mobject_builder.instantiate(&self.residue, self.config)
     }
 }
 

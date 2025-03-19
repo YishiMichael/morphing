@@ -1,12 +1,22 @@
 const PI = radians(180.0);
 
-struct CameraUniform {
-    view_motor: mat2x4<f32>,
-    projection_matrix: mat4x4<f32>,
+// struct Camera3DUniform {
+//     view_motor: mat2x4<f32>,
+//     projection_matrix: mat4x4<f32>,
+// }
+
+// struct Transform3DUniform {
+//     motor: mat2x4<f32>,
+//     scale: f32,
+// }
+
+struct CameraTransform2DUniform {
+    view_motor: vec4<f32>,
+    projection_matrix: mat3x3<f32>,
 }
 
-struct TransformUniform {
-    motor: mat2x4<f32>,
+struct Transform2DUniform {
+    motor: vec4<f32>,
     scale: f32,
 }
 
@@ -37,30 +47,80 @@ struct VertexOutput {
     @location(0) position: vec2<f32>,
 }
 
-@group(0) @binding(0) var<uniform> u_transform: TransformUniform;
+@group(0) @binding(0) var<uniform> u_transform_2d: Transform2DUniform;
 @group(1) @binding(0) var<uniform> u_color: ColorUniform;
 @group(1) @binding(1) var<storage> s_gradients: array<GradientStorage>;
 @group(1) @binding(2) var<storage> s_radial_stops: array<GradientStopStorage>;
 @group(1) @binding(3) var<storage> s_angular_stops: array<GradientStopStorage>;
-@group(2) @binding(0) var<uniform> u_camera: CameraUniform;
+@group(2) @binding(0) var<uniform> u_camera_transform_2d: CameraTransform2DUniform;
+
+// @vertex
+// fn vs_main(
+//     in: Vertex,
+// ) -> VertexOutput {
+//     return VertexOutput(
+//         vec4(apply_projection_matrix(
+//             u_camera_transform_3d.projection_matrix, apply_motor(
+//                 u_camera_transform_3d.motor, apply_motor(
+//                     u_transform_3d.motor, in.position
+//                 )
+//             )
+//         ), 1.0),
+//         in.position,
+//     );
+// }
+
+// fn apply_projection_matrix(
+//     projection_matrix: mat4x4<f32>,
+//     position: vec3<f32>,
+// ) -> vec3<f32> {
+//     let homogeneous_position = projection_matrix * vec4(position, 1.0);
+//     return homogeneous_position.xyz / homogeneous_position.w;
+// }
+
+// // https://github.com/enkimute/LookMaNoMatrices/blob/main/src/miniPGA.glsl
+// // Port from function `sw_mp`
+// Motor should be normalized.
+// fn apply_motor(
+//     motor: mat2x4<f32>,
+//     position: vec3<f32>,
+// ) -> vec3<f32> {
+//     let direction = cross(position, motor[0].yzw) - motor[1].yzw;
+//     let half_shift = motor[0].x * direction + cross(direction, motor[0].yzw) - motor[0].yzw * motor[1].x;
+//     return half_shift * 2.0 + position;
+// }
 
 @vertex
 fn vs_main(
     in: Vertex,
 ) -> VertexOutput {
     return VertexOutput(
-        u_camera.projection_matrix * vec4(apply_motor(u_camera.view_motor, apply_motor(u_transform.motor, vec3(in.position, 0.0))), 1.0),
+        vec4(apply_projection_matrix(
+            u_camera_transform_2d.projection_matrix, apply_motor(
+                u_camera_transform_2d.motor, apply_motor(
+                    u_transform_2d.motor, in.position
+                )
+            )
+        ), 0.0, 1.0),
         in.position,
     );
 }
 
-// https://github.com/enkimute/LookMaNoMatrices/blob/main/src/miniPGA.glsl
-fn apply_motor(
-    motor: mat2x4<f32>,
-    position: vec3<f32>,
+fn apply_projection_matrix(
+    projection_matrix: mat3x3<f32>,
+    position: vec2<f32>,
 ) -> vec3<f32> {
-    let direction = cross(position, motor[0].yzw) - motor[1].yzw;
-    return (motor[0].x * direction + cross(direction, motor[0].yzw) - motor[0].yzw * motor[1].x) * 2.0 + position;
+    let homogeneous_position = projection_matrix * vec3(position, 1.0);
+    return homogeneous_position.xy / homogeneous_position.z;
+}
+
+// Motor should be normalized.
+fn apply_motor(
+    motor: vec4<f32>,
+    position: vec2<f32>,
+) -> vec2<f32> {
+    let half_shift = (motor.w - motor.x * position.x) * vec2(motor.y, motor.x) + (motor.z - motor.y * position.y) * vec2(-motor.x, motor.y);
+    return half_shift * 2.0 + position;
 }
 
 @fragment
