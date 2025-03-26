@@ -6,5 +6,4 @@ members = [
     "morphing-builtins",
     "morphing-gui",
     "morphing-macros",
-    "winit-egui-wgpu-template",
 ]

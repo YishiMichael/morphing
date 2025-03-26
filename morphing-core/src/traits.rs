@@ -59,22 +59,6 @@ where
         LI: LayerIndex<W, Layer = L>;
 }
 
-pub trait Rate<TM>:
-    'static + Clone + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
-where
-    TM: TimeMetric,
-{
-    type OutputTimeMetric: TimeMetric;
-
-    fn eval(&self, time_metric: TM) -> Self::OutputTimeMetric;
-}
-
-pub trait IncreasingRate<TM>: Rate<TM>
-where
-    TM: TimeMetric,
-{
-}
-
 pub trait Update<TM, TQ>:
     'static + Debug + Send + Sync + serde::de::DeserializeOwned + serde::Serialize
 where
