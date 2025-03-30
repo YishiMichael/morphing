@@ -10,9 +10,14 @@ use super::timer::Time;
 use super::timer::TimeMetric;
 
 pub trait Mobject:
-    'static + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize
+    'static + Clone + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize
 {
     type Entity;
+}
+
+pub trait Structure:
+    'static + Clone + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize
+{
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -47,8 +52,8 @@ impl<M, S> Deref for Entity<M, S> {
 
 impl<M, S> EntityTrait for Entity<M, S>
 where
-    M: 'static + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
-    S: 'static + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
+    M: Mobject,
+    S: Structure,
 {
     type Mobject = M;
     type Structure = S;
@@ -142,53 +147,53 @@ where
 //     fn own(&self) -> Self::Entity;
 // }
 
-pub trait Observatory:
-    'static + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize
-{
-    // type Initial;
-    type Target;
+// pub trait Observatory:
+//     'static + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize
+// {
+//     // type Initial;
+//     type Target;
 
-    // fn initial(&self) -> Self::Initial;
-    // fn update(self, initial: Self::Initial) -> &Self::Target;
-    fn borrow(&self) -> &Self::Target;
-}
+//     // fn initial(&self) -> Self::Initial;
+//     // fn update(self, initial: Self::Initial) -> &Self::Target;
+//     fn borrow(&self) -> &Self::Target;
+// }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct StaticObservatory<O>(Arc<O>);
+// #[derive(Debug, serde::Deserialize, serde::Serialize)]
+// pub struct StaticObservatory<O>(Arc<O>);
 
-impl<O> Clone for StaticObservatory<O> {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
+// impl<O> Clone for StaticObservatory<O> {
+//     fn clone(&self) -> Self {
+//         Self(self.0.clone())
+//     }
+// }
 
-impl<O> Observatory for StaticObservatory<O>
-where
-    O: 'static + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
-{
-    type Target = O;
+// impl<O> Observatory for StaticObservatory<O>
+// where
+//     O: 'static + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
+// {
+//     type Target = O;
 
-    fn borrow(&self) -> &Self::Target {
-        &self.0
-    }
-}
+//     fn borrow(&self) -> &Self::Target {
+//         &self.0
+//     }
+// }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct DynamicObservatory<O>(O);
+// #[derive(Debug, serde::Deserialize, serde::Serialize)]
+// pub struct DynamicObservatory<O>(O);
 
-impl<O> Observatory for DynamicObservatory<O>
-where
-    O: 'static + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
-{
-    type Target = O;
+// impl<O> Observatory for DynamicObservatory<O>
+// where
+//     O: 'static + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
+// {
+//     type Target = O;
 
-    fn borrow(&self) -> &Self::Target {
-        &self.0
-    }
-}
+//     fn borrow(&self) -> &Self::Target {
+//         &self.0
+//     }
+// }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct GenericObservatory<O>(O);
+// #[derive(Debug, serde::Deserialize, serde::Serialize)]
+// pub struct GenericObservatory<O>(O);
 
 // impl<E> MobjectObservatory for StaticObservatory<E>
 // where
@@ -253,23 +258,29 @@ pub struct GenericObservatory<O>(O);
 //     }
 // }
 
-pub trait Worldline:
-    Send + Sync + serde_traitobject::Deserialize + serde_traitobject::Serialize
+pub trait Worldline: Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize {
+    type Observatory;
+
+    fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory;
+}
+
+// pub trait SerdeWorldline:
+//     Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize + Worldline
+// {
+// }
+
+pub trait StructureWorldline:
+    Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize
 {
     type Observatory;
 
     fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory;
 }
 
-pub trait SerdeWorldline:
-    Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize + Worldline
-{
-}
-
 pub trait Prepare<E>: Sized {
     // type Presentation;
 
-    fn present(
+    fn prepare_new(
         entity: &E,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -282,7 +293,7 @@ pub trait Prepare<E>: Sized {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) {
-        *self = Self::present(entity, device, queue, format);
+        *self = Self::prepare_new(entity, device, queue, format);
     } // -> &Self::Output; // input presentation write-only
 }
 
@@ -290,8 +301,8 @@ pub trait Render {
     fn render(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView);
 }
 
-impl<W> SerdeWorldline for W where W: for<'de> serde::Deserialize<'de> + serde::Serialize + Worldline
-{}
+// impl<W> SerdeWorldline for W where W: for<'de> serde::Deserialize<'de> + serde::Serialize + Worldline
+// {}
 
 // pub trait PreparableTimeline<M>: Timeline<M> {
 //     type Presentation: Prepare<M>;
@@ -362,18 +373,18 @@ impl<W> SerdeWorldline for W where W: for<'de> serde::Deserialize<'de> + serde::
 struct StaticWorldline<M, S> {
     // time_rate: TR,
     // entity: Arc<M::Entity>,
-    entity: Entity<StaticObservatory<M>, StaticObservatory<S>>,
+    entity: Entity<Arc<M>, Arc<S>>,
 }
 
 impl<M, S> Worldline for StaticWorldline<M, S>
 where
     M: Mobject<Entity = Entity<M, S>>,
-    S: Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
+    S: Structure,
 {
     // type Transformed<TR0> = StaticWorldline<RateChain<TR0, TR::TimeMetric, TR>, M>
     // where
     //     TR0: TimeRate;
-    type Observatory = Entity<StaticObservatory<M>, StaticObservatory<S>>;
+    type Observatory = Entity<M, S>;
 
     // fn transform<TR0>(
     //     self,
@@ -393,15 +404,15 @@ where
 
     fn observe(&self, _clock: Clock, _clock_span: ClockSpan) -> Self::Observatory {
         Entity {
-            mobject: self.entity.mobject.clone(),
-            structure: self.entity.structure.clone(),
+            mobject: self.entity.mobject.as_ref().clone(),
+            structure: self.entity.structure.as_ref().clone(),
         }
     }
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct DynamicWorldline<M, S, TM, R, CU> {
-    entity: Entity<DynamicObservatory<M>, DynamicObservatory<S>>,
+    entity: Entity<M, S>,
     time_metric: TM,
     rate: R,
     continuous_update: CU,
@@ -409,8 +420,8 @@ struct DynamicWorldline<M, S, TM, R, CU> {
 
 impl<M, S, TM, R, CU> Worldline for DynamicWorldline<M, S, TM, R, CU>
 where
-    M: Clone + Mobject<Entity = Entity<M, S>>,
-    S: Clone + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
+    M: Mobject<Entity = Entity<M, S>>,
+    S: Structure,
     TM: TimeMetric,
     R: Rate<TM>,
     CU: ContinuousUpdate<TM, M::Entity>,
@@ -418,7 +429,7 @@ where
     // type Transformed<TR0> = DynamicWorldline<RateChain<TR0, TR::TimeMetric, TR>, M, CU>
     // where
     //     TR0: TimeRate;
-    type Observatory = Entity<DynamicObservatory<M>, DynamicObservatory<S>>;
+    type Observatory = Entity<M, S>;
 
     // fn transform<TR0>(
     //     self,
@@ -439,22 +450,39 @@ where
 
     fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
         let mut entity = Entity {
-            mobject: self.entity.mobject.0.clone(),
-            structure: self.entity.structure.0.clone(),
+            mobject: self.entity.mobject.clone(),
+            structure: self.entity.structure.clone(),
         };
         self.continuous_update.continuous_update(
             self.rate
                 .eval(self.time_metric.localize_from_clock(clock, clock_span)),
             &mut entity,
         );
-        Entity {
-            mobject: DynamicObservatory(entity.mobject),
-            structure: DynamicObservatory(entity.structure),
-        }
+        entity
         // self.time_rate.eval_time(time).map(|metric_time| {
         //     self.continuous_update
         //         .continuous_update(*metric_time, self.entity.clone())
         // })
+    }
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct GenericWorldline<M, S> {
+    entity: Entity<Arc<M>, S>,
+}
+
+impl<M, S> Worldline for GenericWorldline<M, S>
+where
+    M: Mobject<Entity = Entity<M, S::Observatory>>,
+    S: StructureWorldline,
+{
+    type Observatory = Entity<M, S::Observatory>;
+
+    fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
+        Entity {
+            mobject: self.entity.mobject.as_ref().clone(),
+            structure: self.entity.structure.observe(clock, clock_span),
+        }
     }
 }
 
@@ -463,18 +491,10 @@ where
 
 // atom
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject0Structure {}
 
-impl Observatory for GenericObservatory<MyMobject0Structure> {
-    type Target = MyMobject0Structure;
-
-    fn borrow(&self) -> &Self::Target {
-        &MyMobject0Structure {}
-    }
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject0 {
     demo0: f32,
 }
@@ -487,37 +507,18 @@ pub trait MyMobject0Trait {}
 
 impl MyMobject0Trait for Entity<MyMobject0, MyMobject0Structure> {}
 
-pub trait MyMobject0ObservatoryTrait:
-    EntityTrait<
-    Mobject: Observatory<Target = MyMobject0>,
-    Structure: Observatory<Target = MyMobject0Structure>,
->
-{
-}
-
-impl<M, S> MyMobject0ObservatoryTrait for Entity<M, S>
-where
-    M: Observatory<Target = MyMobject0>,
-    S: Observatory<Target = MyMobject0Structure>,
-{
-}
-
-impl Worldline for Entity<StaticObservatory<MyMobject0>, GenericObservatory<MyMobject0Structure>> {
-    type Observatory =
-        Entity<StaticObservatory<MyMobject0>, GenericObservatory<MyMobject0Structure>>;
+impl StructureWorldline for MyMobject0Structure {
+    type Observatory = MyMobject0Structure;
 
     #[allow(unused_variables)]
     fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
-        Entity {
-            mobject: self.mobject.clone(),
-            structure: GenericObservatory(MyMobject0Structure {}),
-        }
+        MyMobject0Structure {}
     }
 }
 
 // atom structured
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject1Structure<
     MA = Entity<MyMobject0, MyMobject0Structure>,
     MB = Entity<MyMobject0, MyMobject0Structure>,
@@ -526,26 +527,7 @@ pub struct MyMobject1Structure<
     mb: MB,
 }
 
-impl<MA, MB> Observatory for GenericObservatory<MyMobject1Structure<MA, MB>>
-where
-    MA: Observatory<Target: MyMobject0ObservatoryTrait>,
-    MB: Observatory<Target: MyMobject0ObservatoryTrait>,
-{
-    type Target = MyMobject1Structure<MA::Target, MB::Target>;
-
-    fn borrow(&self) -> &Self::Target {
-        &self.0
-    }
-
-    fn update(self, target: Self::Target) -> Self::Target {
-        MyMobject1Structure {
-            ma: self.0.ma.update(target.ma),
-            mb: self.0.mb.update(target.mb),
-        }
-    }
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject1 {
     demo1: f32,
 }
@@ -575,63 +557,24 @@ impl MyMobject1Trait for Entity<MyMobject1, MyMobject1Structure> {
     }
 }
 
-pub trait MyMobject1ObservatoryTrait:
-    EntityTrait<
-    Mobject: Observatory<Target = MyMobject1>,
-    Structure: Observatory<Target = MyMobject1Structure<Self::MA, Self::MB>>,
->
-{
-    type MA: Observatory<Target: MyMobject0ObservatoryTrait>;
-    type MB: Observatory<Target: MyMobject0ObservatoryTrait>;
-
-    fn ma(&self) -> &Self::MA;
-    fn mb(&self) -> &Self::MB;
-}
-
-impl<M, S, MA, MB> MyMobject1ObservatoryTrait for Entity<M, S>
+impl<MA, MB> StructureWorldline for MyMobject1Structure<MA, MB>
 where
-    M: Observatory<Target = MyMobject1>,
-    S: Observatory<Target = MyMobject1Structure<MA, MB>>,
-    MA: Observatory<Target: MyMobject0ObservatoryTrait>,
-    MB: Observatory<Target: MyMobject0ObservatoryTrait>,
+    MA: Worldline<Observatory = Entity<MyMobject0, MyMobject0Structure>>,
+    MB: Worldline<Observatory = Entity<MyMobject0, MyMobject0Structure>>,
 {
-    type MA = MA;
-    type MB = MB;
-
-    fn ma(&self) -> &Self::MA {
-        &self.structure.ma
-    }
-
-    fn mb(&self) -> &Self::MB {
-        &self.structure.mb
-    }
-}
-
-impl<MA, MB> Worldline
-    for Entity<StaticObservatory<MyMobject1>, GenericObservatory<MyMobject1Structure<MA, MB>>>
-where
-    MA: SerdeWorldline,
-    MB: SerdeWorldline,
-{
-    type Observatory = Entity<
-        StaticObservatory<MyMobject1>,
-        GenericObservatory<MyMobject1Structure<MA::Observatory, MB::Observatory>>,
-    >;
+    type Observatory = MyMobject1Structure;
 
     fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
-        Entity {
-            mobject: self.mobject.clone(),
-            structure: GenericObservatory(MyMobject1Structure {
-                ma: self.structure.ma.observe(clock, clock_span),
-                mb: self.structure.mb.observe(clock, clock_span),
-            }),
+        MyMobject1Structure {
+            ma: self.ma.observe(clock, clock_span),
+            mb: self.mb.observe(clock, clock_span),
         }
     }
 }
 
-// prepare
+// prepare buffer slice
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject2Structure<
     MA = Entity<MyMobject1, MyMobject1Structure>,
     MB = Entity<MyMobject1, MyMobject1Structure>,
@@ -640,24 +583,7 @@ pub struct MyMobject2Structure<
     mb: MB,
 }
 
-impl<MA, MB> Observatory for GenericObservatory<MyMobject2Structure<MA, MB>>
-where
-    MA: Observatory<Target: MyMobject1ObservatoryTrait>,
-    MB: Observatory<Target: MyMobject1ObservatoryTrait>,
-{
-    type Target = MyMobject2Structure<MA, MB>;
-
-    fn borrow(&self) -> &Self::Target {
-        &self.0
-    }
-
-    fn update(self, target: &mut Self::Target) {
-        self.ma.update(&mut target.ma);
-        self.mb.update(&mut target.mb);
-    }
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject2 {
     demo2: f32,
 }
@@ -687,28 +613,90 @@ impl MyMobject2Trait for Entity<MyMobject2, MyMobject2Structure> {
     }
 }
 
-pub trait MyMobject2ObservatoryTrait:
-    EntityTrait<
-    Mobject: Observatory<Target = MyMobject2>,
-    Structure: Observatory<Target = MyMobject2Structure<Self::MA, Self::MB>>,
->
+impl<MA, MB> StructureWorldline for MyMobject2Structure<MA, MB>
+where
+    MA: Worldline<Observatory = Entity<MyMobject1, MyMobject1Structure>>,
+    MB: Worldline<Observatory = Entity<MyMobject1, MyMobject1Structure>>,
 {
-    type MA: Observatory<Target: MyMobject1ObservatoryTrait>;
-    type MB: Observatory<Target: MyMobject1ObservatoryTrait>;
+    type Observatory = MyMobject2Structure;
+
+    fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
+        MyMobject2Structure {
+            ma: self.ma.observe(clock, clock_span),
+            mb: self.mb.observe(clock, clock_span),
+        }
+    }
+}
+
+pub trait BufferSlicePrepare {
+    fn prepare(
+        &self,
+        buffer: &wgpu::Buffer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    );
+}
+
+impl BufferSlicePrepare for (Entity<MyMobject2, MyMobject2Structure>, wgpu::BufferAddress) {
+    fn prepare(
+        &self,
+        _buffer: &wgpu::Buffer,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _format: wgpu::TextureFormat,
+    ) {
+        let (entity, _offset) = self;
+        let _bytes = [
+            entity.demo2,
+            entity.ma().demo1 + entity.ma().ma().demo0 + entity.ma().mb().demo0,
+            entity.mb().demo1 + entity.mb().ma().demo0 + entity.mb().mb().demo0,
+        ];
+        // Pretend we write bytes into `buffer` at `offset`
+    }
+}
+
+// impl Prepare<Entity<MyMobject2, MyMobject2Structure>> for [f32; 3] {
+//     fn prepare_new(
+//         entity: &Entity<MyMobject2, MyMobject2Structure>,
+//         _device: &wgpu::Device,
+//         _queue: &wgpu::Queue,
+//         _format: wgpu::TextureFormat,
+//     ) -> Self {
+//     }
+// }
+
+// prepare buffer slice structured
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct MyMobject3Structure<
+    MA = Entity<MyMobject2, MyMobject2Structure>,
+    MB = Entity<MyMobject2, MyMobject2Structure>,
+> {
+    ma: MA,
+    mb: MB,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct MyMobject3 {
+    demo3: f32,
+}
+
+impl Mobject for MyMobject3 {
+    type Entity = Entity<MyMobject3, MyMobject3Structure>;
+}
+
+pub trait MyMobject3Trait {
+    type MA;
+    type MB;
 
     fn ma(&self) -> &Self::MA;
     fn mb(&self) -> &Self::MB;
 }
 
-impl<M, S, MA, MB> MyMobject2ObservatoryTrait for Entity<M, S>
-where
-    M: Observatory<Target = MyMobject2>,
-    S: Observatory<Target = MyMobject2Structure<MA, MB>>,
-    MA: Observatory<Target: MyMobject1ObservatoryTrait>,
-    MB: Observatory<Target: MyMobject1ObservatoryTrait>,
-{
-    type MA = MA;
-    type MB = MB;
+impl MyMobject3Trait for Entity<MyMobject3, MyMobject3Structure> {
+    type MA = Entity<MyMobject2, MyMobject2Structure>;
+    type MB = Entity<MyMobject2, MyMobject2Structure>;
 
     fn ma(&self) -> &Self::MA {
         &self.structure.ma
@@ -719,79 +707,12 @@ where
     }
 }
 
-impl<MA, MB> Worldline
-    for Entity<StaticObservatory<MyMobject2>, GenericObservatory<MyMobject2Structure<MA, MB>>>
+impl<MA, MB> StructureWorldline for MyMobject3Structure<MA, MB>
 where
-    MA: SerdeWorldline,
-    MB: SerdeWorldline,
+    MA: Worldline<Observatory = Entity<MyMobject2, MyMobject2Structure>>,
+    MB: Worldline<Observatory = Entity<MyMobject2, MyMobject2Structure>>,
 {
-    type Observatory = Entity<
-        StaticObservatory<MyMobject2>,
-        GenericObservatory<MyMobject2Structure<MA::Observatory, MB::Observatory>>,
-    >;
-
-    fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
-        Entity {
-            mobject: self.mobject.clone(),
-            structure: GenericObservatory(MyMobject2Structure {
-                ma: self.structure.ma.observe(clock, clock_span),
-                mb: self.structure.mb.observe(clock, clock_span),
-            }),
-        }
-    }
-}
-
-impl Prepare<Entity<MyMobject2, MyMobject2Structure>>
-    for (f32, ((f32, (f32, f32)), (f32, (f32, f32))))
-{
-    fn present(
-        entity: &Entity<MyMobject2, MyMobject2Structure>,
-        _device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        _format: wgpu::TextureFormat,
-    ) -> Self {
-        (
-            entity.demo2,
-            (
-                (
-                    entity.ma().demo1,
-                    (entity.ma().ma().demo0, entity.ma().mb().demo0),
-                ),
-                (
-                    entity.mb().demo1,
-                    (entity.mb().ma().demo0, entity.mb().mb().demo0),
-                ),
-            ),
-        )
-    }
-}
-
-// prepare structured
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct MyMobject3Structure<
-    MA = Entity<MyMobject2, MyMobject2Structure>,
-    MB = Entity<MyMobject2, MyMobject2Structure>,
-> {
-    ma: MA,
-    mb: MB,
-}
-
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-pub struct MyMobject3 {
-    demo3: f32,
-}
-
-impl Mobject for MyMobject3 {
-    type Entity = Entity<MyMobject3, MyMobject3Structure>;
-}
-
-impl<MA, MB> Worldline for MyMobject3Structure<MA, MB>
-where
-    MA: SerdeWorldline,
-    MB: SerdeWorldline,
-{
-    type Observatory = MyMobject3Structure<MA::Observatory, MB::Observatory>;
+    type Observatory = MyMobject3Structure;
 
     fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
         MyMobject3Structure {
@@ -801,9 +722,34 @@ where
     }
 }
 
-// render
+pub trait BufferSliceAllocate {
+    fn offset(&self, parent_offset: wgpu::BufferAddress) -> wgpu::BufferAddress;
+}
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+impl BufferSlicePrepare
+    for Entity<
+        MyMobject3,
+        MyMobject3Structure<
+            (Entity<MyMobject2, MyMobject2Structure>, wgpu::BufferAddress),
+            (Entity<MyMobject2, MyMobject2Structure>, wgpu::BufferAddress),
+        >,
+    >
+{
+    fn prepare(
+        &self,
+        buffer: &wgpu::Buffer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) {
+        self.structure.ma.prepare(buffer, device, queue, format);
+        self.structure.mb.prepare(buffer, device, queue, format);
+    }
+}
+
+// buffer
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject4Structure<
     MA = Entity<MyMobject3, MyMobject3Structure>,
     MB = Entity<MyMobject3, MyMobject3Structure>,
@@ -812,7 +758,7 @@ pub struct MyMobject4Structure<
     mb: MB,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject4 {
     demo4: f32,
 }
@@ -821,12 +767,33 @@ impl Mobject for MyMobject4 {
     type Entity = Entity<MyMobject4, MyMobject4Structure>;
 }
 
-impl<MA, MB> Worldline for MyMobject4Structure<MA, MB>
+pub trait MyMobject4Trait {
+    type MA;
+    type MB;
+
+    fn ma(&self) -> &Self::MA;
+    fn mb(&self) -> &Self::MB;
+}
+
+impl MyMobject4Trait for Entity<MyMobject4, MyMobject4Structure> {
+    type MA = Entity<MyMobject3, MyMobject3Structure>;
+    type MB = Entity<MyMobject3, MyMobject3Structure>;
+
+    fn ma(&self) -> &Self::MA {
+        &self.structure.ma
+    }
+
+    fn mb(&self) -> &Self::MB {
+        &self.structure.mb
+    }
+}
+
+impl<MA, MB> StructureWorldline for MyMobject4Structure<MA, MB>
 where
-    MA: SerdeWorldline,
-    MB: SerdeWorldline,
+    MA: Worldline<Observatory = Entity<MyMobject3, MyMobject3Structure>>,
+    MB: Worldline<Observatory = Entity<MyMobject3, MyMobject3Structure>>,
 {
-    type Observatory = MyMobject4Structure<MA::Observatory, MB::Observatory>;
+    type Observatory = MyMobject4Structure;
 
     fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
         MyMobject4Structure {
@@ -836,9 +803,35 @@ where
     }
 }
 
-// render structured
+pub trait BufferPrepare {
+    fn prepare(
+        &self,
+        storage_type_map: &mut StorageTypeMap,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    );
+}
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+pub struct BufferAllocationKey(u32); // Allocated
+
+impl BufferPrepare for (Entity<MyMobject4, MyMobject4Structure>, BufferAllocationKey) {
+    fn prepare(
+        &self,
+        _storage_type_map: &mut StorageTypeMap,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _format: wgpu::TextureFormat,
+    ) {
+        let (_entity, _allocation_key) = self;
+        // Pretend we create an buffer at `storage_type_map[allocation_key]`, initialized using `entity`
+        // Then, prepare the buffer via field dispatching
+    }
+}
+
+// buffer structured
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject5Structure<
     MA = Entity<MyMobject4, MyMobject4Structure>,
     MB = Entity<MyMobject4, MyMobject4Structure>,
@@ -847,7 +840,7 @@ pub struct MyMobject5Structure<
     mb: MB,
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject5 {
     demo5: f32,
 }
@@ -856,15 +849,175 @@ impl Mobject for MyMobject5 {
     type Entity = Entity<MyMobject5, MyMobject5Structure>;
 }
 
-impl<MA, MB> Worldline for MyMobject5Structure<MA, MB>
+pub trait MyMobject5Trait {
+    type MA;
+    type MB;
+
+    fn ma(&self) -> &Self::MA;
+    fn mb(&self) -> &Self::MB;
+}
+
+impl MyMobject5Trait for Entity<MyMobject5, MyMobject5Structure> {
+    type MA = Entity<MyMobject4, MyMobject4Structure>;
+    type MB = Entity<MyMobject4, MyMobject4Structure>;
+
+    fn ma(&self) -> &Self::MA {
+        &self.structure.ma
+    }
+
+    fn mb(&self) -> &Self::MB {
+        &self.structure.mb
+    }
+}
+
+impl<MA, MB> StructureWorldline for MyMobject5Structure<MA, MB>
 where
-    MA: SerdeWorldline,
-    MB: SerdeWorldline,
+    MA: Worldline,
+    MB: Worldline,
 {
     type Observatory = MyMobject5Structure<MA::Observatory, MB::Observatory>;
 
     fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
         MyMobject5Structure {
+            ma: self.ma.observe(clock, clock_span),
+            mb: self.mb.observe(clock, clock_span),
+        }
+    }
+}
+
+impl BufferPrepare
+    for Entity<
+        MyMobject5,
+        MyMobject5Structure<
+            (Entity<MyMobject4, MyMobject4Structure>, BufferAllocationKey),
+            (Entity<MyMobject4, MyMobject4Structure>, BufferAllocationKey),
+        >,
+    >
+{
+    fn prepare(
+        &self,
+        storage_type_map: &mut StorageTypeMap,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) {
+        self.structure
+            .ma
+            .prepare(storage_type_map, device, queue, format);
+        self.structure
+            .mb
+            .prepare(storage_type_map, device, queue, format);
+    }
+}
+
+// we still have one more level of bind group, but similar to buffer and is omitted here
+
+// render
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct MyMobject6Structure<
+    MA = Entity<MyMobject5, MyMobject5Structure>,
+    MB = Entity<MyMobject5, MyMobject5Structure>,
+> {
+    ma: MA,
+    mb: MB,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct MyMobject6 {
+    demo6: f32,
+}
+
+impl Mobject for MyMobject6 {
+    type Entity = Entity<MyMobject6, MyMobject6Structure>;
+}
+
+pub trait MyMobject6Trait {
+    type MA;
+    type MB;
+
+    fn ma(&self) -> &Self::MA;
+    fn mb(&self) -> &Self::MB;
+}
+
+impl MyMobject6Trait for Entity<MyMobject6, MyMobject6Structure> {
+    type MA = Entity<MyMobject5, MyMobject5Structure>;
+    type MB = Entity<MyMobject5, MyMobject5Structure>;
+
+    fn ma(&self) -> &Self::MA {
+        &self.structure.ma
+    }
+
+    fn mb(&self) -> &Self::MB {
+        &self.structure.mb
+    }
+}
+
+impl<MA, MB> StructureWorldline for MyMobject6Structure<MA, MB>
+where
+    MA: Worldline<Observatory = Entity<MyMobject5, MyMobject5Structure>>,
+    MB: Worldline<Observatory = Entity<MyMobject5, MyMobject5Structure>>,
+{
+    type Observatory = MyMobject6Structure;
+
+    fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
+        MyMobject6Structure {
+            ma: self.ma.observe(clock, clock_span),
+            mb: self.mb.observe(clock, clock_span),
+        }
+    }
+}
+
+// render structured
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct MyMobject7Structure<
+    MA = Entity<MyMobject6, MyMobject6Structure>,
+    MB = Entity<MyMobject6, MyMobject6Structure>,
+> {
+    ma: MA,
+    mb: MB,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct MyMobject7 {
+    demo7: f32,
+}
+
+impl Mobject for MyMobject7 {
+    type Entity = Entity<MyMobject7, MyMobject7Structure>;
+}
+
+pub trait MyMobject7Trait {
+    type MA;
+    type MB;
+
+    fn ma(&self) -> &Self::MA;
+    fn mb(&self) -> &Self::MB;
+}
+
+impl MyMobject7Trait for Entity<MyMobject7, MyMobject7Structure> {
+    type MA = Entity<MyMobject6, MyMobject6Structure>;
+    type MB = Entity<MyMobject6, MyMobject6Structure>;
+
+    fn ma(&self) -> &Self::MA {
+        &self.structure.ma
+    }
+
+    fn mb(&self) -> &Self::MB {
+        &self.structure.mb
+    }
+}
+
+impl<MA, MB> StructureWorldline for MyMobject7Structure<MA, MB>
+where
+    MA: Worldline<Observatory = Entity<MyMobject6, MyMobject6Structure>>,
+    MB: Worldline<Observatory = Entity<MyMobject6, MyMobject6Structure>>,
+{
+    type Observatory = MyMobject7Structure;
+
+    fn observe(&self, clock: Clock, clock_span: ClockSpan) -> Self::Observatory {
+        MyMobject7Structure {
             ma: self.ma.observe(clock, clock_span),
             mb: self.mb.observe(clock, clock_span),
         }
