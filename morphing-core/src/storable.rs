@@ -201,19 +201,21 @@ pub trait Storable: 'static + Send + Sync {
 }
 
 #[derive(Clone)]
-pub struct StorageKey<K, SK> {
-    storable_key: K,
-    slot_key: SK,
+pub struct StorageKey<S>
+where
+    S: Storable,
+{
+    storable_key: S::StorableKey,
+    slot_key: <<S::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
 }
 
-struct SlotKeyGeneratorWrapper<K, S>(K, S);
+struct SlotKeyGeneratorWrapper<S>(S);
 
-impl<K, S> typemap_rev::TypeMapKey for SlotKeyGeneratorWrapper<K, S>
+impl<S> typemap_rev::TypeMapKey for SlotKeyGeneratorWrapper<S>
 where
-    K: 'static + Send + Sync,
-    S: Slot,
+    S: Storable,
 {
-    type Value = HashMap<K, S::SlotKeyGenerator>;
+    type Value = HashMap<S::StorableKey, <S::Slot as Slot>::SlotKeyGenerator>;
 }
 
 pub struct SlotKeyGeneratorTypeMap {
@@ -229,13 +231,7 @@ impl SlotKeyGeneratorTypeMap {
         }
     }
 
-    pub fn allocate<S>(
-        &mut self,
-        storable: &S,
-    ) -> StorageKey<
-        S::StorableKey,
-        <<S::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-    >
+    pub fn allocate<S>(&mut self, storable: &S) -> StorageKey<S>
     where
         S: Storable,
     {
@@ -244,7 +240,7 @@ impl SlotKeyGeneratorTypeMap {
             storable_key: storable_key.clone(),
             slot_key: self
                 .type_map
-                .entry::<SlotKeyGeneratorWrapper<S::StorableKey, S::Slot>>()
+                .entry::<SlotKeyGeneratorWrapper<S>>()
                 .or_insert_with(HashMap::new)
                 .entry(storable_key)
                 .or_insert_with(<S::Slot as Slot>::SlotKeyGenerator::new)
@@ -257,14 +253,13 @@ impl SlotKeyGeneratorTypeMap {
     }
 }
 
-struct StorageWrapper<K, S>(K, S);
+struct StorageWrapper<S>(S);
 
-impl<K, S> typemap_rev::TypeMapKey for StorageWrapper<K, S>
+impl<S> typemap_rev::TypeMapKey for StorageWrapper<S>
 where
-    K: 'static + Send + Sync,
-    S: Slot,
+    S: Storable,
 {
-    type Value = HashMap<K, S>;
+    type Value = HashMap<S::StorableKey, S::Slot>;
 }
 
 trait Expire: Send + Sync {
@@ -302,34 +297,33 @@ impl StorageTypeMap {
         }
     }
 
-    pub fn get_or_insert_with<K, S, F>(
+    pub fn get_or_insert_with<S, F>(
         &mut self,
-        storage_key: &StorageKey<K, <S::SlotKeyGenerator as SlotKeyGenerator>::SlotKey>,
+        storage_key: &StorageKey<S>,
         f: F,
-    ) -> &mut S::Value
+    ) -> &mut <S::Slot as Slot>::Value
     where
-        K: 'static + Clone + Eq + Hash + Send + Sync,
-        S: Slot,
-        F: FnOnce() -> S::Value,
+        S: Storable,
+        // K: 'static + Clone + Eq + Hash + Send + Sync,
+        // S: Slot,
+        F: FnOnce() -> <S::Slot as Slot>::Value,
     {
         self.type_map
-            .entry::<StorageWrapper<K, S>>()
+            .entry::<StorageWrapper<S>>()
             .or_insert_with(HashMap::new)
             .entry(storage_key.storable_key.clone())
-            .or_insert_with(S::new)
+            .or_insert_with(S::Slot::new)
             .get_or_insert_with(&storage_key.slot_key, f)
     }
 
-    pub fn get<K, S>(
-        &self,
-        storage_key: &StorageKey<K, <S::SlotKeyGenerator as SlotKeyGenerator>::SlotKey>,
-    ) -> Option<&S::Value>
+    pub fn get<S>(&self, storage_key: &StorageKey<S>) -> Option<&<S::Slot as Slot>::Value>
     where
-        K: 'static + Clone + Eq + Hash + Send + Sync,
-        S: Slot,
+        S: Storable,
+        // K: 'static + Clone + Eq + Hash + Send + Sync,
+        // S: Slot,
     {
         self.type_map
-            .get::<StorageWrapper<K, S>>()
+            .get::<StorageWrapper<S>>()
             .unwrap()
             .get(&storage_key.storable_key)
             .unwrap()
