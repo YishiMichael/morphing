@@ -8,8 +8,9 @@ edition = "2021"
 dyn-clone = "1.0.19"
 dyn-eq = "0.1.3"
 dyn-hash = "0.2.2"
+encase = "0.10.0"
 inventory = "0.3.17"
-morphing-macros = { path = "../morphing-macros" }
+# morphing-macros = { path = "../morphing-macros" }
 serde = { version = "1.0.217", features = ["rc", "serde_derive"] }
 # serde-hashkey = { version = "0.4.5", features = ["ordered-float"] }
 serde_traitobject = "0.2.8"
