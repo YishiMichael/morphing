@@ -210,13 +210,13 @@ dyn_eq::eq_trait_object!(DynKey);
 dyn_hash::hash_trait_object!(DynKey);
 
 pub trait Storable: 'static + Send + Sync {
-    type KeyInput<'s>: serde::Serialize;
+    type KeyInput: serde::Serialize;
     type Slot: Slot;
 
-    fn key_input<'s>(
-        &'s self,
-        // storable_key_fn: &fn(&dyn serde_traitobject::Serialize) -> Box<dyn DynKey>,
-    ) -> Self::KeyInput<'s>;
+    // fn key_input<'s>(
+    //     &'s self,
+    //     // storable_key_fn: &fn(&dyn serde_traitobject::Serialize) -> Box<dyn DynKey>,
+    // ) -> Self::KeyInput<'s>;
 }
 
 #[derive(Clone)]
@@ -250,11 +250,11 @@ impl SlotKeyGeneratorTypeMap {
         }
     }
 
-    pub fn allocate<S>(&mut self, storable: &S) -> StorageKey<S>
+    pub fn allocate<S>(&mut self, key_input: &S::KeyInput) -> StorageKey<S>
     where
         S: Storable,
     {
-        let storable_key = (self.storable_key_fn)(&storable.key_input());
+        let storable_key = (self.storable_key_fn)(key_input);
         StorageKey {
             storable_key: storable_key.clone(),
             slot_key: self
