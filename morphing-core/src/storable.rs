@@ -48,17 +48,19 @@ pub trait Slot: 'static + Send + Sync {
     type SlotKeyGenerator: SlotKeyGenerator;
 
     fn new() -> Self;
-    fn get(
-        &self,
-        slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-    ) -> Option<&Self::Value>;
-    fn get_or_insert_with<F>(
+    fn update_or_insert<D, F, FO>(
         &mut self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        default: D,
         f: F,
-    ) -> &mut Self::Value
+    ) -> Option<FO>
     where
-        F: FnOnce() -> Self::Value;
+        D: FnOnce() -> Self::Value,
+        F: FnOnce(&mut Self::Value) -> FO;
+    fn get_and_unwrap(
+        &self,
+        slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+    ) -> &Self::Value;
     fn expire(&mut self);
 }
 
@@ -75,22 +77,29 @@ where
         Self(None)
     }
 
-    fn get(
-        &self,
-        _slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-    ) -> Option<&Self::Value> {
-        self.0.as_ref()
-    }
-
-    fn get_or_insert_with<F>(
+    fn update_or_insert<D, F, FO>(
         &mut self,
         _slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        default: D,
         f: F,
-    ) -> &mut Self::Value
+    ) -> Option<FO>
     where
-        F: FnOnce() -> Self::Value,
+        D: FnOnce() -> Self::Value,
+        F: FnOnce(&mut Self::Value) -> FO,
     {
-        self.0.get_or_insert_with(f)
+        if let Some(value) = self.0.as_mut() {
+            Some(f(value))
+        } else {
+            self.0.insert(default());
+            None
+        }
+    }
+
+    fn get_and_unwrap(
+        &self,
+        _slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+    ) -> &Self::Value {
+        self.0.as_ref().unwrap()
     }
 
     fn expire(&mut self) {
@@ -111,25 +120,33 @@ where
         Self(Vec::new())
     }
 
-    fn get(
-        &self,
-        slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-    ) -> Option<&Self::Value> {
-        self.0.get(*slot_key).as_ref().unwrap().as_ref()
-    }
-
-    fn get_or_insert_with<F>(
+    fn update_or_insert<D, F, FO>(
         &mut self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        default: D,
         f: F,
-    ) -> &mut Self::Value
+    ) -> Option<FO>
     where
-        F: FnOnce() -> Self::Value,
+        D: FnOnce() -> Self::Value,
+        F: FnOnce(&mut Self::Value) -> FO,
     {
         if self.0.len() <= *slot_key {
             self.0.resize_with(slot_key + 1, || None);
         }
-        self.0.get_mut(*slot_key).unwrap().get_or_insert_with(f)
+        let option_mut = self.0.get_mut(*slot_key).unwrap();
+        if let Some(value) = option_mut.as_mut() {
+            Some(f(value))
+        } else {
+            option_mut.insert(default());
+            None
+        }
+    }
+
+    fn get_and_unwrap(
+        &self,
+        slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+    ) -> &Self::Value {
+        self.0.get(*slot_key).as_ref().unwrap().as_ref().unwrap()
     }
 
     fn expire(&mut self) {
@@ -156,22 +173,24 @@ where
         }
     }
 
-    fn get(
-        &self,
-        slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-    ) -> Option<&Self::Value> {
-        self.active.get(slot_key)
-    }
-
-    fn get_or_insert_with<F>(
+    fn update_or_insert<D, F, FO>(
         &mut self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+        default: D,
         f: F,
-    ) -> &mut Self::Value
+    ) -> Option<FO>
     where
-        F: FnOnce() -> Self::Value,
+        D: FnOnce() -> Self::Value,
+        F: FnOnce(&mut Self::Value) -> FO,
     {
-        self.active.get_or_insert_with(slot_key, f)
+        self.active.update_or_insert(slot_key, default, f)
+    }
+
+    fn get_and_unwrap(
+        &self,
+        slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+    ) -> &Self::Value {
+        self.active.get_and_unwrap(slot_key)
     }
 
     fn expire(&mut self) {
@@ -191,13 +210,13 @@ dyn_eq::eq_trait_object!(DynKey);
 dyn_hash::hash_trait_object!(DynKey);
 
 pub trait Storable: 'static + Send + Sync {
-    type StorableKey: Clone + Eq + Hash + Send + Sync;
+    type KeyInput<'s>: serde::Serialize;
     type Slot: Slot;
 
-    fn key(
-        &self,
-        storable_key_fn: &fn(&dyn serde_traitobject::Serialize) -> Box<dyn DynKey>,
-    ) -> Self::StorableKey;
+    fn key_input<'s>(
+        &'s self,
+        // storable_key_fn: &fn(&dyn serde_traitobject::Serialize) -> Box<dyn DynKey>,
+    ) -> Self::KeyInput<'s>;
 }
 
 #[derive(Clone)]
@@ -205,7 +224,7 @@ pub struct StorageKey<S>
 where
     S: Storable,
 {
-    storable_key: S::StorableKey,
+    storable_key: Box<dyn DynKey>,
     slot_key: <<S::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
 }
 
@@ -215,7 +234,7 @@ impl<S> typemap_rev::TypeMapKey for SlotKeyGeneratorWrapper<S>
 where
     S: Storable,
 {
-    type Value = HashMap<S::StorableKey, <S::Slot as Slot>::SlotKeyGenerator>;
+    type Value = HashMap<Box<dyn DynKey>, <S::Slot as Slot>::SlotKeyGenerator>;
 }
 
 pub struct SlotKeyGeneratorTypeMap {
@@ -235,7 +254,7 @@ impl SlotKeyGeneratorTypeMap {
     where
         S: Storable,
     {
-        let storable_key = storable.key(&self.storable_key_fn);
+        let storable_key = (self.storable_key_fn)(&storable.key_input());
         StorageKey {
             storable_key: storable_key.clone(),
             slot_key: self
@@ -259,7 +278,7 @@ impl<S> typemap_rev::TypeMapKey for StorageWrapper<S>
 where
     S: Storable,
 {
-    type Value = HashMap<S::StorableKey, S::Slot>;
+    type Value = HashMap<Box<dyn DynKey>, S::Slot>;
 }
 
 trait Expire: Send + Sync {
@@ -297,37 +316,35 @@ impl StorageTypeMap {
         }
     }
 
-    pub fn get_or_insert_with<S, F>(
+    pub fn update_or_insert<S, D, F, FO>(
         &mut self,
         storage_key: &StorageKey<S>,
+        default: D,
         f: F,
-    ) -> &mut <S::Slot as Slot>::Value
+    ) -> Option<FO>
     where
         S: Storable,
-        // K: 'static + Clone + Eq + Hash + Send + Sync,
-        // S: Slot,
-        F: FnOnce() -> <S::Slot as Slot>::Value,
+        D: FnOnce() -> <S::Slot as Slot>::Value,
+        F: FnOnce(&mut <S::Slot as Slot>::Value) -> FO,
     {
         self.type_map
             .entry::<StorageWrapper<S>>()
             .or_insert_with(HashMap::new)
             .entry(storage_key.storable_key.clone())
             .or_insert_with(S::Slot::new)
-            .get_or_insert_with(&storage_key.slot_key, f)
+            .update_or_insert(&storage_key.slot_key, default, f)
     }
 
-    pub fn get<S>(&self, storage_key: &StorageKey<S>) -> Option<&<S::Slot as Slot>::Value>
+    pub fn get_and_unwrap<S>(&self, storage_key: &StorageKey<S>) -> &<S::Slot as Slot>::Value
     where
         S: Storable,
-        // K: 'static + Clone + Eq + Hash + Send + Sync,
-        // S: Slot,
     {
         self.type_map
             .get::<StorageWrapper<S>>()
             .unwrap()
             .get(&storage_key.storable_key)
             .unwrap()
-            .get(&storage_key.slot_key)
+            .get_and_unwrap(&storage_key.slot_key)
     }
 
     pub fn expire(&mut self) {
