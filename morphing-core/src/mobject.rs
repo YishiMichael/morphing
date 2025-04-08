@@ -75,57 +75,65 @@ where
     );
 }
 
-pub trait Prepare: Mobject {
+pub trait ResourceType<RT> {
     type Resource: 'static + Send + Sync;
 
-    fn prepare_new(
-        input: Self::ResourceRefInput<'_>,
+    fn resource_new(
+        &self,
+        resource_target: RT,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) -> Self::Resource;
-    fn prepare_incremental(
+    fn resource_update(
+        &self,
         resource: &mut Self::Resource,
-        input: Self::ResourceRefInput<'_>,
+        resource_target: RT,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) -> ResourceReuseResult;
 }
 
-pub trait Render: Mobject {
-    fn render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass);
-}
-
-pub trait Variant<P>: StoreType
+pub trait Prepare<M>: 'static + Send + Sync
 where
-    P: Prepare,
+    M: Mobject,
 {
+    const RESOURCE_TYPE: Self::ResourceType;
+    type ResourceType: ResourceType<Self::ResourceTarget>;
+    type ResourceTarget;
+
+    fn prepare(input: M::ResourceRefInput<'_>) -> Self::ResourceTarget;
 }
 
-pub struct StaticVariant<P>(P);
-
-impl<P> StoreType for StaticVariant<P>
+pub trait Render<M>
 where
-    P: Prepare,
+    M: Mobject,
 {
-    type KeyInput = P;
-    type Slot = ArcSlot<P::Resource>;
+    fn render(resource: M::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass);
 }
 
-impl<P> Variant<P> for StaticVariant<P> where P: Prepare {}
+pub struct StaticVariant<M, P>(M, P);
 
-pub struct DynamicVariant<P>(P);
-
-impl<P> StoreType for DynamicVariant<P>
+impl<M, P> StoreType for StaticVariant<M, P>
 where
-    P: Prepare,
+    M: Mobject,
+    P: Prepare<M>,
+{
+    type KeyInput = M;
+    type Slot = ArcSlot<<P::ResourceType as ResourceType<P::ResourceTarget>>::Resource>;
+}
+
+pub struct DynamicVariant<M, P>(M, P);
+
+impl<M, P> StoreType for DynamicVariant<M, P>
+where
+    M: Mobject,
+    P: Prepare<M>,
 {
     type KeyInput = ();
-    type Slot = VecSlot<P::Resource>;
+    type Slot = VecSlot<<P::ResourceType as ResourceType<P::ResourceTarget>>::Resource>;
 }
-
-impl<P> Variant<P> for DynamicVariant<P> where P: Prepare {}
 
 pub trait Refresh<M>: 'static + Send + Sync
 where
@@ -456,31 +464,49 @@ where
 
 //
 
-impl Prepare for MyMobject1 {
-    type Resource = [f32; 4];
+pub struct MyMobject1ResourceType;
 
-    fn prepare_new(
-        input: <MyMobject1 as Mobject>::ResourceRefInput<'_>,
+impl ResourceType<[f32; 4]> for MyMobject1ResourceType {
+    type Resource = [[f32; 4]; 2];
+
+    fn resource_new(
+        &self,
+        resource_target: [f32; 4],
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
     ) -> Self::Resource {
-        [input.ma.ma, input.ma.mb, input.mb.ma, input.mb.mb]
+        [resource_target, resource_target]
     }
 
-    fn prepare_incremental(
+    fn resource_update(
+        &self,
         resource: &mut Self::Resource,
-        input: <MyMobject1 as Mobject>::ResourceRefInput<'_>,
+        resource_target: [f32; 4],
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
     ) -> ResourceReuseResult {
-        *resource = [input.ma.ma, input.ma.mb, input.mb.ma, input.mb.mb];
+        *resource = [resource_target, resource_target];
         Ok(())
     }
 }
 
-impl Render for MyMobject1 {
+pub struct MyMobject1Prepare;
+
+impl Prepare<MyMobject1> for MyMobject1Prepare {
+    const RESOURCE_TYPE: MyMobject1ResourceType = MyMobject1ResourceType;
+    type ResourceType = MyMobject1ResourceType;
+    type ResourceTarget = [f32; 4];
+
+    fn prepare(input: <MyMobject1 as Mobject>::ResourceRefInput<'_>) -> Self::ResourceTarget {
+        [input.ma.ma, input.ma.mb, input.mb.ma, input.mb.mb]
+    }
+}
+
+pub struct MyMobject1Render;
+
+impl Render<MyMobject1> for MyMobject1Render {
     fn render(
         _resource: <MyMobject1 as Mobject>::ResourceRef<'_>,
         _render_pass: &mut wgpu::RenderPass,
@@ -500,17 +526,20 @@ pub struct MyMobject1<MA = MyMobject0, MB = MyMobject0> {
 impl Mobject for MyMobject1 {
     type StaticKey = (
         MyMobject1<<MyMobject0 as Mobject>::StaticKey, <MyMobject0 as Mobject>::StaticKey>,
-        StorageKey<StaticVariant<MyMobject1>>,
+        StorageKey<StaticVariant<MyMobject1, MyMobject1Prepare>>,
     );
     type DynamicKey = (
         MyMobject1<<MyMobject0 as Mobject>::StaticKey, <MyMobject0 as Mobject>::StaticKey>,
-        StorageKey<DynamicVariant<MyMobject1>>,
+        StorageKey<DynamicVariant<MyMobject1, MyMobject1Prepare>>,
     );
     type ResourceRefInput<'s> = MyMobject1<
         <MyMobject0 as Mobject>::ResourceRef<'s>,
         <MyMobject0 as Mobject>::ResourceRef<'s>,
     >;
-    type ResourceRef<'s> = &'s <MyMobject1 as Prepare>::Resource;
+    type ResourceRef<'s> =
+        &'s <<MyMobject1Prepare as Prepare<MyMobject1>>::ResourceType as ResourceType<
+            <MyMobject1Prepare as Prepare<MyMobject1>>::ResourceTarget,
+        >>::Resource;
 
     fn static_allocate(
         mobject: &Self,
@@ -572,9 +601,14 @@ impl Mobject for MyMobject1 {
             (input, device, queue, format),
             result,
             |(input, device, queue, format)| {
-                Arc::new(<MyMobject1 as Prepare>::prepare_new(
-                    input, device, queue, format,
-                ))
+                Arc::new(
+                    <MyMobject1Prepare as Prepare<MyMobject1>>::RESOURCE_TYPE.resource_new(
+                        <MyMobject1Prepare as Prepare<MyMobject1>>::prepare(input),
+                        device,
+                        queue,
+                        format,
+                    ),
+                )
             },
             |(_input, _device, _queue, _format), _resource, _result| {},
         )
@@ -614,18 +648,28 @@ impl Mobject for MyMobject1 {
             (input, device, queue, format),
             result,
             |(input, device, queue, format)| {
-                <MyMobject1 as Prepare>::prepare_new(input, device, queue, format)
+                <MyMobject1Prepare as Prepare<MyMobject1>>::RESOURCE_TYPE.resource_new(
+                    <MyMobject1Prepare as Prepare<MyMobject1>>::prepare(input),
+                    device,
+                    queue,
+                    format,
+                )
             },
             |(input, device, queue, format), resource, result| {
-                *result = <MyMobject1 as Prepare>::prepare_incremental(
-                    resource, input, device, queue, format,
-                );
+                *result = <MyMobject1Prepare as Prepare<MyMobject1>>::RESOURCE_TYPE
+                    .resource_update(
+                        resource,
+                        <MyMobject1Prepare as Prepare<MyMobject1>>::prepare(input),
+                        device,
+                        queue,
+                        format,
+                    );
             },
         )
     }
 
     fn generic_render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass) {
-        <MyMobject1 as Render>::render(resource, render_pass);
+        <MyMobject1Render as Render<MyMobject1>>::render(resource, render_pass);
     }
 }
 
