@@ -1,7 +1,8 @@
 use wgpu::util::DeviceExt;
 
+use super::storable::ResourceReuseResult;
+
 // TODO: move to builtins
-pub type ResourceReuseResult = Result<(), ()>;
 
 // pub trait Resource<I> {
 //     fn prepare_new(

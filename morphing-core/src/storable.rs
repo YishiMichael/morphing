@@ -6,6 +6,8 @@ use dyn_clone::DynClone;
 use dyn_eq::DynEq;
 use dyn_hash::DynHash;
 
+pub type ResourceReuseResult = Result<(), ()>;
+
 pub trait SlotKeyGenerator: 'static + Send + Sync {
     type SlotKey: 'static + Clone;
 
@@ -48,15 +50,14 @@ pub trait Slot: 'static + Send + Sync {
     type SlotKeyGenerator: SlotKeyGenerator;
 
     fn new() -> Self;
-    fn update_or_insert<D, F, FO>(
+    fn update_or_insert<I>(
         &mut self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-        default: D,
-        f: F,
-    ) -> Option<FO>
-    where
-        D: FnOnce() -> Self::Value,
-        F: FnOnce(&mut Self::Value) -> FO;
+        input: I,
+        result: &mut ResourceReuseResult,
+        default: fn(I) -> Self::Value,
+        f: fn(I, &mut Self::Value, &mut ResourceReuseResult),
+    ) -> &Self::Value;
     fn get_and_unwrap(
         &self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
@@ -64,9 +65,9 @@ pub trait Slot: 'static + Send + Sync {
     fn expire(&mut self);
 }
 
-pub struct SharableSlot<V>(Option<Arc<V>>);
+pub struct ArcSlot<V>(Option<Arc<V>>);
 
-impl<V> Slot for SharableSlot<V>
+impl<V> Slot for ArcSlot<V>
 where
     V: 'static + Send + Sync,
 {
@@ -77,22 +78,25 @@ where
         Self(None)
     }
 
-    fn update_or_insert<D, F, FO>(
+    fn update_or_insert<I>(
         &mut self,
         _slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-        default: D,
-        f: F,
-    ) -> Option<FO>
-    where
-        D: FnOnce() -> Self::Value,
-        F: FnOnce(&mut Self::Value) -> FO,
-    {
-        if let Some(value) = self.0.as_mut() {
-            Some(f(value))
-        } else {
-            self.0.insert(default());
-            None
-        }
+        input: I,
+        result: &mut ResourceReuseResult,
+        default: fn(I) -> Self::Value,
+        f: fn(I, &mut Self::Value, &mut ResourceReuseResult),
+    ) -> &Self::Value {
+        let value = match self.0.take() {
+            Some(mut value) => {
+                f(input, &mut value, result);
+                value
+            }
+            None => {
+                *result = Err(());
+                default(input)
+            }
+        };
+        self.0.insert(value)
     }
 
     fn get_and_unwrap(
@@ -120,26 +124,29 @@ where
         Self(Vec::new())
     }
 
-    fn update_or_insert<D, F, FO>(
+    fn update_or_insert<I>(
         &mut self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-        default: D,
-        f: F,
-    ) -> Option<FO>
-    where
-        D: FnOnce() -> Self::Value,
-        F: FnOnce(&mut Self::Value) -> FO,
-    {
+        input: I,
+        result: &mut ResourceReuseResult,
+        default: fn(I) -> Self::Value,
+        f: fn(I, &mut Self::Value, &mut ResourceReuseResult),
+    ) -> &Self::Value {
         if self.0.len() <= *slot_key {
             self.0.resize_with(slot_key + 1, || None);
         }
         let option_mut = self.0.get_mut(*slot_key).unwrap();
-        if let Some(value) = option_mut.as_mut() {
-            Some(f(value))
-        } else {
-            option_mut.insert(default());
-            None
-        }
+        let value = match option_mut.take() {
+            Some(mut value) => {
+                f(input, &mut value, result);
+                value
+            }
+            None => {
+                *result = Err(());
+                default(input)
+            }
+        };
+        option_mut.insert(value)
     }
 
     fn get_and_unwrap(
@@ -173,17 +180,16 @@ where
         }
     }
 
-    fn update_or_insert<D, F, FO>(
+    fn update_or_insert<I>(
         &mut self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-        default: D,
-        f: F,
-    ) -> Option<FO>
-    where
-        D: FnOnce() -> Self::Value,
-        F: FnOnce(&mut Self::Value) -> FO,
-    {
-        self.active.update_or_insert(slot_key, default, f)
+        input: I,
+        result: &mut ResourceReuseResult,
+        default: fn(I) -> Self::Value,
+        f: fn(I, &mut Self::Value, &mut ResourceReuseResult),
+    ) -> &Self::Value {
+        self.active
+            .update_or_insert(slot_key, input, result, default, f)
     }
 
     fn get_and_unwrap(
@@ -209,7 +215,7 @@ dyn_clone::clone_trait_object!(DynKey);
 dyn_eq::eq_trait_object!(DynKey);
 dyn_hash::hash_trait_object!(DynKey);
 
-pub trait Storable: 'static + Send + Sync {
+pub trait StoreType: 'static + Send + Sync {
     type KeyInput: serde::Serialize;
     type Slot: Slot;
 
@@ -220,21 +226,22 @@ pub trait Storable: 'static + Send + Sync {
 }
 
 #[derive(Clone)]
-pub struct StorageKey<S>
+pub struct StorageKey<ST>
 where
-    S: Storable,
+    ST: StoreType,
 {
     storable_key: Box<dyn DynKey>,
-    slot_key: <<S::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
+    slot_key: <<ST::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
 }
 
-struct SlotKeyGeneratorWrapper<S>(S);
+struct SlotKeyGeneratorWrapper<KI, S>(KI, S);
 
-impl<S> typemap_rev::TypeMapKey for SlotKeyGeneratorWrapper<S>
+impl<KI, S> typemap_rev::TypeMapKey for SlotKeyGeneratorWrapper<KI, S>
 where
-    S: Storable,
+    KI: 'static,
+    S: Slot,
 {
-    type Value = HashMap<Box<dyn DynKey>, <S::Slot as Slot>::SlotKeyGenerator>;
+    type Value = HashMap<Box<dyn DynKey>, S::SlotKeyGenerator>;
 }
 
 pub struct SlotKeyGeneratorTypeMap {
@@ -250,19 +257,19 @@ impl SlotKeyGeneratorTypeMap {
         }
     }
 
-    pub fn allocate<S>(&mut self, key_input: &S::KeyInput) -> StorageKey<S>
+    pub fn allocate<ST>(&mut self, key_input: &ST::KeyInput) -> StorageKey<ST>
     where
-        S: Storable,
+        ST: StoreType,
     {
         let storable_key = (self.storable_key_fn)(key_input);
         StorageKey {
             storable_key: storable_key.clone(),
             slot_key: self
                 .type_map
-                .entry::<SlotKeyGeneratorWrapper<S>>()
+                .entry::<SlotKeyGeneratorWrapper<ST::KeyInput, ST::Slot>>()
                 .or_insert_with(HashMap::new)
                 .entry(storable_key)
-                .or_insert_with(<S::Slot as Slot>::SlotKeyGenerator::new)
+                .or_insert_with(<ST::Slot as Slot>::SlotKeyGenerator::new)
                 .generate_slot_key(),
         }
     }
@@ -272,13 +279,14 @@ impl SlotKeyGeneratorTypeMap {
     }
 }
 
-struct StorageWrapper<S>(S);
+struct StorageWrapper<KI, S>(KI, S);
 
-impl<S> typemap_rev::TypeMapKey for StorageWrapper<S>
+impl<KI, S> typemap_rev::TypeMapKey for StorageWrapper<KI, S>
 where
-    S: Storable,
+    KI: 'static,
+    S: Slot,
 {
-    type Value = HashMap<Box<dyn DynKey>, S::Slot>;
+    type Value = HashMap<Box<dyn DynKey>, S>;
 }
 
 trait Expire: Send + Sync {
@@ -316,31 +324,31 @@ impl StorageTypeMap {
         }
     }
 
-    pub fn update_or_insert<S, D, F, FO>(
+    pub fn update_or_insert<ST, I>(
         &mut self,
-        storage_key: &StorageKey<S>,
-        default: D,
-        f: F,
-    ) -> Option<FO>
+        storage_key: &StorageKey<ST>,
+        input: I,
+        result: &mut ResourceReuseResult,
+        default: fn(I) -> <ST::Slot as Slot>::Value,
+        f: fn(I, &mut <ST::Slot as Slot>::Value, &mut ResourceReuseResult),
+    ) -> &<ST::Slot as Slot>::Value
     where
-        S: Storable,
-        D: FnOnce() -> <S::Slot as Slot>::Value,
-        F: FnOnce(&mut <S::Slot as Slot>::Value) -> FO,
+        ST: StoreType,
     {
         self.type_map
-            .entry::<StorageWrapper<S>>()
+            .entry::<StorageWrapper<ST::KeyInput, ST::Slot>>()
             .or_insert_with(HashMap::new)
             .entry(storage_key.storable_key.clone())
-            .or_insert_with(S::Slot::new)
-            .update_or_insert(&storage_key.slot_key, default, f)
+            .or_insert_with(ST::Slot::new)
+            .update_or_insert(&storage_key.slot_key, input, result, default, f)
     }
 
-    pub fn get_and_unwrap<S>(&self, storage_key: &StorageKey<S>) -> &<S::Slot as Slot>::Value
+    pub fn get_and_unwrap<ST>(&self, storage_key: &StorageKey<ST>) -> &<ST::Slot as Slot>::Value
     where
-        S: Storable,
+        ST: StoreType,
     {
         self.type_map
-            .get::<StorageWrapper<S>>()
+            .get::<StorageWrapper<ST::KeyInput, ST::Slot>>()
             .unwrap()
             .get(&storage_key.storable_key)
             .unwrap()
