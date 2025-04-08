@@ -17,9 +17,8 @@ pub trait Mobject:
 {
     type StaticKey;
     type DynamicKey;
-    type Resource: 'static + Send + Sync;
     type ResourceRefInput<'s>;
-    type ResourceRef<'s>: Send + Sync;
+    type ResourceRef<'s>;
 
     fn static_allocate(
         mobject: &Self,
@@ -47,21 +46,7 @@ pub trait Mobject:
         format: wgpu::TextureFormat,
         result: &mut ResourceReuseResult,
     ) -> Self::ResourceRef<'s>;
-    // fn resource_input<'m>(mobject: &'m Self) -> Self::ResourceInput<'s>;
-    // fn prepare_new(
-    //     mobject: &Self,
-    //     device: &wgpu::Device,
-    //     queue: &wgpu::Queue,
-    //     format: wgpu::TextureFormat,
-    // ) -> Self::Resource;
-    // fn prepare_incremental(
-    //     resource: &mut Self::Resource,
-    //     mobject: &Self,
-    //     device: &wgpu::Device,
-    //     queue: &wgpu::Queue,
-    //     format: wgpu::TextureFormat,
-    // ) -> ResourceReuseResult;
-    fn render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass);
+    fn generic_render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass);
 }
 
 pub trait Timeline<M>: 'static + Send + Sized + Sync
@@ -86,58 +71,61 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> ResourceReuseResult;
+        result: &mut ResourceReuseResult,
+    );
 }
 
-pub trait Resource<M>
-where
-    M: Mobject,
-{
+pub trait Prepare: Mobject {
+    type Resource: 'static + Send + Sync;
+
     fn prepare_new(
-        resource_input: M::ResourceRefInput<'_>,
+        input: Self::ResourceRefInput<'_>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> Self;
+    ) -> Self::Resource;
     fn prepare_incremental(
-        &mut self,
-        resource_input: M::ResourceRefInput<'_>,
+        resource: &mut Self::Resource,
+        input: Self::ResourceRefInput<'_>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) -> ResourceReuseResult;
-    fn render(&self, render_pass: &mut wgpu::RenderPass);
 }
 
-pub trait Variant<M>: StoreType
+pub trait Render: Mobject {
+    fn render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass);
+}
+
+pub trait Variant<P>: StoreType
 where
-    M: Mobject,
+    P: Prepare,
 {
 }
 
-pub struct StaticVariant<M>(M);
+pub struct StaticVariant<P>(P);
 
-impl<M> StoreType for StaticVariant<M>
+impl<P> StoreType for StaticVariant<P>
 where
-    M: Mobject,
+    P: Prepare,
 {
-    type KeyInput = M;
-    type Slot = ArcSlot<M::Resource>;
+    type KeyInput = P;
+    type Slot = ArcSlot<P::Resource>;
 }
 
-impl<M> Variant<M> for StaticVariant<M> where M: Mobject {}
+impl<P> Variant<P> for StaticVariant<P> where P: Prepare {}
 
-pub struct DynamicVariant<M>(M);
+pub struct DynamicVariant<P>(P);
 
-impl<M> StoreType for DynamicVariant<M>
+impl<P> StoreType for DynamicVariant<P>
 where
-    M: Mobject,
+    P: Prepare,
 {
     type KeyInput = ();
-    type Slot = VecSlot<M::Resource>;
+    type Slot = VecSlot<P::Resource>;
 }
 
-impl<M> Variant<M> for DynamicVariant<M> where M: Mobject {}
+impl<P> Variant<P> for DynamicVariant<P> where P: Prepare {}
 
 pub trait Refresh<M>: 'static + Send + Sync
 where
@@ -147,14 +135,6 @@ where
 }
 
 pub struct StaticTimeline;
-
-// impl<M> Storable for (M, StaticTimeline)
-// where
-//     M: Mobject,
-// {
-//     type KeyInput = M;
-//     type Slot = ArcSlot<M::Resource>;
-// }
 
 impl<M> Timeline<M> for StaticTimeline
 where
@@ -169,7 +149,6 @@ where
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Key {
         M::static_allocate(observe.as_ref(), slot_key_generator_map)
-        // slot_key_generator_map.allocate(observe.as_ref())
     }
 
     fn prepare(
@@ -182,8 +161,8 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> ResourceReuseResult {
-        let mut result = Ok(());
+        result: &mut ResourceReuseResult,
+    ) {
         M::static_prepare(
             observe.as_ref(),
             key,
@@ -191,23 +170,8 @@ where
             device,
             queue,
             format,
-            &mut result,
+            result,
         );
-        result
-        // storage_type_map
-        //     .update_or_insert(
-        //         key,
-        //         || {
-        //             Arc::new(M::prepare_new(
-        //                 &M::resource_input(observe.as_ref()),
-        //                 device,
-        //                 queue,
-        //                 format,
-        //             ))
-        //         },
-        //         |_| Ok(()),
-        //     )
-        //     .unwrap_or(Err(()))
     }
 }
 
@@ -229,7 +193,6 @@ where
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Key {
         M::dynamic_allocate(observe, slot_key_generator_map)
-        // slot_key_generator_map.allocate(&())
     }
 
     fn prepare(
@@ -242,8 +205,8 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> ResourceReuseResult {
-        let mut result = Ok(());
+        result: &mut ResourceReuseResult,
+    ) {
         M::dynamic_prepare(
             &timeline.refresh.refresh(clock, clock_span, observe.clone()),
             key,
@@ -251,17 +214,8 @@ where
             device,
             queue,
             format,
-            &mut result,
+            result,
         );
-        result
-        // let resource_input = M::resource_input(&mobject);
-        // storage_type_map
-        //     .update_or_insert(
-        //         key,
-        //         || M::prepare_new(&resource_input, device, queue, format),
-        //         |resource| M::prepare_incremental(resource, &resource_input, device, queue, format),
-        //     )
-        //     .unwrap_or(Err(()))
     }
 }
 
@@ -288,7 +242,6 @@ where
 {
     type StaticKey = ();
     type DynamicKey = ();
-    type Resource = ();
     type ResourceRefInput<'s> = ();
     type ResourceRef<'s> = T;
 
@@ -330,30 +283,7 @@ where
         (**mobject).clone()
     }
 
-    // fn resource_input<'m>(mobject: &'m Self) -> Self::ResourceInput<'s> {
-    //     mobject
-    // }
-
-    // fn prepare_new(
-    //     mobject: &Self,
-    //     _device: &wgpu::Device,
-    //     _queue: &wgpu::Queue,
-    //     _format: wgpu::TextureFormat,
-    // ) -> Self::Resource {
-    //     (**mobject).clone()
-    // }
-
-    // fn prepare_incremental(
-    //     _resource: &mut Self::Resource,
-    //     _mobject: &Self,
-    //     _device: &wgpu::Device,
-    //     _queue: &wgpu::Queue,
-    //     _format: wgpu::TextureFormat,
-    // ) -> ResourceReuseResult {
-    //     Ok(())
-    // }
-
-    fn render(_resource: Self::ResourceRef<'_>, _render_pass: &mut wgpu::RenderPass) {}
+    fn generic_render(_resource_ref: Self::ResourceRef<'_>, _render_pass: &mut wgpu::RenderPass) {}
 }
 
 // demo
@@ -369,7 +299,6 @@ impl Mobject for MyMobject0 {
         MyMobject0<<Data<f32> as Mobject>::StaticKey, <Data<f32> as Mobject>::StaticKey>;
     type DynamicKey =
         MyMobject0<<Data<f32> as Mobject>::DynamicKey, <Data<f32> as Mobject>::DynamicKey>;
-    type Resource = ();
     type ResourceRefInput<'s> = MyMobject0<
         <Data<f32> as Mobject>::ResourceRef<'s>,
         <Data<f32> as Mobject>::ResourceRef<'s>,
@@ -461,55 +390,9 @@ impl Mobject for MyMobject0 {
         }
     }
 
-    // fn resource_input<'m>(mobject: &'m Self) -> Self::ResourceInput<'s> {
-    //     MyMobject0 {
-    //         ma: <Data<f32> as Mobject>::resource_input(&mobject.ma),
-    //         mb: <Data<f32> as Mobject>::resource_input(&mobject.mb),
-    //     }
-    // }
-
-    // fn prepare_new(
-    //     mobject: &Self,
-    //     device: &wgpu::Device,
-    //     queue: &wgpu::Queue,
-    //     format: wgpu::TextureFormat,
-    // ) -> Self::Resource {
-    //     MyMobject0 {
-    //         ma: <Data<f32> as Mobject>::prepare_new(&mobject.ma, device, queue, format),
-    //         mb: <Data<f32> as Mobject>::prepare_new(&mobject.mb, device, queue, format),
-    //     }
-    // }
-
-    // fn prepare_incremental(
-    //     resource: &mut Self::Resource,
-    //     mobject: &Self,
-    //     device: &wgpu::Device,
-    //     queue: &wgpu::Queue,
-    //     format: wgpu::TextureFormat,
-    // ) -> ResourceReuseResult {
-    //     [
-    //         <Data<f32> as Mobject>::prepare_incremental(
-    //             &mut resource.ma,
-    //             &mobject.ma,
-    //             device,
-    //             queue,
-    //             format,
-    //         ),
-    //         <Data<f32> as Mobject>::prepare_incremental(
-    //             &mut resource.mb,
-    //             &mobject.mb,
-    //             device,
-    //             queue,
-    //             format,
-    //         ),
-    //     ]
-    //     .into_iter()
-    //     .collect()
-    // }
-
-    fn render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass) {
-        <Data<f32> as Mobject>::render(resource.ma, render_pass);
-        <Data<f32> as Mobject>::render(resource.mb, render_pass);
+    fn generic_render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass) {
+        <Data<f32> as Mobject>::generic_render(resource.ma, render_pass);
+        <Data<f32> as Mobject>::generic_render(resource.mb, render_pass);
     }
 }
 
@@ -542,73 +425,71 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> ResourceReuseResult {
-        [
-            MA::prepare(
-                clock,
-                clock_span,
-                &timeline.ma,
-                &observe.ma,
-                &key.ma,
-                storage_type_map,
-                device,
-                queue,
-                format,
-            ),
-            MB::prepare(
-                clock,
-                clock_span,
-                &timeline.mb,
-                &observe.mb,
-                &key.mb,
-                storage_type_map,
-                device,
-                queue,
-                format,
-            ),
-        ]
-        .into_iter()
-        .collect()
+        result: &mut ResourceReuseResult,
+    ) {
+        MA::prepare(
+            clock,
+            clock_span,
+            &timeline.ma,
+            &observe.ma,
+            &key.ma,
+            storage_type_map,
+            device,
+            queue,
+            format,
+            result,
+        );
+        MB::prepare(
+            clock,
+            clock_span,
+            &timeline.mb,
+            &observe.mb,
+            &key.mb,
+            storage_type_map,
+            device,
+            queue,
+            format,
+            result,
+        );
     }
 }
 
 //
 
-pub struct MyMobject1Resource([f32; 4]);
+impl Prepare for MyMobject1 {
+    type Resource = [f32; 4];
 
-impl Resource<MyMobject1> for MyMobject1Resource {
     fn prepare_new(
-        resource_input: <MyMobject1 as Mobject>::ResourceRefInput<'_>,
+        input: <MyMobject1 as Mobject>::ResourceRefInput<'_>,
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
-    ) -> Self {
-        Self([
-            resource_input.ma.ma,
-            resource_input.ma.mb,
-            resource_input.mb.ma,
-            resource_input.mb.mb,
-        ])
+    ) -> Self::Resource {
+        [input.ma.ma, input.ma.mb, input.mb.ma, input.mb.mb]
     }
 
     fn prepare_incremental(
-        &mut self,
-        resource_input: <MyMobject1 as Mobject>::ResourceRefInput<'_>,
+        resource: &mut Self::Resource,
+        input: <MyMobject1 as Mobject>::ResourceRefInput<'_>,
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
     ) -> ResourceReuseResult {
-        self.0 = [
-            resource_input.ma.ma,
-            resource_input.ma.mb,
-            resource_input.mb.ma,
-            resource_input.mb.mb,
-        ];
-        Err(())
+        *resource = [input.ma.ma, input.ma.mb, input.mb.ma, input.mb.mb];
+        Ok(())
     }
-
-    fn render(&self, _render_pass: &mut wgpu::RenderPass) {}
 }
+
+impl Render for MyMobject1 {
+    fn render(
+        _resource: <MyMobject1 as Mobject>::ResourceRef<'_>,
+        _render_pass: &mut wgpu::RenderPass,
+    ) {
+        ()
+    }
+}
+
+//
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct MyMobject1<MA = MyMobject0, MB = MyMobject0> {
@@ -625,12 +506,11 @@ impl Mobject for MyMobject1 {
         MyMobject1<<MyMobject0 as Mobject>::StaticKey, <MyMobject0 as Mobject>::StaticKey>,
         StorageKey<DynamicVariant<MyMobject1>>,
     );
-    type Resource = MyMobject1Resource;
     type ResourceRefInput<'s> = MyMobject1<
         <MyMobject0 as Mobject>::ResourceRef<'s>,
         <MyMobject0 as Mobject>::ResourceRef<'s>,
     >;
-    type ResourceRef<'s> = &'s MyMobject1Resource;
+    type ResourceRef<'s> = &'s <MyMobject1 as Prepare>::Resource;
 
     fn static_allocate(
         mobject: &Self,
@@ -667,7 +547,7 @@ impl Mobject for MyMobject1 {
         format: wgpu::TextureFormat,
         result: &mut ResourceReuseResult,
     ) -> Self::ResourceRef<'s> {
-        let resource_input = MyMobject1 {
+        let input = MyMobject1 {
             ma: <MyMobject0 as Mobject>::static_prepare(
                 &mobject.ma,
                 &key.0.ma,
@@ -689,41 +569,15 @@ impl Mobject for MyMobject1 {
         };
         storage_type_map.update_or_insert(
             &key.1,
-            (resource_input, device, queue, format),
+            (input, device, queue, format),
             result,
-            |(resource_input, device, queue, format)| {
-                Arc::new(<MyMobject1Resource as Resource<MyMobject1>>::prepare_new(
-                    resource_input,
-                    device,
-                    queue,
-                    format,
+            |(input, device, queue, format)| {
+                Arc::new(<MyMobject1 as Prepare>::prepare_new(
+                    input, device, queue, format,
                 ))
             },
-            |(_resource_input, _device, _queue, _format), _resource, _result| {},
+            |(_input, _device, _queue, _format), _resource, _result| {},
         )
-
-        // [
-        //     <MyMobject0 as Mobject>::static_prepare(
-        //         &mobject.ma,
-        //         &key.ma,
-        //         storage_type_map,
-        //         device,
-        //         queue,
-        //         format,
-        //         result,
-        //     ),
-        //     <MyMobject0 as Mobject>::static_prepare(
-        //         &mobject.mb,
-        //         &key.mb,
-        //         storage_type_map,
-        //         device,
-        //         queue,
-        //         format,
-        //         result,
-        //     ),
-        // ]
-        // .into_iter()
-        // .collect()
     }
 
     fn dynamic_prepare<'s>(
@@ -735,7 +589,7 @@ impl Mobject for MyMobject1 {
         format: wgpu::TextureFormat,
         result: &mut ResourceReuseResult,
     ) -> Self::ResourceRef<'s> {
-        let resource_input = MyMobject1 {
+        let input = MyMobject1 {
             ma: <MyMobject0 as Mobject>::dynamic_prepare(
                 &mobject.ma,
                 &key.0.ma,
@@ -757,103 +611,21 @@ impl Mobject for MyMobject1 {
         };
         storage_type_map.update_or_insert(
             &key.1,
-            (resource_input, device, queue, format),
+            (input, device, queue, format),
             result,
-            |(resource_input, device, queue, format)| {
-                <MyMobject1Resource as Resource<MyMobject1>>::prepare_new(
-                    resource_input,
-                    device,
-                    queue,
-                    format,
-                )
+            |(input, device, queue, format)| {
+                <MyMobject1 as Prepare>::prepare_new(input, device, queue, format)
             },
-            |(resource_input, device, queue, format), resource, result| {
-                *result = <MyMobject1Resource as Resource<MyMobject1>>::prepare_incremental(
-                    resource,
-                    resource_input,
-                    device,
-                    queue,
-                    format,
+            |(input, device, queue, format), resource, result| {
+                *result = <MyMobject1 as Prepare>::prepare_incremental(
+                    resource, input, device, queue, format,
                 );
             },
         )
-        // storage_type_map.update_or_insert(
-        //     &key.1,
-        //     (resource_input, device, queue, format),
-        //     result,
-        //     |(resource_input, device, queue, format)| {
-        //         Arc::new(<MyMobject1Resource as Resource<MyMobject1>>::prepare_new(
-        //             resource_input,
-        //             device,
-        //             queue,
-        //             format,
-        //         ))
-        //     },
-        //     |(_resource_input, _device, _queue, _format), _resource, _result| {},
-        // )
-
-        // [
-        //     <MyMobject0 as Mobject>::dynamic_prepare(
-        //         &mobject.ma,
-        //         &key.ma,
-        //         storage_type_map,
-        //         device,
-        //         queue,
-        //         format,
-        //     ),
-        //     <MyMobject0 as Mobject>::dynamic_prepare(
-        //         &mobject.mb,
-        //         &key.mb,
-        //         storage_type_map,
-        //         device,
-        //         queue,
-        //         format,
-        //     ),
-        // ]
-        // .into_iter()
-        // .collect()
     }
 
-    // fn resource_input<'m>(mobject: &'m Self) -> Self::ResourceRefInput<'s> {
-    //     MyMobject1 {
-    //         ma: <MyMobject0 as Mobject>::resource_input(&mobject.ma),
-    //         mb: <MyMobject0 as Mobject>::resource_input(&mobject.mb),
-    //     }
-    // }
-
-    // fn prepare_new(
-    //     mobject: &Self,
-    //     device: &wgpu::Device,
-    //     queue: &wgpu::Queue,
-    //     format: wgpu::TextureFormat,
-    // ) -> Self::ResourceRef {
-    //     MyMobject1Resource::prepare_new(
-    //         <MyMobject1 as Mobject>::resource_input(mobject),
-    //         device,
-    //         queue,
-    //         format,
-    //     )
-    // }
-
-    // fn prepare_incremental(
-    //     resource: &mut Self::ResourceRef,
-    //     mobject: &Self,
-    //     device: &wgpu::Device,
-    //     queue: &wgpu::Queue,
-    //     format: wgpu::TextureFormat,
-    // ) -> ResourceReuseResult {
-    //     resource.prepare_incremental(
-    //         <MyMobject1 as Mobject>::resource_input(mobject),
-    //         device,
-    //         queue,
-    //         format,
-    //     )
-    // }
-
-    fn render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass) {
-        resource.render(render_pass);
-        // <MyMobject0 as Mobject>::render(&resource.ma, render_pass);
-        // <MyMobject0 as Mobject>::render(&resource.mb, render_pass);
+    fn generic_render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass) {
+        <MyMobject1 as Render>::render(resource, render_pass);
     }
 }
 
@@ -886,32 +658,31 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-    ) -> ResourceReuseResult {
-        [
-            MA::prepare(
-                clock,
-                clock_span,
-                &timeline.ma,
-                &observe.ma,
-                &key.ma,
-                storage_type_map,
-                device,
-                queue,
-                format,
-            ),
-            MB::prepare(
-                clock,
-                clock_span,
-                &timeline.mb,
-                &observe.mb,
-                &key.mb,
-                storage_type_map,
-                device,
-                queue,
-                format,
-            ),
-        ]
-        .into_iter()
-        .collect()
+        result: &mut ResourceReuseResult,
+    ) {
+        MA::prepare(
+            clock,
+            clock_span,
+            &timeline.ma,
+            &observe.ma,
+            &key.ma,
+            storage_type_map,
+            device,
+            queue,
+            format,
+            result,
+        );
+        MB::prepare(
+            clock,
+            clock_span,
+            &timeline.mb,
+            &observe.mb,
+            &key.mb,
+            storage_type_map,
+            device,
+            queue,
+            format,
+            result,
+        );
     }
 }

@@ -86,12 +86,12 @@ where
         default: fn(I) -> Self::Value,
         f: fn(I, &mut Self::Value, &mut ResourceReuseResult),
     ) -> &Self::Value {
-        let value = match self.0.take() {
-            Some(mut value) => {
+        let value = match (self.0.take(), *result) {
+            (Some(mut value), Ok(())) => {
                 f(input, &mut value, result);
                 value
             }
-            None => {
+            _ => {
                 *result = Err(());
                 default(input)
             }
@@ -136,12 +136,12 @@ where
             self.0.resize_with(slot_key + 1, || None);
         }
         let option_mut = self.0.get_mut(*slot_key).unwrap();
-        let value = match option_mut.take() {
-            Some(mut value) => {
+        let value = match (option_mut.take(), *result) {
+            (Some(mut value), Ok(())) => {
                 f(input, &mut value, result);
                 value
             }
-            None => {
+            _ => {
                 *result = Err(());
                 default(input)
             }
