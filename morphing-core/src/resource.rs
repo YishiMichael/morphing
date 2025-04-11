@@ -103,20 +103,22 @@ where
         _device: &wgpu::Device,
         queue: &wgpu::Queue,
         _format: wgpu::TextureFormat,
-    ) -> ResourceReuseResult {
-        queue
-            .write_buffer_with(&resource.buffer, 0, resource_repr.size())
-            .map(|mut queue_write_buffer_view| {
-                resource_repr.write_into(
-                    &mut encase::internal::Writer::new(
-                        &resource_repr,
-                        &mut *queue_write_buffer_view,
-                        0,
-                    )
-                    .unwrap(),
+        reuse: &mut ResourceReuseResult,
+    ) {
+        if let Some(mut queue_write_buffer_view) =
+            queue.write_buffer_with(&resource.buffer, 0, resource_repr.size())
+        {
+            resource_repr.write_into(
+                &mut encase::internal::Writer::new(
+                    &resource_repr,
+                    &mut *queue_write_buffer_view,
+                    0,
                 )
-            })
-            .ok_or(())
+                .unwrap(),
+            )
+        } else {
+            *reuse = Err(());
+        }
     }
 }
 

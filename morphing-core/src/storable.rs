@@ -216,7 +216,7 @@ dyn_eq::eq_trait_object!(DynKey);
 dyn_hash::hash_trait_object!(DynKey);
 
 pub trait StoreType: 'static + Send + Sync {
-    type KeyInput: serde::Serialize;
+    // type KeyInput: serde::Serialize;
     type Slot: Slot;
 
     // fn key_input<'s>(
@@ -234,11 +234,10 @@ where
     slot_key: <<ST::Slot as Slot>::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
 }
 
-struct SlotKeyGeneratorWrapper<KI, S>(KI, S);
+struct SlotKeyGeneratorWrapper<S>(S);
 
-impl<KI, S> typemap_rev::TypeMapKey for SlotKeyGeneratorWrapper<KI, S>
+impl<S> typemap_rev::TypeMapKey for SlotKeyGeneratorWrapper<S>
 where
-    KI: 'static,
     S: Slot,
 {
     type Value = HashMap<Box<dyn DynKey>, S::SlotKeyGenerator>;
@@ -257,7 +256,7 @@ impl SlotKeyGeneratorTypeMap {
         }
     }
 
-    pub fn allocate<ST>(&mut self, key_input: &ST::KeyInput) -> StorageKey<ST>
+    pub fn allocate<ST>(&mut self, key_input: &dyn serde_traitobject::Serialize) -> StorageKey<ST>
     where
         ST: StoreType,
     {
@@ -266,7 +265,7 @@ impl SlotKeyGeneratorTypeMap {
             storable_key: storable_key.clone(),
             slot_key: self
                 .type_map
-                .entry::<SlotKeyGeneratorWrapper<ST::KeyInput, ST::Slot>>()
+                .entry::<SlotKeyGeneratorWrapper<ST::Slot>>()
                 .or_insert_with(HashMap::new)
                 .entry(storable_key)
                 .or_insert_with(<ST::Slot as Slot>::SlotKeyGenerator::new)
@@ -279,11 +278,10 @@ impl SlotKeyGeneratorTypeMap {
     }
 }
 
-struct StorageWrapper<KI, S>(KI, S);
+struct StorageWrapper<S>(S);
 
-impl<KI, S> typemap_rev::TypeMapKey for StorageWrapper<KI, S>
+impl<S> typemap_rev::TypeMapKey for StorageWrapper<S>
 where
-    KI: 'static,
     S: Slot,
 {
     type Value = HashMap<Box<dyn DynKey>, S>;
@@ -336,7 +334,7 @@ impl StorageTypeMap {
         ST: StoreType,
     {
         self.type_map
-            .entry::<StorageWrapper<ST::KeyInput, ST::Slot>>()
+            .entry::<StorageWrapper<ST::Slot>>()
             .or_insert_with(HashMap::new)
             .entry(storage_key.storable_key.clone())
             .or_insert_with(ST::Slot::new)
@@ -348,7 +346,7 @@ impl StorageTypeMap {
         ST: StoreType,
     {
         self.type_map
-            .get::<StorageWrapper<ST::KeyInput, ST::Slot>>()
+            .get::<StorageWrapper<ST::Slot>>()
             .unwrap()
             .get(&storage_key.storable_key)
             .unwrap()
