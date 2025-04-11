@@ -5,7 +5,7 @@ pub mod config;
 // pub mod entity;
 pub mod mobject;
 pub mod resource;
-pub mod storable;
+pub mod storage;
 // pub mod timeline;
 pub mod timer;
 // pub mod traits;

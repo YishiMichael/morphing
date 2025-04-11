@@ -15,9 +15,9 @@ pub trait SlotKeyGenerator: 'static + Send + Sync {
     fn generate_slot_key(&mut self) -> Self::SlotKey;
 }
 
-pub struct SharableSlotKeyGenerator;
+pub struct SingletonSlotKeyGenerator;
 
-impl SlotKeyGenerator for SharableSlotKeyGenerator {
+impl SlotKeyGenerator for SingletonSlotKeyGenerator {
     type SlotKey = ();
 
     fn new() -> Self {
@@ -29,9 +29,9 @@ impl SlotKeyGenerator for SharableSlotKeyGenerator {
     }
 }
 
-pub struct VecSlotKeyGenerator(usize);
+pub struct MultitonSlotKeyGenerator(usize);
 
-impl SlotKeyGenerator for VecSlotKeyGenerator {
+impl SlotKeyGenerator for MultitonSlotKeyGenerator {
     type SlotKey = usize;
 
     fn new() -> Self {
@@ -65,14 +65,14 @@ pub trait Slot: 'static + Send + Sync {
     fn expire(&mut self);
 }
 
-pub struct ArcSlot<V>(Option<Arc<V>>);
+pub struct SingletonSlot<V>(Option<Arc<V>>);
 
-impl<V> Slot for ArcSlot<V>
+impl<V> Slot for SingletonSlot<V>
 where
     V: 'static + Send + Sync,
 {
     type Value = Arc<V>;
-    type SlotKeyGenerator = SharableSlotKeyGenerator;
+    type SlotKeyGenerator = SingletonSlotKeyGenerator;
 
     fn new() -> Self {
         Self(None)
@@ -111,14 +111,14 @@ where
     }
 }
 
-pub struct VecSlot<V>(Vec<Option<V>>);
+pub struct MultitonSlot<V>(Vec<Option<V>>);
 
-impl<V> Slot for VecSlot<V>
+impl<V> Slot for MultitonSlot<V>
 where
     V: 'static + Send + Sync,
 {
     type Value = V;
-    type SlotKeyGenerator = VecSlotKeyGenerator;
+    type SlotKeyGenerator = MultitonSlotKeyGenerator;
 
     fn new() -> Self {
         Self(Vec::new())
@@ -216,7 +216,7 @@ dyn_eq::eq_trait_object!(DynKey);
 dyn_hash::hash_trait_object!(DynKey);
 
 pub trait StoreType: 'static + Send + Sync {
-    // type KeyInput: serde::Serialize;
+    type KeyInput: serde::Serialize;
     type Slot: Slot;
 
     // fn key_input<'s>(
@@ -256,7 +256,7 @@ impl SlotKeyGeneratorTypeMap {
         }
     }
 
-    pub fn allocate<ST>(&mut self, key_input: &dyn serde_traitobject::Serialize) -> StorageKey<ST>
+    pub fn allocate<ST>(&mut self, key_input: &ST::KeyInput) -> StorageKey<ST>
     where
         ST: StoreType,
     {
