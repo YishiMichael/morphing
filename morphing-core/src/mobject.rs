@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
+use std::sync::RwLock;
 
 use super::storage::MultitonSlot;
 use super::storage::ResourceReuseResult;
@@ -21,8 +22,8 @@ pub trait Mobject:
     // type ResourceInput;
     // type ResourceIntrinsic;
     // type ResourceExtrinsic;
-    type ResourceRef<'s>;
-    type ResourceRefInput<'s>;
+    type Resource;
+    type ResourceInput;
     // type ResourceRef<'s>;
 
     fn static_allocate(
@@ -81,32 +82,32 @@ pub trait Mobject:
     //     format: wgpu::TextureFormat,
     //     reuse: &mut ResourceReuseResult,
     // );
-    fn static_refresh<'s>(
+    fn static_refresh(
         mobject: &Self,
         static_keys: &Self::StaticKeys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> Self::ResourceRef<'s>;
-    fn dynamic_refresh<'s>(
+    ) -> Self::Resource;
+    fn dynamic_refresh(
         mobject: &Self,
         dynamic_keys: &Self::DynamicKeys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> Self::ResourceRef<'s>;
-    fn static_fetch<'s>(
+    ) -> Self::Resource;
+    fn static_fetch(
         static_keys: &Self::StaticKeys,
-        storage_type_map: &'s StorageTypeMap,
-    ) -> Self::ResourceRef<'s>;
-    fn dynamic_fetch<'s>(
+        storage_type_map: &StorageTypeMap,
+    ) -> Self::Resource;
+    fn dynamic_fetch(
         dynamic_keys: &Self::DynamicKeys,
-        storage_type_map: &'s StorageTypeMap,
-    ) -> Self::ResourceRef<'s>;
+        storage_type_map: &StorageTypeMap,
+    ) -> Self::Resource;
     // fn static_prepare<'s>(resource_ref_input: Self::ResourceRefInput<'s>, )
     // fn dynamic_prepare_new<'s>(
     //     mobject: &'s Self,
@@ -127,7 +128,7 @@ pub trait Mobject:
     //     storage_type_map: &StorageTypeMap,
     //     render_pass: &mut wgpu::RenderPass,
     // );
-    fn render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass);
+    fn render(resource: &Self::Resource, render_pass: &mut wgpu::RenderPass);
 }
 
 pub trait Variant<M>
@@ -143,15 +144,15 @@ where
         observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Keys;
-    fn prepare<'s>(
+    fn prepare(
         observe: &Self::Observe,
         keys: &Self::Keys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> M::ResourceRef<'s>;
+    ) -> M::Resource;
     fn render(
         keys: &Self::Keys,
         storage_type_map: &StorageTypeMap,
@@ -204,65 +205,65 @@ where
     type ResourceRepr;
     type Resource: Resource<Self::ResourceRepr>;
 
-    fn prepare(input: M::ResourceRefInput<'_>) -> Self::ResourceRepr;
+    fn prepare(input: &M::ResourceInput) -> Self::ResourceRepr;
 
-    fn static_prepare<'s>(
-        input: M::ResourceRefInput<'_>,
+    fn static_prepare(
+        input: &M::ResourceInput,
         static_key: &StorageKey<StaticStoreType<M, Self::Resource>>,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> &'s Self::Resource {
-        storage_type_map.update_or_insert(
-            static_key,
-            (input, device, queue, format),
-            reuse,
-            |(input, device, queue, format)| {
-                Arc::new(<Self::Resource as Resource<Self::ResourceRepr>>::new(
-                    Self::prepare(input),
-                    device,
-                    queue,
-                    format,
-                ))
-            },
-            |(_input, _device, _queue, _format), _resource, _reuse| {},
-        )
+    ) -> Arc<RwLock<Self::Resource>> {
+        storage_type_map
+            .update_or_insert(
+                static_key,
+                reuse,
+                || {
+                    Arc::new(RwLock::new(<Self::Resource as Resource<
+                        Self::ResourceRepr,
+                    >>::new(
+                        Self::prepare(input), device, queue, format
+                    )))
+                },
+                |_resource, _reuse| {},
+            )
+            .clone()
     }
 
-    fn dynamic_prepare<'s>(
-        input: M::ResourceRefInput<'_>,
+    fn dynamic_prepare(
+        input: &M::ResourceInput,
         dynamic_key: &StorageKey<DynamicStoreType<M, Self::Resource>>,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> &'s Self::Resource {
-        storage_type_map.update_or_insert(
-            dynamic_key,
-            (input, device, queue, format),
-            reuse,
-            |(input, device, queue, format)| {
-                <Self::Resource as Resource<Self::ResourceRepr>>::new(
-                    Self::prepare(input),
-                    device,
-                    queue,
-                    format,
-                )
-            },
-            |(input, device, queue, format), resource, reuse| {
-                <Self::Resource as Resource<Self::ResourceRepr>>::update(
-                    resource,
-                    Self::prepare(input),
-                    device,
-                    queue,
-                    format,
-                    reuse,
-                )
-            },
-        )
+    ) -> Arc<RwLock<Self::Resource>> {
+        storage_type_map
+            .update_or_insert(
+                dynamic_key,
+                reuse,
+                || {
+                    Arc::new(RwLock::new(<Self::Resource as Resource<
+                        Self::ResourceRepr,
+                    >>::new(
+                        Self::prepare(input), device, queue, format
+                    )))
+                },
+                |resource, reuse| {
+                    <Self::Resource as Resource<Self::ResourceRepr>>::update(
+                        &mut resource.write().unwrap(),
+                        Self::prepare(input),
+                        device,
+                        queue,
+                        format,
+                        reuse,
+                    )
+                },
+            )
+            .clone()
     }
 }
 
@@ -270,7 +271,7 @@ pub trait Render<M>
 where
     M: Mobject,
 {
-    fn render(resource_ref: M::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass);
+    fn render(resource: &M::Resource, render_pass: &mut wgpu::RenderPass);
 }
 
 pub struct Derivation<I, E> {
@@ -295,7 +296,7 @@ where
     R: 'static + Send + Sync,
 {
     type KeyInput = M;
-    type Slot = SwapSlot<SingletonSlot<R>>;
+    type Slot = SwapSlot<SingletonSlot<Arc<RwLock<R>>>>;
 }
 
 // impl<M> Variant<M> for StaticVariant<M>
@@ -313,7 +314,7 @@ where
     R: 'static + Send + Sync,
 {
     type KeyInput = ();
-    type Slot = SwapSlot<MultitonSlot<R>>;
+    type Slot = SwapSlot<MultitonSlot<Arc<RwLock<R>>>>;
 }
 
 // impl<M> Variant<M> for DynamicVariant<M>
@@ -349,15 +350,15 @@ where
         M::static_allocate(observe.as_ref(), slot_key_generator_map)
     }
 
-    fn prepare<'s>(
+    fn prepare(
         observe: &Self::Observe,
         keys: &Self::Keys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> M::ResourceRef<'s> {
+    ) -> M::Resource {
         // let mobject = observe.as_ref();
         // storage_type_map.update_or_insert(
         //     key,
@@ -385,7 +386,7 @@ where
         render_pass: &mut wgpu::RenderPass,
     ) {
         // M::render(storage_type_map.get_and_unwrap(key), render_pass);
-        M::render(M::static_fetch(keys, storage_type_map), render_pass);
+        M::render(&M::static_fetch(keys, storage_type_map), render_pass);
     }
 }
 
@@ -426,15 +427,15 @@ where
         M::dynamic_allocate(slot_key_generator_map)
     }
 
-    fn prepare<'s>(
+    fn prepare(
         observe: &Self::Observe,
         keys: &Self::Keys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> M::ResourceRef<'s> {
+    ) -> M::Resource {
         // storage_type_map.update_or_insert(
         //     key,
         //     (observe, device, queue, format),
@@ -462,7 +463,7 @@ where
         render_pass: &mut wgpu::RenderPass,
     ) {
         // M::render(storage_type_map.get_and_unwrap(key), render_pass);
-        M::render(M::dynamic_fetch(keys, storage_type_map), render_pass);
+        M::render(&M::dynamic_fetch(keys, storage_type_map), render_pass);
     }
 }
 
@@ -539,7 +540,7 @@ where
     type ResourceRepr = T;
     type Resource = T;
 
-    fn prepare(input: <Data<T> as Mobject>::ResourceRefInput<'_>) -> Self::ResourceRepr {
+    fn prepare(input: &<Data<T> as Mobject>::ResourceInput) -> Self::ResourceRepr {
         input.clone()
     }
 }
@@ -552,8 +553,8 @@ where
     type DynamicKeys = StorageKey<DynamicStoreType<Data<T>, T>>;
     // type ResourceIntrinsic = T;
     // type ResourceExtrinsic = ();
-    type ResourceRef<'s> = &'s T;
-    type ResourceRefInput<'s> = &'s T;
+    type Resource = Arc<RwLock<T>>;
+    type ResourceInput = T;
 
     fn static_allocate(
         mobject: &Self,
@@ -566,15 +567,15 @@ where
         slot_key_generator_map.allocate(&())
     }
 
-    fn static_refresh<'s>(
+    fn static_refresh(
         mobject: &Self,
         static_keys: &Self::StaticKeys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> Self::ResourceRef<'s> {
+    ) -> Self::Resource {
         // storage_type_map.update_or_insert(
         //     static_keys,
         //     (mobject, device, queue, format),
@@ -602,15 +603,15 @@ where
         // )
     }
 
-    fn dynamic_refresh<'s>(
+    fn dynamic_refresh(
         mobject: &Self,
         dynamic_keys: &Self::DynamicKeys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> Self::ResourceRef<'s> {
+    ) -> Self::Resource {
         // storage_type_map.update_or_insert(
         //     key,
         //     (observe, device, queue, format),
@@ -631,18 +632,18 @@ where
         )
     }
 
-    fn static_fetch<'s>(
+    fn static_fetch(
         static_keys: &Self::StaticKeys,
-        storage_type_map: &'s StorageTypeMap,
-    ) -> Self::ResourceRef<'s> {
-        storage_type_map.get_and_unwrap(static_keys)
+        storage_type_map: &StorageTypeMap,
+    ) -> Self::Resource {
+        storage_type_map.get_and_unwrap(static_keys).clone()
     }
 
-    fn dynamic_fetch<'s>(
+    fn dynamic_fetch(
         dynamic_keys: &Self::DynamicKeys,
-        storage_type_map: &'s StorageTypeMap,
-    ) -> Self::ResourceRef<'s> {
-        storage_type_map.get_and_unwrap(dynamic_keys)
+        storage_type_map: &StorageTypeMap,
+    ) -> Self::Resource {
+        storage_type_map.get_and_unwrap(dynamic_keys).clone()
     }
 
     // fn prepare_new(
@@ -712,7 +713,7 @@ where
     //     Self::prepare_intrinsic_update(mobject, resource, device, queue, format, reuse);
     // }
 
-    fn render(_resource_ref: Self::ResourceRef<'_>, _render_pass: &mut wgpu::RenderPass) {}
+    fn render(_resource: &Self::Resource, _render_pass: &mut wgpu::RenderPass) {}
 
     // fn static_allocate(
     //     _mobject: &Self,
@@ -784,14 +785,9 @@ impl Mobject for MyMobject0 {
     //     MyMobject0<<Data<f32> as Mobject>::Resource, <Data<f32> as Mobject>::Resource>;
     // type ResourceExtrinsic = ();
     // type Resource = MyMobject0<<Data<f32> as Mobject>::Resource, <Data<f32> as Mobject>::Resource>;
-    type ResourceRef<'s> = MyMobject0<
-        <Data<f32> as Mobject>::ResourceRef<'s>,
-        <Data<f32> as Mobject>::ResourceRef<'s>,
-    >;
-    type ResourceRefInput<'s> = MyMobject0<
-        <Data<f32> as Mobject>::ResourceRef<'s>,
-        <Data<f32> as Mobject>::ResourceRef<'s>,
-    >;
+    type Resource = MyMobject0<<Data<f32> as Mobject>::Resource, <Data<f32> as Mobject>::Resource>;
+    type ResourceInput =
+        MyMobject0<<Data<f32> as Mobject>::Resource, <Data<f32> as Mobject>::Resource>;
 
     fn static_allocate(
         mobject: &Self,
@@ -810,98 +806,82 @@ impl Mobject for MyMobject0 {
         }
     }
 
-    fn static_refresh<'s>(
+    fn static_refresh(
         mobject: &Self,
         static_keys: &Self::StaticKeys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> Self::ResourceRef<'s> {
+    ) -> Self::Resource {
         MyMobject0 {
-            ma: unsafe {
-                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(
-                    <Data<f32> as Mobject>::static_refresh(
-                        &mobject.ma,
-                        &static_keys.ma,
-                        storage_type_map,
-                        device,
-                        queue,
-                        format,
-                        reuse,
-                    ),
-                )
-            },
-            mb: unsafe {
-                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(
-                    <Data<f32> as Mobject>::static_refresh(
-                        &mobject.mb,
-                        &static_keys.mb,
-                        storage_type_map,
-                        device,
-                        queue,
-                        format,
-                        reuse,
-                    ),
-                )
-            },
+            ma: <Data<f32> as Mobject>::static_refresh(
+                &mobject.ma,
+                &static_keys.ma,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
+            mb: <Data<f32> as Mobject>::static_refresh(
+                &mobject.mb,
+                &static_keys.mb,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
         }
     }
 
-    fn dynamic_refresh<'s>(
+    fn dynamic_refresh(
         mobject: &Self,
         dynamic_keys: &Self::DynamicKeys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> Self::ResourceRef<'s> {
+    ) -> Self::Resource {
         MyMobject0 {
-            ma: unsafe {
-                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(
-                    <Data<f32> as Mobject>::dynamic_refresh(
-                        &mobject.ma,
-                        &dynamic_keys.ma,
-                        storage_type_map,
-                        device,
-                        queue,
-                        format,
-                        reuse,
-                    ),
-                )
-            },
-            mb: unsafe {
-                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(
-                    <Data<f32> as Mobject>::dynamic_refresh(
-                        &mobject.mb,
-                        &dynamic_keys.mb,
-                        storage_type_map,
-                        device,
-                        queue,
-                        format,
-                        reuse,
-                    ),
-                )
-            },
+            ma: <Data<f32> as Mobject>::dynamic_refresh(
+                &mobject.ma,
+                &dynamic_keys.ma,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
+            mb: <Data<f32> as Mobject>::dynamic_refresh(
+                &mobject.mb,
+                &dynamic_keys.mb,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
         }
     }
 
-    fn static_fetch<'s>(
+    fn static_fetch(
         static_keys: &Self::StaticKeys,
-        storage_type_map: &'s StorageTypeMap,
-    ) -> Self::ResourceRef<'s> {
+        storage_type_map: &StorageTypeMap,
+    ) -> Self::Resource {
         MyMobject0 {
             ma: <Data<f32> as Mobject>::static_fetch(&static_keys.ma, storage_type_map),
             mb: <Data<f32> as Mobject>::static_fetch(&static_keys.mb, storage_type_map),
         }
     }
 
-    fn dynamic_fetch<'s>(
+    fn dynamic_fetch(
         dynamic_keys: &Self::DynamicKeys,
-        storage_type_map: &'s StorageTypeMap,
-    ) -> Self::ResourceRef<'s> {
+        storage_type_map: &StorageTypeMap,
+    ) -> Self::Resource {
         MyMobject0 {
             ma: <Data<f32> as Mobject>::dynamic_fetch(&dynamic_keys.ma, storage_type_map),
             mb: <Data<f32> as Mobject>::dynamic_fetch(&dynamic_keys.mb, storage_type_map),
@@ -990,9 +970,9 @@ impl Mobject for MyMobject0 {
     //     Self::prepare_intrinsic_update(mobject, resource, device, queue, format, reuse);
     // }
 
-    fn render(resource_ref: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass) {
-        <Data<f32> as Mobject>::render(resource_ref.ma, render_pass);
-        <Data<f32> as Mobject>::render(resource_ref.mb, render_pass);
+    fn render(resource: &Self::Resource, render_pass: &mut wgpu::RenderPass) {
+        <Data<f32> as Mobject>::render(&resource.ma, render_pass);
+        <Data<f32> as Mobject>::render(&resource.mb, render_pass);
     }
 
     // fn static_allocate(
@@ -1103,38 +1083,34 @@ where
         }
     }
 
-    fn prepare<'s>(
+    fn prepare(
         observe: &Self::Observe,
         keys: &Self::Keys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> <MyMobject0 as Mobject>::ResourceRef<'s> {
+    ) -> <MyMobject0 as Mobject>::Resource {
         MyMobject0 {
-            ma: unsafe {
-                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(MA::prepare(
-                    &observe.ma,
-                    &keys.ma,
-                    storage_type_map,
-                    device,
-                    queue,
-                    format,
-                    reuse,
-                ))
-            },
-            mb: unsafe {
-                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(MB::prepare(
-                    &observe.mb,
-                    &keys.mb,
-                    storage_type_map,
-                    device,
-                    queue,
-                    format,
-                    reuse,
-                ))
-            },
+            ma: MA::prepare(
+                &observe.ma,
+                &keys.ma,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
+            mb: MB::prepare(
+                &observe.mb,
+                &keys.mb,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
         }
     }
 
@@ -1200,18 +1176,20 @@ impl Prepare<MyMobject1> for MyMobject1Prepare {
     type ResourceRepr = [f32; 4];
     type Resource = MyMobject1Resource;
 
-    fn prepare(input: <MyMobject1 as Mobject>::ResourceRefInput<'_>) -> Self::ResourceRepr {
-        [*input.ma.ma, *input.ma.mb, *input.mb.ma, *input.mb.mb]
+    fn prepare(input: &<MyMobject1 as Mobject>::ResourceInput) -> Self::ResourceRepr {
+        [
+            *input.ma.ma.read().unwrap(),
+            *input.ma.mb.read().unwrap(),
+            *input.mb.ma.read().unwrap(),
+            *input.mb.mb.read().unwrap(),
+        ]
     }
 }
 
 pub struct MyMobject1Render;
 
 impl Render<MyMobject1> for MyMobject1Render {
-    fn render(
-        _resource_ref: <MyMobject1 as Mobject>::ResourceRef<'_>,
-        _render_pass: &mut wgpu::RenderPass,
-    ) {
+    fn render(_resource: &<MyMobject1 as Mobject>::Resource, _render_pass: &mut wgpu::RenderPass) {
         ()
     }
 }
@@ -1240,11 +1218,9 @@ impl Mobject for MyMobject1 {
     // type ResourceIntrinsic =
     //     MyMobject1<<MyMobject0 as Mobject>::Resource, <MyMobject0 as Mobject>::Resource>;
     // type ResourceExtrinsic = <MyMobject1Prepare as Prepare<MyMobject1>>::ResourceExtrinsic;
-    type ResourceRef<'s> = &'s <MyMobject1Prepare as Prepare<MyMobject1>>::Resource;
-    type ResourceRefInput<'s> = MyMobject1<
-        <MyMobject0 as Mobject>::ResourceRef<'s>,
-        <MyMobject0 as Mobject>::ResourceRef<'s>,
-    >;
+    type Resource = Arc<RwLock<<MyMobject1Prepare as Prepare<MyMobject1>>::Resource>>;
+    type ResourceInput =
+        MyMobject1<<MyMobject0 as Mobject>::Resource, <MyMobject0 as Mobject>::Resource>;
     // type ResourceRefInput<'s> =
     //     MyMobject1<&'s <MyMobject0 as Mobject>::Resource, &'s <MyMobject0 as Mobject>::Resource>;
     // type ResourceRef<'s> = &'s <MyMobject1Prepare as Prepare<MyMobject1>>::Resource;
@@ -1272,43 +1248,35 @@ impl Mobject for MyMobject1 {
         }
     }
 
-    fn static_refresh<'s>(
+    fn static_refresh(
         mobject: &Self,
         static_keys: &Self::StaticKeys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> Self::ResourceRef<'s> {
+    ) -> Self::Resource {
         <MyMobject1Prepare as Prepare<MyMobject1>>::static_prepare(
-            MyMobject1 {
-                ma: unsafe {
-                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
-                        <MyMobject0 as Mobject>::static_refresh(
-                            &mobject.ma,
-                            &static_keys.intrinsic.ma,
-                            storage_type_map,
-                            device,
-                            queue,
-                            format,
-                            reuse,
-                        ),
-                    )
-                },
-                mb: unsafe {
-                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
-                        <MyMobject0 as Mobject>::static_refresh(
-                            &mobject.mb,
-                            &static_keys.intrinsic.mb,
-                            storage_type_map,
-                            device,
-                            queue,
-                            format,
-                            reuse,
-                        ),
-                    )
-                },
+            &MyMobject1 {
+                ma: <MyMobject0 as Mobject>::static_refresh(
+                    &mobject.ma,
+                    &static_keys.intrinsic.ma,
+                    storage_type_map,
+                    device,
+                    queue,
+                    format,
+                    reuse,
+                ),
+                mb: <MyMobject0 as Mobject>::static_refresh(
+                    &mobject.mb,
+                    &static_keys.intrinsic.mb,
+                    storage_type_map,
+                    device,
+                    queue,
+                    format,
+                    reuse,
+                ),
             },
             &static_keys.extrinsic,
             storage_type_map,
@@ -1339,43 +1307,35 @@ impl Mobject for MyMobject1 {
         // )
     }
 
-    fn dynamic_refresh<'s>(
+    fn dynamic_refresh(
         mobject: &Self,
         dynamic_keys: &Self::DynamicKeys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> Self::ResourceRef<'s> {
+    ) -> Self::Resource {
         <MyMobject1Prepare as Prepare<MyMobject1>>::dynamic_prepare(
-            MyMobject1 {
-                ma: unsafe {
-                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
-                        <MyMobject0 as Mobject>::dynamic_refresh(
-                            &mobject.ma,
-                            &dynamic_keys.intrinsic.ma,
-                            storage_type_map,
-                            device,
-                            queue,
-                            format,
-                            reuse,
-                        ),
-                    )
-                },
-                mb: unsafe {
-                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
-                        <MyMobject0 as Mobject>::dynamic_refresh(
-                            &mobject.mb,
-                            &dynamic_keys.intrinsic.mb,
-                            storage_type_map,
-                            device,
-                            queue,
-                            format,
-                            reuse,
-                        ),
-                    )
-                },
+            &MyMobject1 {
+                ma: <MyMobject0 as Mobject>::dynamic_refresh(
+                    &mobject.ma,
+                    &dynamic_keys.intrinsic.ma,
+                    storage_type_map,
+                    device,
+                    queue,
+                    format,
+                    reuse,
+                ),
+                mb: <MyMobject0 as Mobject>::dynamic_refresh(
+                    &mobject.mb,
+                    &dynamic_keys.intrinsic.mb,
+                    storage_type_map,
+                    device,
+                    queue,
+                    format,
+                    reuse,
+                ),
             },
             &dynamic_keys.extrinsic,
             storage_type_map,
@@ -1415,18 +1375,22 @@ impl Mobject for MyMobject1 {
         // )
     }
 
-    fn static_fetch<'s>(
+    fn static_fetch(
         static_keys: &Self::StaticKeys,
-        storage_type_map: &'s StorageTypeMap,
-    ) -> Self::ResourceRef<'s> {
-        storage_type_map.get_and_unwrap(&static_keys.extrinsic)
+        storage_type_map: &StorageTypeMap,
+    ) -> Self::Resource {
+        storage_type_map
+            .get_and_unwrap(&static_keys.extrinsic)
+            .clone()
     }
 
-    fn dynamic_fetch<'s>(
+    fn dynamic_fetch(
         dynamic_keys: &Self::DynamicKeys,
-        storage_type_map: &'s StorageTypeMap,
-    ) -> Self::ResourceRef<'s> {
-        storage_type_map.get_and_unwrap(&dynamic_keys.extrinsic)
+        storage_type_map: &StorageTypeMap,
+    ) -> Self::Resource {
+        storage_type_map
+            .get_and_unwrap(&dynamic_keys.extrinsic)
+            .clone()
     }
 
     // fn prepare_new(
@@ -1612,7 +1576,7 @@ impl Mobject for MyMobject1 {
     //     )
     // }
 
-    fn render(resource: Self::ResourceRef<'_>, render_pass: &mut wgpu::RenderPass) {
+    fn render(resource: &Self::Resource, render_pass: &mut wgpu::RenderPass) {
         <MyMobject1Render as Render<MyMobject1>>::render(resource, render_pass);
     }
 
@@ -1780,15 +1744,15 @@ where
         }
     }
 
-    fn prepare<'s>(
+    fn prepare(
         observe: &Self::Observe,
         keys: &Self::Keys,
-        storage_type_map: &'s mut StorageTypeMap,
+        storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
-    ) -> <MyMobject1 as Mobject>::ResourceRef<'s> {
+    ) -> <MyMobject1 as Mobject>::Resource {
         // let input = MyMobject1 {
         //     ma: MA::prepare(
         //         &observe.ma,
@@ -1836,33 +1800,25 @@ where
         // )
 
         <MyMobject1Prepare as Prepare<MyMobject1>>::dynamic_prepare(
-            MyMobject1 {
-                ma: unsafe {
-                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
-                        MA::prepare(
-                            &observe.ma,
-                            &keys.intrinsic.ma,
-                            storage_type_map,
-                            device,
-                            queue,
-                            format,
-                            reuse,
-                        ),
-                    )
-                },
-                mb: unsafe {
-                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
-                        MB::prepare(
-                            &observe.mb,
-                            &keys.intrinsic.mb,
-                            storage_type_map,
-                            device,
-                            queue,
-                            format,
-                            reuse,
-                        ),
-                    )
-                },
+            &MyMobject1 {
+                ma: MA::prepare(
+                    &observe.ma,
+                    &keys.intrinsic.ma,
+                    storage_type_map,
+                    device,
+                    queue,
+                    format,
+                    reuse,
+                ),
+                mb: MB::prepare(
+                    &observe.mb,
+                    &keys.intrinsic.mb,
+                    storage_type_map,
+                    device,
+                    queue,
+                    format,
+                    reuse,
+                ),
             },
             &keys.extrinsic,
             storage_type_map,
