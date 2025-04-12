@@ -227,11 +227,6 @@ dyn_hash::hash_trait_object!(DynKey);
 pub trait StoreType: 'static + Send + Sync {
     type KeyInput: serde::Serialize;
     type Slot: Slot;
-
-    // fn key_input<'s>(
-    //     &'s self,
-    //     // storable_key_fn: &fn(&dyn serde_traitobject::Serialize) -> Box<dyn DynKey>,
-    // ) -> Self::KeyInput<'s>;
 }
 
 #[derive(Clone)]
