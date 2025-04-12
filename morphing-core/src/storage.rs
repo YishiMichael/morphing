@@ -49,16 +49,14 @@ pub trait Slot: 'static + Send + Sync {
     type SlotKeyGenerator: SlotKeyGenerator;
 
     fn new() -> Self;
-    fn update_or_insert<D, F>(
+    fn update_or_insert<I>(
         &mut self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-        result: &mut ResourceReuseResult,
-        default: D,
-        f: F,
-    ) -> &Self::Value
-    where
-        D: FnOnce() -> Self::Value,
-        F: FnOnce(&mut Self::Value, &mut ResourceReuseResult);
+        reuse: &mut ResourceReuseResult,
+        input: I,
+        default: fn(I) -> Self::Value,
+        f: fn(I, &mut Self::Value, &mut ResourceReuseResult),
+    );
     fn get_and_unwrap(
         &self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
@@ -79,28 +77,25 @@ where
         Self(None)
     }
 
-    fn update_or_insert<D, F>(
+    fn update_or_insert<I>(
         &mut self,
         _slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-        result: &mut ResourceReuseResult,
-        default: D,
-        f: F,
-    ) -> &Self::Value
-    where
-        D: FnOnce() -> Self::Value,
-        F: FnOnce(&mut Self::Value, &mut ResourceReuseResult),
-    {
-        let value = match (self.0.take(), *result) {
+        reuse: &mut ResourceReuseResult,
+        input: I,
+        default: fn(I) -> Self::Value,
+        f: fn(I, &mut Self::Value, &mut ResourceReuseResult),
+    ) {
+        let value = match (self.0.take(), *reuse) {
             (Some(mut value), Ok(())) => {
-                f(&mut value, result);
+                f(input, &mut value, reuse);
                 value
             }
             _ => {
-                *result = Err(());
-                default()
+                *reuse = Err(());
+                default(input)
             }
         };
-        self.0.insert(value)
+        let _ = self.0.insert(value);
     }
 
     fn get_and_unwrap(
@@ -128,32 +123,29 @@ where
         Self(Vec::new())
     }
 
-    fn update_or_insert<D, F>(
+    fn update_or_insert<I>(
         &mut self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-        result: &mut ResourceReuseResult,
-        default: D,
-        f: F,
-    ) -> &Self::Value
-    where
-        D: FnOnce() -> Self::Value,
-        F: FnOnce(&mut Self::Value, &mut ResourceReuseResult),
-    {
+        reuse: &mut ResourceReuseResult,
+        input: I,
+        default: fn(I) -> Self::Value,
+        f: fn(I, &mut Self::Value, &mut ResourceReuseResult),
+    ) {
         if self.0.len() <= *slot_key {
             self.0.resize_with(slot_key + 1, || None);
         }
         let option_mut = self.0.get_mut(*slot_key).unwrap();
-        let value = match (option_mut.take(), *result) {
+        let value = match (option_mut.take(), *reuse) {
             (Some(mut value), Ok(())) => {
-                f(&mut value, result);
+                f(input, &mut value, reuse);
                 value
             }
             _ => {
-                *result = Err(());
-                default()
+                *reuse = Err(());
+                default(input)
             }
         };
-        option_mut.insert(value)
+        let _ = option_mut.insert(value);
     }
 
     fn get_and_unwrap(
@@ -187,18 +179,16 @@ where
         }
     }
 
-    fn update_or_insert<D, F>(
+    fn update_or_insert<I>(
         &mut self,
         slot_key: &<Self::SlotKeyGenerator as SlotKeyGenerator>::SlotKey,
-        result: &mut ResourceReuseResult,
-        default: D,
-        f: F,
-    ) -> &Self::Value
-    where
-        D: FnOnce() -> Self::Value,
-        F: FnOnce(&mut Self::Value, &mut ResourceReuseResult),
-    {
-        self.active.update_or_insert(slot_key, result, default, f)
+        reuse: &mut ResourceReuseResult,
+        input: I,
+        default: fn(I) -> Self::Value,
+        f: fn(I, &mut Self::Value, &mut ResourceReuseResult),
+    ) {
+        self.active
+            .update_or_insert(slot_key, reuse, input, default, f);
     }
 
     fn get_and_unwrap(
@@ -227,6 +217,16 @@ dyn_hash::hash_trait_object!(DynKey);
 pub trait StoreType: 'static + Send + Sync {
     type KeyInput: serde::Serialize;
     type Slot: Slot;
+    type Input<'s>;
+    type Output<'s>;
+
+    fn insert(input: Self::Input<'_>) -> <Self::Slot as Slot>::Value;
+    fn update(
+        input: Self::Input<'_>,
+        value: &mut <Self::Slot as Slot>::Value,
+        reuse: &mut ResourceReuseResult,
+    );
+    fn fetch(value: &<Self::Slot as Slot>::Value) -> Self::Output<'_>;
 }
 
 #[derive(Clone)]
@@ -326,36 +326,34 @@ impl StorageTypeMap {
         }
     }
 
-    pub fn update_or_insert<ST, D, F>(
+    pub fn write<ST>(
         &mut self,
         storage_key: &StorageKey<ST>,
-        result: &mut ResourceReuseResult,
-        default: D,
-        f: F,
-    ) -> &<ST::Slot as Slot>::Value
-    where
+        reuse: &mut ResourceReuseResult,
+        input: ST::Input<'_>,
+    ) where
         ST: StoreType,
-        D: FnOnce() -> <ST::Slot as Slot>::Value,
-        F: FnOnce(&mut <ST::Slot as Slot>::Value, &mut ResourceReuseResult),
     {
         self.type_map
             .entry::<StorageWrapper<ST::Slot>>()
             .or_insert_with(HashMap::new)
             .entry(storage_key.storable_key.clone())
             .or_insert_with(ST::Slot::new)
-            .update_or_insert(&storage_key.slot_key, result, default, f)
+            .update_or_insert(&storage_key.slot_key, reuse, input, ST::insert, ST::update);
     }
 
-    pub fn get_and_unwrap<ST>(&self, storage_key: &StorageKey<ST>) -> &<ST::Slot as Slot>::Value
+    pub fn read<ST>(&self, storage_key: &StorageKey<ST>) -> ST::Output<'_>
     where
         ST: StoreType,
     {
-        self.type_map
-            .get::<StorageWrapper<ST::Slot>>()
-            .unwrap()
-            .get(&storage_key.storable_key)
-            .unwrap()
-            .get_and_unwrap(&storage_key.slot_key)
+        ST::fetch(
+            self.type_map
+                .get::<StorageWrapper<ST::Slot>>()
+                .unwrap()
+                .get(&storage_key.storable_key)
+                .unwrap()
+                .get_and_unwrap(&storage_key.slot_key),
+        )
     }
 
     pub fn expire(&mut self) {
