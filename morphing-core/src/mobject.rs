@@ -67,39 +67,9 @@ pub trait Variant<M>
 where
     M: Mobject,
 {
-    // type Observe: Send + Sync;
-    type Keys;
-
-    fn allocate(mobject: &M, slot_key_generator_map: &mut SlotKeyGeneratorTypeMap) -> Self::Keys;
-    fn prepare(
-        mobject: &M,
-        keys: &Self::Keys,
-        storage_type_map: &mut StorageTypeMap,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-        reuse: &mut ResourceReuseResult,
-    ) -> M::ResourceStructure;
-    fn render(
-        keys: &Self::Keys,
-        storage_type_map: &StorageTypeMap,
-        render_pass: &mut wgpu::RenderPass,
-    );
-}
-
-pub trait Timeline<M>
-where
-    M: Mobject,
-{
     type Observe;
     type Keys;
 
-    fn observe(
-        clock: Clock,
-        clock_span: ClockSpan,
-        timeline: &Self,
-        observe: &Self::Observe,
-    ) -> Self::Observe;
     fn allocate(
         observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
@@ -118,6 +88,39 @@ where
         storage_type_map: &StorageTypeMap,
         render_pass: &mut wgpu::RenderPass,
     );
+}
+
+pub trait Timeline<M>
+where
+    M: Mobject,
+{
+    type Variant: Variant<M>;
+    // type Keys;
+
+    fn observe(
+        clock: Clock,
+        clock_span: ClockSpan,
+        timeline: &Self,
+        observe: &<Self::Variant as Variant<M>>::Observe,
+    ) -> <Self::Variant as Variant<M>>::Observe;
+    // fn allocate(
+    //     observe: &Self::Observe,
+    //     slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
+    // ) -> Self::Keys;
+    // fn prepare(
+    //     observe: &Self::Observe,
+    //     keys: &Self::Keys,
+    //     storage_type_map: &mut StorageTypeMap,
+    //     device: &wgpu::Device,
+    //     queue: &wgpu::Queue,
+    //     format: wgpu::TextureFormat,
+    //     reuse: &mut ResourceReuseResult,
+    // ) -> M::ResourceStructure;
+    // fn render(
+    //     keys: &Self::Keys,
+    //     storage_type_map: &StorageTypeMap,
+    //     render_pass: &mut wgpu::RenderPass,
+    // );
 }
 
 pub trait Resource<RR>: 'static + Send + Sync {
@@ -242,6 +245,10 @@ where
 {
     fn refresh(&self, clock: Clock, clock_span: ClockSpan, mobject: &mut M);
 }
+
+pub struct StaticDerivationVariant;
+
+pub struct DynamicDerivationVariant;
 
 pub struct StaticVariant;
 
@@ -454,18 +461,18 @@ where
     // }
 }
 
-impl<T> Variant<Data<T>> for StaticVariant
+impl<T> Variant<Data<T>> for StaticDerivationVariant
 where
     T: 'static + Clone + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
 {
-    // type Observe = Arc<Data<T>>;
+    type Observe = Data<T>;
     type Keys = StorageKey<StaticStoreType<Data<T>, T>>;
 
     fn allocate(
-        mobject: &Data<T>,
+        observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Keys {
-        slot_key_generator_map.allocate(mobject)
+        slot_key_generator_map.allocate(observe)
     }
 
     // fn allocate(
@@ -476,7 +483,7 @@ where
     // }
 
     fn prepare(
-        mobject: &Data<T>,
+        observe: &Self::Observe,
         keys: &Self::Keys,
         storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
@@ -485,7 +492,7 @@ where
         reuse: &mut ResourceReuseResult,
     ) -> <Data<T> as Mobject>::ResourceStructure {
         <Data<T> as Prepare>::static_prepare(
-            &&**mobject,
+            &&**observe,
             keys,
             storage_type_map,
             device,
@@ -503,22 +510,22 @@ where
     }
 }
 
-impl<T> Variant<Data<T>> for DynamicVariant
+impl<T> Variant<Data<T>> for DynamicDerivationVariant
 where
     T: 'static + Clone + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
 {
-    // type Observe = Data<T>;
+    type Observe = Data<T>;
     type Keys = StorageKey<DynamicStoreType<Data<T>, T>>;
 
     fn allocate(
-        _mobject: &Data<T>,
+        _observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Keys {
         slot_key_generator_map.allocate(&())
     }
 
     fn prepare(
-        mobject: &Data<T>,
+        observe: &Self::Observe,
         keys: &Self::Keys,
         storage_type_map: &mut StorageTypeMap,
         device: &wgpu::Device,
@@ -527,7 +534,7 @@ where
         reuse: &mut ResourceReuseResult,
     ) -> <Data<T> as Mobject>::ResourceStructure {
         <Data<T> as Prepare>::dynamic_prepare(
-            &&**mobject,
+            &&**observe,
             keys,
             storage_type_map,
             device,
@@ -545,28 +552,29 @@ where
     }
 }
 
-impl<T> Timeline<Data<T>> for StaticTimeline
+impl<T> Variant<Data<T>> for StaticVariant
 where
     T: 'static + Clone + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
 {
     type Observe = Arc<Data<T>>;
-    type Keys = <StaticVariant as Variant<Data<T>>>::Keys;
-
-    fn observe(
-        _clock: Clock,
-        _clock_span: ClockSpan,
-        _timeline: &Self,
-        observe: &Self::Observe,
-    ) -> Self::Observe {
-        observe.clone()
-    }
+    type Keys = <StaticDerivationVariant as Variant<Data<T>>>::Keys;
 
     fn allocate(
         observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Keys {
-        <StaticVariant as Variant<Data<T>>>::allocate(observe.as_ref(), slot_key_generator_map)
+        <StaticDerivationVariant as Variant<Data<T>>>::allocate(
+            observe.as_ref(),
+            slot_key_generator_map,
+        )
     }
+
+    // fn allocate(
+    //     observe: &Self::Observe,
+    //     slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
+    // ) -> Self::Keys {
+    //     Self::allocate_mobject(observe.as_ref(), slot_key_generator_map)
+    // }
 
     fn prepare(
         observe: &Self::Observe,
@@ -577,7 +585,7 @@ where
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
     ) -> <Data<T> as Mobject>::ResourceStructure {
-        <StaticVariant as Variant<Data<T>>>::prepare(
+        <StaticDerivationVariant as Variant<Data<T>>>::prepare(
             observe.as_ref(),
             keys,
             storage_type_map,
@@ -593,34 +601,22 @@ where
         storage_type_map: &StorageTypeMap,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        <StaticVariant as Variant<Data<T>>>::render(keys, storage_type_map, render_pass);
+        <StaticDerivationVariant as Variant<Data<T>>>::render(keys, storage_type_map, render_pass)
     }
 }
 
-impl<T, R> Timeline<Data<T>> for DynamicTimeline<R>
+impl<T> Variant<Data<T>> for DynamicVariant
 where
     T: 'static + Clone + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
-    R: Refresh<Data<T>>,
 {
     type Observe = Data<T>;
-    type Keys = <DynamicVariant as Variant<Data<T>>>::Keys;
-
-    fn observe(
-        clock: Clock,
-        clock_span: ClockSpan,
-        timeline: &Self,
-        observe: &Self::Observe,
-    ) -> Self::Observe {
-        let mut observe = observe.clone();
-        timeline.refresh.refresh(clock, clock_span, &mut observe);
-        observe
-    }
+    type Keys = <DynamicDerivationVariant as Variant<Data<T>>>::Keys;
 
     fn allocate(
         observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Keys {
-        <DynamicVariant as Variant<Data<T>>>::allocate(observe, slot_key_generator_map)
+        <DynamicDerivationVariant as Variant<Data<T>>>::allocate(observe, slot_key_generator_map)
     }
 
     fn prepare(
@@ -632,7 +628,7 @@ where
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
     ) -> <Data<T> as Mobject>::ResourceStructure {
-        <DynamicVariant as Variant<Data<T>>>::prepare(
+        <DynamicDerivationVariant as Variant<Data<T>>>::prepare(
             observe,
             keys,
             storage_type_map,
@@ -648,7 +644,42 @@ where
         storage_type_map: &StorageTypeMap,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        <DynamicVariant as Variant<Data<T>>>::render(keys, storage_type_map, render_pass);
+        <DynamicDerivationVariant as Variant<Data<T>>>::render(keys, storage_type_map, render_pass)
+    }
+}
+
+impl<T> Timeline<Data<T>> for StaticTimeline
+where
+    T: 'static + Clone + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
+{
+    type Variant = StaticVariant;
+
+    fn observe(
+        _clock: Clock,
+        _clock_span: ClockSpan,
+        _timeline: &Self,
+        observe: &<Self::Variant as Variant<Data<T>>>::Observe,
+    ) -> <Self::Variant as Variant<Data<T>>>::Observe {
+        observe.clone()
+    }
+}
+
+impl<T, R> Timeline<Data<T>> for DynamicTimeline<R>
+where
+    T: 'static + Clone + Debug + Send + Sync + for<'de> serde::Deserialize<'de> + serde::Serialize,
+    R: Refresh<Data<T>>,
+{
+    type Variant = DynamicVariant;
+
+    fn observe(
+        clock: Clock,
+        clock_span: ClockSpan,
+        timeline: &Self,
+        observe: &<Self::Variant as Variant<Data<T>>>::Observe,
+    ) -> <Self::Variant as Variant<Data<T>>>::Observe {
+        let mut observe = observe.clone();
+        timeline.refresh.refresh(clock, clock_span, &mut observe);
+        observe
     }
 }
 
@@ -805,180 +836,174 @@ impl Mobject for MyMobject0 {
     // }
 }
 
+impl Variant<MyMobject0> for StaticDerivationVariant {
+    type Observe = MyMobject0;
+    type Keys = Derivation<
+        MyMobject0<
+            <StaticDerivationVariant as Variant<Data<f32>>>::Keys,
+            <StaticDerivationVariant as Variant<Data<f32>>>::Keys,
+        >,
+        (),
+    >;
+
+    fn allocate(
+        observe: &Self::Observe,
+        slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::Keys {
+        Derivation {
+            intrinsic: MyMobject0 {
+                ma: <StaticDerivationVariant as Variant<Data<f32>>>::allocate(
+                    &observe.ma,
+                    slot_key_generator_map,
+                ),
+                mb: <StaticDerivationVariant as Variant<Data<f32>>>::allocate(
+                    &observe.mb,
+                    slot_key_generator_map,
+                ),
+            },
+            extrinsic: (),
+        }
+    }
+
+    fn prepare(
+        observe: &Self::Observe,
+        keys: &Self::Keys,
+        storage_type_map: &mut StorageTypeMap,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        reuse: &mut ResourceReuseResult,
+    ) -> <MyMobject0 as Mobject>::ResourceStructure {
+        MyMobject0 {
+            ma: <StaticDerivationVariant as Variant<Data<f32>>>::prepare(
+                &observe.ma,
+                &keys.intrinsic.ma,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
+            mb: <StaticDerivationVariant as Variant<Data<f32>>>::prepare(
+                &observe.mb,
+                &keys.intrinsic.mb,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
+        }
+    }
+
+    fn render(
+        keys: &Self::Keys,
+        storage_type_map: &StorageTypeMap,
+        render_pass: &mut wgpu::RenderPass,
+    ) {
+        <StaticDerivationVariant as Variant<Data<f32>>>::render(
+            &keys.intrinsic.ma,
+            storage_type_map,
+            render_pass,
+        );
+        <StaticDerivationVariant as Variant<Data<f32>>>::render(
+            &keys.intrinsic.mb,
+            storage_type_map,
+            render_pass,
+        );
+    }
+}
+
+impl Variant<MyMobject0> for DynamicDerivationVariant {
+    type Observe = MyMobject0;
+    type Keys = Derivation<
+        MyMobject0<
+            <DynamicDerivationVariant as Variant<Data<f32>>>::Keys,
+            <DynamicDerivationVariant as Variant<Data<f32>>>::Keys,
+        >,
+        (),
+    >;
+
+    fn allocate(
+        observe: &Self::Observe,
+        slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::Keys {
+        Derivation {
+            intrinsic: MyMobject0 {
+                ma: <DynamicDerivationVariant as Variant<Data<f32>>>::allocate(
+                    &observe.ma,
+                    slot_key_generator_map,
+                ),
+                mb: <DynamicDerivationVariant as Variant<Data<f32>>>::allocate(
+                    &observe.mb,
+                    slot_key_generator_map,
+                ),
+            },
+            extrinsic: (),
+        }
+    }
+
+    fn prepare(
+        observe: &Self::Observe,
+        keys: &Self::Keys,
+        storage_type_map: &mut StorageTypeMap,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        reuse: &mut ResourceReuseResult,
+    ) -> <MyMobject0 as Mobject>::ResourceStructure {
+        MyMobject0 {
+            ma: <DynamicDerivationVariant as Variant<Data<f32>>>::prepare(
+                &observe.ma,
+                &keys.intrinsic.ma,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
+            mb: <DynamicDerivationVariant as Variant<Data<f32>>>::prepare(
+                &observe.mb,
+                &keys.intrinsic.mb,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
+        }
+    }
+
+    fn render(
+        keys: &Self::Keys,
+        storage_type_map: &StorageTypeMap,
+        render_pass: &mut wgpu::RenderPass,
+    ) {
+        <DynamicDerivationVariant as Variant<Data<f32>>>::render(
+            &keys.intrinsic.ma,
+            storage_type_map,
+            render_pass,
+        );
+        <DynamicDerivationVariant as Variant<Data<f32>>>::render(
+            &keys.intrinsic.mb,
+            storage_type_map,
+            render_pass,
+        );
+    }
+}
+
 impl Variant<MyMobject0> for StaticVariant {
-    // type Observe = Arc<MyMobject0>;
-    type Keys = Derivation<
-        MyMobject0<
-            <StaticVariant as Variant<Data<f32>>>::Keys,
-            <StaticVariant as Variant<Data<f32>>>::Keys,
-        >,
-        (),
-    >;
-
-    fn allocate(
-        mobject: &MyMobject0,
-        slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Self::Keys {
-        Derivation {
-            intrinsic: MyMobject0 {
-                ma: <StaticVariant as Variant<Data<f32>>>::allocate(
-                    &mobject.ma,
-                    slot_key_generator_map,
-                ),
-                mb: <StaticVariant as Variant<Data<f32>>>::allocate(
-                    &mobject.mb,
-                    slot_key_generator_map,
-                ),
-            },
-            extrinsic: (),
-        }
-    }
-
-    fn prepare(
-        mobject: &MyMobject0,
-        keys: &Self::Keys,
-        storage_type_map: &mut StorageTypeMap,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-        reuse: &mut ResourceReuseResult,
-    ) -> <MyMobject0 as Mobject>::ResourceStructure {
-        MyMobject0 {
-            ma: <StaticVariant as Variant<Data<f32>>>::prepare(
-                &mobject.ma,
-                &keys.intrinsic.ma,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
-            mb: <StaticVariant as Variant<Data<f32>>>::prepare(
-                &mobject.mb,
-                &keys.intrinsic.mb,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
-        }
-    }
-
-    fn render(
-        keys: &Self::Keys,
-        storage_type_map: &StorageTypeMap,
-        render_pass: &mut wgpu::RenderPass,
-    ) {
-        <StaticVariant as Variant<Data<f32>>>::render(
-            &keys.intrinsic.ma,
-            storage_type_map,
-            render_pass,
-        );
-        <StaticVariant as Variant<Data<f32>>>::render(
-            &keys.intrinsic.mb,
-            storage_type_map,
-            render_pass,
-        );
-    }
-}
-
-impl Variant<MyMobject0> for DynamicVariant {
-    // type Observe = Arc<MyMobject0>;
-    type Keys = Derivation<
-        MyMobject0<
-            <DynamicVariant as Variant<Data<f32>>>::Keys,
-            <DynamicVariant as Variant<Data<f32>>>::Keys,
-        >,
-        (),
-    >;
-
-    fn allocate(
-        mobject: &MyMobject0,
-        slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Self::Keys {
-        Derivation {
-            intrinsic: MyMobject0 {
-                ma: <DynamicVariant as Variant<Data<f32>>>::allocate(
-                    &mobject.ma,
-                    slot_key_generator_map,
-                ),
-                mb: <DynamicVariant as Variant<Data<f32>>>::allocate(
-                    &mobject.mb,
-                    slot_key_generator_map,
-                ),
-            },
-            extrinsic: (),
-        }
-    }
-
-    fn prepare(
-        mobject: &MyMobject0,
-        keys: &Self::Keys,
-        storage_type_map: &mut StorageTypeMap,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-        reuse: &mut ResourceReuseResult,
-    ) -> <MyMobject0 as Mobject>::ResourceStructure {
-        MyMobject0 {
-            ma: <DynamicVariant as Variant<Data<f32>>>::prepare(
-                &mobject.ma,
-                &keys.intrinsic.ma,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
-            mb: <DynamicVariant as Variant<Data<f32>>>::prepare(
-                &mobject.mb,
-                &keys.intrinsic.mb,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
-        }
-    }
-
-    fn render(
-        keys: &Self::Keys,
-        storage_type_map: &StorageTypeMap,
-        render_pass: &mut wgpu::RenderPass,
-    ) {
-        <DynamicVariant as Variant<Data<f32>>>::render(
-            &keys.intrinsic.ma,
-            storage_type_map,
-            render_pass,
-        );
-        <DynamicVariant as Variant<Data<f32>>>::render(
-            &keys.intrinsic.mb,
-            storage_type_map,
-            render_pass,
-        );
-    }
-}
-
-impl Timeline<MyMobject0> for StaticTimeline {
     type Observe = Arc<MyMobject0>;
-    type Keys = <StaticVariant as Variant<MyMobject0>>::Keys;
-
-    fn observe(
-        _clock: Clock,
-        _clock_span: ClockSpan,
-        _timeline: &Self,
-        observe: &Self::Observe,
-    ) -> Self::Observe {
-        observe.clone()
-    }
+    type Keys = <StaticDerivationVariant as Variant<MyMobject0>>::Keys;
 
     fn allocate(
         observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Keys {
-        <StaticVariant as Variant<MyMobject0>>::allocate(observe.as_ref(), slot_key_generator_map)
+        <StaticDerivationVariant as Variant<MyMobject0>>::allocate(
+            observe.as_ref(),
+            slot_key_generator_map,
+        )
     }
 
     fn prepare(
@@ -990,7 +1015,7 @@ impl Timeline<MyMobject0> for StaticTimeline {
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
     ) -> <MyMobject0 as Mobject>::ResourceStructure {
-        <StaticVariant as Variant<MyMobject0>>::prepare(
+        <StaticDerivationVariant as Variant<MyMobject0>>::prepare(
             observe.as_ref(),
             keys,
             storage_type_map,
@@ -1006,33 +1031,23 @@ impl Timeline<MyMobject0> for StaticTimeline {
         storage_type_map: &StorageTypeMap,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        <StaticVariant as Variant<MyMobject0>>::render(keys, storage_type_map, render_pass);
+        <StaticDerivationVariant as Variant<MyMobject0>>::render(
+            keys,
+            storage_type_map,
+            render_pass,
+        );
     }
 }
 
-impl<R> Timeline<MyMobject0> for DynamicTimeline<R>
-where
-    R: Refresh<MyMobject0>,
-{
+impl Variant<MyMobject0> for DynamicVariant {
     type Observe = MyMobject0;
-    type Keys = <DynamicVariant as Variant<MyMobject0>>::Keys;
-
-    fn observe(
-        clock: Clock,
-        clock_span: ClockSpan,
-        timeline: &Self,
-        observe: &Self::Observe,
-    ) -> Self::Observe {
-        let mut observe = observe.clone();
-        timeline.refresh.refresh(clock, clock_span, &mut observe);
-        observe
-    }
+    type Keys = <DynamicDerivationVariant as Variant<MyMobject0>>::Keys;
 
     fn allocate(
         observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Keys {
-        <DynamicVariant as Variant<MyMobject0>>::allocate(observe, slot_key_generator_map)
+        <DynamicDerivationVariant as Variant<MyMobject0>>::allocate(observe, slot_key_generator_map)
     }
 
     fn prepare(
@@ -1044,7 +1059,7 @@ where
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
     ) -> <MyMobject0 as Mobject>::ResourceStructure {
-        <DynamicVariant as Variant<MyMobject0>>::prepare(
+        <DynamicDerivationVariant as Variant<MyMobject0>>::prepare(
             observe,
             keys,
             storage_type_map,
@@ -1060,7 +1075,104 @@ where
         storage_type_map: &StorageTypeMap,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        <DynamicVariant as Variant<MyMobject0>>::render(keys, storage_type_map, render_pass);
+        <DynamicDerivationVariant as Variant<MyMobject0>>::render(
+            keys,
+            storage_type_map,
+            render_pass,
+        );
+    }
+}
+
+impl<MA, MB> Variant<MyMobject0> for MyMobject0<MA, MB>
+where
+    MA: Variant<Data<f32>>,
+    MB: Variant<Data<f32>>,
+{
+    type Observe = MyMobject0<MA::Observe, MB::Observe>;
+    type Keys = Derivation<MyMobject0<MA::Keys, MB::Keys>, ()>;
+
+    fn allocate(
+        observe: &Self::Observe,
+        slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
+    ) -> Self::Keys {
+        Derivation {
+            intrinsic: MyMobject0 {
+                ma: MA::allocate(&observe.ma, slot_key_generator_map),
+                mb: MB::allocate(&observe.mb, slot_key_generator_map),
+            },
+            extrinsic: (),
+        }
+    }
+
+    fn prepare(
+        observe: &Self::Observe,
+        keys: &Self::Keys,
+        storage_type_map: &mut StorageTypeMap,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        reuse: &mut ResourceReuseResult,
+    ) -> <MyMobject0 as Mobject>::ResourceStructure {
+        MyMobject0 {
+            ma: MA::prepare(
+                &observe.ma,
+                &keys.intrinsic.ma,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
+            mb: MB::prepare(
+                &observe.mb,
+                &keys.intrinsic.mb,
+                storage_type_map,
+                device,
+                queue,
+                format,
+                reuse,
+            ),
+        }
+    }
+
+    fn render(
+        keys: &Self::Keys,
+        storage_type_map: &StorageTypeMap,
+        render_pass: &mut wgpu::RenderPass,
+    ) {
+        MA::render(&keys.intrinsic.ma, storage_type_map, render_pass);
+        MB::render(&keys.intrinsic.mb, storage_type_map, render_pass);
+    }
+}
+
+impl Timeline<MyMobject0> for StaticTimeline {
+    type Variant = StaticVariant;
+
+    fn observe(
+        _clock: Clock,
+        _clock_span: ClockSpan,
+        _timeline: &Self,
+        observe: &<Self::Variant as Variant<MyMobject0>>::Observe,
+    ) -> <Self::Variant as Variant<MyMobject0>>::Observe {
+        observe.clone()
+    }
+}
+
+impl<R> Timeline<MyMobject0> for DynamicTimeline<R>
+where
+    R: Refresh<MyMobject0>,
+{
+    type Variant = DynamicVariant;
+
+    fn observe(
+        clock: Clock,
+        clock_span: ClockSpan,
+        timeline: &Self,
+        observe: &<Self::Variant as Variant<MyMobject0>>::Observe,
+    ) -> <Self::Variant as Variant<MyMobject0>>::Observe {
+        let mut observe = observe.clone();
+        timeline.refresh.refresh(clock, clock_span, &mut observe);
+        observe
     }
 }
 
@@ -1170,72 +1282,18 @@ where
     MA: Timeline<Data<f32>>,
     MB: Timeline<Data<f32>>,
 {
-    type Observe = MyMobject0<MA::Observe, MB::Observe>;
-    type Keys = Derivation<MyMobject0<MA::Keys, MB::Keys>, ()>;
+    type Variant = MyMobject0<MA::Variant, MB::Variant>;
 
     fn observe(
         clock: Clock,
         clock_span: ClockSpan,
         timeline: &Self,
-        observe: &Self::Observe,
-    ) -> Self::Observe {
+        observe: &<Self::Variant as Variant<MyMobject0>>::Observe,
+    ) -> <Self::Variant as Variant<MyMobject0>>::Observe {
         MyMobject0 {
             ma: MA::observe(clock, clock_span, &timeline.ma, &observe.ma),
             mb: MB::observe(clock, clock_span, &timeline.mb, &observe.mb),
         }
-    }
-
-    fn allocate(
-        observe: &Self::Observe,
-        slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
-    ) -> Self::Keys {
-        Derivation {
-            intrinsic: MyMobject0 {
-                ma: MA::allocate(&observe.ma, slot_key_generator_map),
-                mb: MB::allocate(&observe.mb, slot_key_generator_map),
-            },
-            extrinsic: (),
-        }
-    }
-
-    fn prepare(
-        observe: &Self::Observe,
-        keys: &Self::Keys,
-        storage_type_map: &mut StorageTypeMap,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-        reuse: &mut ResourceReuseResult,
-    ) -> <MyMobject0 as Mobject>::ResourceStructure {
-        MyMobject0 {
-            ma: MA::prepare(
-                &observe.ma,
-                &keys.intrinsic.ma,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
-            mb: MB::prepare(
-                &observe.mb,
-                &keys.intrinsic.mb,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
-        }
-    }
-
-    fn render(
-        keys: &Self::Keys,
-        storage_type_map: &StorageTypeMap,
-        render_pass: &mut wgpu::RenderPass,
-    ) {
-        MA::render(&keys.intrinsic.ma, storage_type_map, render_pass);
-        MB::render(&keys.intrinsic.mb, storage_type_map, render_pass);
     }
 }
 
@@ -1447,12 +1505,12 @@ impl Mobject for MyMobject1 {
     // }
 }
 
-impl Variant<MyMobject1> for StaticVariant {
-    // type Observe = Arc<MyMobject1>;
+impl Variant<MyMobject1> for StaticDerivationVariant {
+    type Observe = MyMobject1;
     type Keys = Derivation<
         MyMobject1<
-            <StaticVariant as Variant<MyMobject0>>::Keys,
-            <StaticVariant as Variant<MyMobject0>>::Keys,
+            <StaticDerivationVariant as Variant<MyMobject0>>::Keys,
+            <StaticDerivationVariant as Variant<MyMobject0>>::Keys,
         >,
         StorageKey<StaticStoreType<MyMobject1, <MyMobject1 as Prepare>::Resource>>,
     >;
@@ -1463,11 +1521,11 @@ impl Variant<MyMobject1> for StaticVariant {
     ) -> Self::Keys {
         Derivation {
             intrinsic: MyMobject1 {
-                ma: <StaticVariant as Variant<MyMobject0>>::allocate(
+                ma: <StaticDerivationVariant as Variant<MyMobject0>>::allocate(
                     &mobject.ma,
                     slot_key_generator_map,
                 ),
-                mb: <StaticVariant as Variant<MyMobject0>>::allocate(
+                mb: <StaticDerivationVariant as Variant<MyMobject0>>::allocate(
                     &mobject.mb,
                     slot_key_generator_map,
                 ),
@@ -1487,7 +1545,7 @@ impl Variant<MyMobject1> for StaticVariant {
     ) -> <MyMobject1 as Mobject>::ResourceStructure {
         <MyMobject1 as Prepare>::static_prepare(
             &<MyMobject1 as Mobject>::resource_ref_input(&MyMobject1 {
-                ma: <StaticVariant as Variant<MyMobject0>>::prepare(
+                ma: <StaticDerivationVariant as Variant<MyMobject0>>::prepare(
                     &mobject.ma,
                     &keys.intrinsic.ma,
                     storage_type_map,
@@ -1496,7 +1554,7 @@ impl Variant<MyMobject1> for StaticVariant {
                     format,
                     reuse,
                 ),
-                mb: <StaticVariant as Variant<MyMobject0>>::prepare(
+                mb: <StaticDerivationVariant as Variant<MyMobject0>>::prepare(
                     &mobject.mb,
                     &keys.intrinsic.mb,
                     storage_type_map,
@@ -1520,25 +1578,21 @@ impl Variant<MyMobject1> for StaticVariant {
         storage_type_map: &StorageTypeMap,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        <StaticVariant as Variant<MyMobject0>>::render(
-            &keys.intrinsic.ma,
-            storage_type_map,
-            render_pass,
-        );
-        <StaticVariant as Variant<MyMobject0>>::render(
-            &keys.intrinsic.mb,
-            storage_type_map,
+        <MyMobject1 as Render>::render(
+            &<MyMobject1 as Mobject>::resource_ref(
+                &storage_type_map.get_and_unwrap(&keys.extrinsic),
+            ),
             render_pass,
         );
     }
 }
 
-impl Variant<MyMobject1> for DynamicVariant {
-    // type Observe = Arc<MyMobject1>;
+impl Variant<MyMobject1> for DynamicDerivationVariant {
+    type Observe = MyMobject1;
     type Keys = Derivation<
         MyMobject1<
-            <DynamicVariant as Variant<MyMobject0>>::Keys,
-            <DynamicVariant as Variant<MyMobject0>>::Keys,
+            <DynamicDerivationVariant as Variant<MyMobject0>>::Keys,
+            <DynamicDerivationVariant as Variant<MyMobject0>>::Keys,
         >,
         StorageKey<DynamicStoreType<MyMobject1, <MyMobject1 as Prepare>::Resource>>,
     >;
@@ -1549,11 +1603,11 @@ impl Variant<MyMobject1> for DynamicVariant {
     ) -> Self::Keys {
         Derivation {
             intrinsic: MyMobject1 {
-                ma: <DynamicVariant as Variant<MyMobject0>>::allocate(
+                ma: <DynamicDerivationVariant as Variant<MyMobject0>>::allocate(
                     &mobject.ma,
                     slot_key_generator_map,
                 ),
-                mb: <DynamicVariant as Variant<MyMobject0>>::allocate(
+                mb: <DynamicDerivationVariant as Variant<MyMobject0>>::allocate(
                     &mobject.mb,
                     slot_key_generator_map,
                 ),
@@ -1573,7 +1627,7 @@ impl Variant<MyMobject1> for DynamicVariant {
     ) -> <MyMobject1 as Mobject>::ResourceStructure {
         <MyMobject1 as Prepare>::dynamic_prepare(
             &<MyMobject1 as Mobject>::resource_ref_input(&MyMobject1 {
-                ma: <DynamicVariant as Variant<MyMobject0>>::prepare(
+                ma: <DynamicDerivationVariant as Variant<MyMobject0>>::prepare(
                     &mobject.ma,
                     &keys.intrinsic.ma,
                     storage_type_map,
@@ -1582,7 +1636,7 @@ impl Variant<MyMobject1> for DynamicVariant {
                     format,
                     reuse,
                 ),
-                mb: <DynamicVariant as Variant<MyMobject0>>::prepare(
+                mb: <DynamicDerivationVariant as Variant<MyMobject0>>::prepare(
                     &mobject.mb,
                     &keys.intrinsic.mb,
                     storage_type_map,
@@ -1606,37 +1660,27 @@ impl Variant<MyMobject1> for DynamicVariant {
         storage_type_map: &StorageTypeMap,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        <DynamicVariant as Variant<MyMobject0>>::render(
-            &keys.intrinsic.ma,
-            storage_type_map,
-            render_pass,
-        );
-        <DynamicVariant as Variant<MyMobject0>>::render(
-            &keys.intrinsic.mb,
-            storage_type_map,
+        <MyMobject1 as Render>::render(
+            &<MyMobject1 as Mobject>::resource_ref(
+                &storage_type_map.get_and_unwrap(&keys.extrinsic),
+            ),
             render_pass,
         );
     }
 }
 
-impl Timeline<MyMobject1> for StaticTimeline {
+impl Variant<MyMobject1> for StaticVariant {
     type Observe = Arc<MyMobject1>;
-    type Keys = <StaticVariant as Variant<MyMobject1>>::Keys;
-
-    fn observe(
-        _clock: Clock,
-        _clock_span: ClockSpan,
-        _timeline: &Self,
-        observe: &Self::Observe,
-    ) -> Self::Observe {
-        observe.clone()
-    }
+    type Keys = <StaticDerivationVariant as Variant<MyMobject1>>::Keys;
 
     fn allocate(
         observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Keys {
-        <StaticVariant as Variant<MyMobject1>>::allocate(observe.as_ref(), slot_key_generator_map)
+        <StaticDerivationVariant as Variant<MyMobject1>>::allocate(
+            observe.as_ref(),
+            slot_key_generator_map,
+        )
     }
 
     fn prepare(
@@ -1648,7 +1692,7 @@ impl Timeline<MyMobject1> for StaticTimeline {
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
     ) -> <MyMobject1 as Mobject>::ResourceStructure {
-        <StaticVariant as Variant<MyMobject1>>::prepare(
+        <StaticDerivationVariant as Variant<MyMobject1>>::prepare(
             observe.as_ref(),
             keys,
             storage_type_map,
@@ -1664,33 +1708,23 @@ impl Timeline<MyMobject1> for StaticTimeline {
         storage_type_map: &StorageTypeMap,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        <StaticVariant as Variant<MyMobject1>>::render(keys, storage_type_map, render_pass);
+        <StaticDerivationVariant as Variant<MyMobject1>>::render(
+            keys,
+            storage_type_map,
+            render_pass,
+        );
     }
 }
 
-impl<R> Timeline<MyMobject1> for DynamicTimeline<R>
-where
-    R: Refresh<MyMobject1>,
-{
+impl Variant<MyMobject1> for DynamicVariant {
     type Observe = MyMobject1;
-    type Keys = <DynamicVariant as Variant<MyMobject1>>::Keys;
-
-    fn observe(
-        clock: Clock,
-        clock_span: ClockSpan,
-        timeline: &Self,
-        observe: &Self::Observe,
-    ) -> Self::Observe {
-        let mut observe = observe.clone();
-        timeline.refresh.refresh(clock, clock_span, &mut observe);
-        observe
-    }
+    type Keys = <DynamicDerivationVariant as Variant<MyMobject1>>::Keys;
 
     fn allocate(
         observe: &Self::Observe,
         slot_key_generator_map: &mut SlotKeyGeneratorTypeMap,
     ) -> Self::Keys {
-        <DynamicVariant as Variant<MyMobject1>>::allocate(observe, slot_key_generator_map)
+        <DynamicDerivationVariant as Variant<MyMobject1>>::allocate(observe, slot_key_generator_map)
     }
 
     fn prepare(
@@ -1702,7 +1736,7 @@ where
         format: wgpu::TextureFormat,
         reuse: &mut ResourceReuseResult,
     ) -> <MyMobject1 as Mobject>::ResourceStructure {
-        <DynamicVariant as Variant<MyMobject1>>::prepare(
+        <DynamicDerivationVariant as Variant<MyMobject1>>::prepare(
             observe,
             keys,
             storage_type_map,
@@ -1718,32 +1752,24 @@ where
         storage_type_map: &StorageTypeMap,
         render_pass: &mut wgpu::RenderPass,
     ) {
-        <DynamicVariant as Variant<MyMobject1>>::render(keys, storage_type_map, render_pass);
+        <DynamicDerivationVariant as Variant<MyMobject1>>::render(
+            keys,
+            storage_type_map,
+            render_pass,
+        );
     }
 }
 
-impl<MA, MB> Timeline<MyMobject1> for MyMobject1<MA, MB>
+impl<MA, MB> Variant<MyMobject1> for MyMobject1<MA, MB>
 where
-    MA: Timeline<MyMobject0>,
-    MB: Timeline<MyMobject0>,
+    MA: Variant<MyMobject0>,
+    MB: Variant<MyMobject0>,
 {
     type Observe = MyMobject1<MA::Observe, MB::Observe>;
     type Keys = Derivation<
         MyMobject1<MA::Keys, MB::Keys>,
         StorageKey<DynamicStoreType<MyMobject1, <MyMobject1 as Prepare>::Resource>>,
     >;
-
-    fn observe(
-        clock: Clock,
-        clock_span: ClockSpan,
-        timeline: &Self,
-        observe: &Self::Observe,
-    ) -> Self::Observe {
-        MyMobject1 {
-            ma: MA::observe(clock, clock_span, &timeline.ma, &observe.ma),
-            mb: MB::observe(clock, clock_span, &timeline.mb, &observe.mb),
-        }
-    }
 
     fn allocate(
         observe: &Self::Observe,
@@ -1808,8 +1834,57 @@ where
             ),
             render_pass,
         );
-        // MA::render(&keys.intrinsic.ma, storage_type_map, render_pass);
-        // MB::render(&keys.intrinsic.mb, storage_type_map, render_pass);
+    }
+}
+
+impl Timeline<MyMobject1> for StaticTimeline {
+    type Variant = StaticVariant;
+
+    fn observe(
+        _clock: Clock,
+        _clock_span: ClockSpan,
+        _timeline: &Self,
+        observe: &<Self::Variant as Variant<MyMobject1>>::Observe,
+    ) -> <Self::Variant as Variant<MyMobject1>>::Observe {
+        observe.clone()
+    }
+}
+
+impl<R> Timeline<MyMobject1> for DynamicTimeline<R>
+where
+    R: Refresh<MyMobject1>,
+{
+    type Variant = DynamicVariant;
+
+    fn observe(
+        clock: Clock,
+        clock_span: ClockSpan,
+        timeline: &Self,
+        observe: &<Self::Variant as Variant<MyMobject1>>::Observe,
+    ) -> <Self::Variant as Variant<MyMobject1>>::Observe {
+        let mut observe = observe.clone();
+        timeline.refresh.refresh(clock, clock_span, &mut observe);
+        observe
+    }
+}
+
+impl<MA, MB> Timeline<MyMobject1> for MyMobject1<MA, MB>
+where
+    MA: Timeline<MyMobject0>,
+    MB: Timeline<MyMobject0>,
+{
+    type Variant = MyMobject1<MA::Variant, MB::Variant>;
+
+    fn observe(
+        clock: Clock,
+        clock_span: ClockSpan,
+        timeline: &Self,
+        observe: &<Self::Variant as Variant<MyMobject1>>::Observe,
+    ) -> <Self::Variant as Variant<MyMobject1>>::Observe {
+        MyMobject1 {
+            ma: MA::observe(clock, clock_span, &timeline.ma, &observe.ma),
+            mb: MB::observe(clock, clock_span, &timeline.mb, &observe.mb),
+        }
     }
 }
 
