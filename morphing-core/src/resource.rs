@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use wgpu::util::DeviceExt;
 
 use super::mobject::Resource;
-use super::storable::ResourceReuseResult;
+use super::storage::ResourceReuseResult;
 
 // TODO: move to builtins
 

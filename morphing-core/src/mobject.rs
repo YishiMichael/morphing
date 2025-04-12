@@ -820,24 +820,32 @@ impl Mobject for MyMobject0 {
         reuse: &mut ResourceReuseResult,
     ) -> Self::ResourceRef<'s> {
         MyMobject0 {
-            ma: <Data<f32> as Mobject>::static_refresh(
-                &mobject.ma,
-                &static_keys.ma,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
-            mb: <Data<f32> as Mobject>::static_refresh(
-                &mobject.mb,
-                &static_keys.mb,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
+            ma: unsafe {
+                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(
+                    <Data<f32> as Mobject>::static_refresh(
+                        &mobject.ma,
+                        &static_keys.ma,
+                        storage_type_map,
+                        device,
+                        queue,
+                        format,
+                        reuse,
+                    ),
+                )
+            },
+            mb: unsafe {
+                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(
+                    <Data<f32> as Mobject>::static_refresh(
+                        &mobject.mb,
+                        &static_keys.mb,
+                        storage_type_map,
+                        device,
+                        queue,
+                        format,
+                        reuse,
+                    ),
+                )
+            },
         }
     }
 
@@ -851,24 +859,32 @@ impl Mobject for MyMobject0 {
         reuse: &mut ResourceReuseResult,
     ) -> Self::ResourceRef<'s> {
         MyMobject0 {
-            ma: <Data<f32> as Mobject>::dynamic_refresh(
-                &mobject.ma,
-                &dynamic_keys.ma,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
-            mb: <Data<f32> as Mobject>::dynamic_refresh(
-                &mobject.mb,
-                &dynamic_keys.mb,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
+            ma: unsafe {
+                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(
+                    <Data<f32> as Mobject>::dynamic_refresh(
+                        &mobject.ma,
+                        &dynamic_keys.ma,
+                        storage_type_map,
+                        device,
+                        queue,
+                        format,
+                        reuse,
+                    ),
+                )
+            },
+            mb: unsafe {
+                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(
+                    <Data<f32> as Mobject>::dynamic_refresh(
+                        &mobject.mb,
+                        &dynamic_keys.mb,
+                        storage_type_map,
+                        device,
+                        queue,
+                        format,
+                        reuse,
+                    ),
+                )
+            },
         }
     }
 
@@ -1097,24 +1113,28 @@ where
         reuse: &mut ResourceReuseResult,
     ) -> <MyMobject0 as Mobject>::ResourceRef<'s> {
         MyMobject0 {
-            ma: MA::prepare(
-                &observe.ma,
-                &keys.ma,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
-            mb: MB::prepare(
-                &observe.mb,
-                &keys.mb,
-                storage_type_map,
-                device,
-                queue,
-                format,
-                reuse,
-            ),
+            ma: unsafe {
+                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(MA::prepare(
+                    &observe.ma,
+                    &keys.ma,
+                    storage_type_map,
+                    device,
+                    queue,
+                    format,
+                    reuse,
+                ))
+            },
+            mb: unsafe {
+                std::mem::transmute::<_, <Data<f32> as Mobject>::ResourceRef<'static>>(MB::prepare(
+                    &observe.mb,
+                    &keys.mb,
+                    storage_type_map,
+                    device,
+                    queue,
+                    format,
+                    reuse,
+                ))
+            },
         }
     }
 
@@ -1263,24 +1283,32 @@ impl Mobject for MyMobject1 {
     ) -> Self::ResourceRef<'s> {
         <MyMobject1Prepare as Prepare<MyMobject1>>::static_prepare(
             MyMobject1 {
-                ma: <MyMobject0 as Mobject>::static_refresh(
-                    &mobject.ma,
-                    &static_keys.intrinsic.ma,
-                    storage_type_map,
-                    device,
-                    queue,
-                    format,
-                    reuse,
-                ),
-                mb: <MyMobject0 as Mobject>::static_refresh(
-                    &mobject.mb,
-                    &static_keys.intrinsic.mb,
-                    storage_type_map,
-                    device,
-                    queue,
-                    format,
-                    reuse,
-                ),
+                ma: unsafe {
+                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
+                        <MyMobject0 as Mobject>::static_refresh(
+                            &mobject.ma,
+                            &static_keys.intrinsic.ma,
+                            storage_type_map,
+                            device,
+                            queue,
+                            format,
+                            reuse,
+                        ),
+                    )
+                },
+                mb: unsafe {
+                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
+                        <MyMobject0 as Mobject>::static_refresh(
+                            &mobject.mb,
+                            &static_keys.intrinsic.mb,
+                            storage_type_map,
+                            device,
+                            queue,
+                            format,
+                            reuse,
+                        ),
+                    )
+                },
             },
             &static_keys.extrinsic,
             storage_type_map,
@@ -1322,24 +1350,32 @@ impl Mobject for MyMobject1 {
     ) -> Self::ResourceRef<'s> {
         <MyMobject1Prepare as Prepare<MyMobject1>>::dynamic_prepare(
             MyMobject1 {
-                ma: <MyMobject0 as Mobject>::dynamic_refresh(
-                    &mobject.ma,
-                    &dynamic_keys.intrinsic.ma,
-                    storage_type_map,
-                    device,
-                    queue,
-                    format,
-                    reuse,
-                ),
-                mb: <MyMobject0 as Mobject>::dynamic_refresh(
-                    &mobject.mb,
-                    &dynamic_keys.intrinsic.mb,
-                    storage_type_map,
-                    device,
-                    queue,
-                    format,
-                    reuse,
-                ),
+                ma: unsafe {
+                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
+                        <MyMobject0 as Mobject>::dynamic_refresh(
+                            &mobject.ma,
+                            &dynamic_keys.intrinsic.ma,
+                            storage_type_map,
+                            device,
+                            queue,
+                            format,
+                            reuse,
+                        ),
+                    )
+                },
+                mb: unsafe {
+                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
+                        <MyMobject0 as Mobject>::dynamic_refresh(
+                            &mobject.mb,
+                            &dynamic_keys.intrinsic.mb,
+                            storage_type_map,
+                            device,
+                            queue,
+                            format,
+                            reuse,
+                        ),
+                    )
+                },
             },
             &dynamic_keys.extrinsic,
             storage_type_map,
@@ -1801,24 +1837,32 @@ where
 
         <MyMobject1Prepare as Prepare<MyMobject1>>::dynamic_prepare(
             MyMobject1 {
-                ma: MA::prepare(
-                    &observe.ma,
-                    &keys.intrinsic.ma,
-                    storage_type_map,
-                    device,
-                    queue,
-                    format,
-                    reuse,
-                ),
-                mb: MB::prepare(
-                    &observe.mb,
-                    &keys.intrinsic.mb,
-                    storage_type_map,
-                    device,
-                    queue,
-                    format,
-                    reuse,
-                ),
+                ma: unsafe {
+                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
+                        MA::prepare(
+                            &observe.ma,
+                            &keys.intrinsic.ma,
+                            storage_type_map,
+                            device,
+                            queue,
+                            format,
+                            reuse,
+                        ),
+                    )
+                },
+                mb: unsafe {
+                    std::mem::transmute::<_, <MyMobject0 as Mobject>::ResourceRef<'static>>(
+                        MB::prepare(
+                            &observe.mb,
+                            &keys.intrinsic.mb,
+                            storage_type_map,
+                            device,
+                            queue,
+                            format,
+                            reuse,
+                        ),
+                    )
+                },
             },
             &keys.extrinsic,
             storage_type_map,
