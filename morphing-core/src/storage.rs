@@ -215,8 +215,8 @@ dyn_eq::eq_trait_object!(DynKey);
 dyn_hash::hash_trait_object!(DynKey);
 
 pub trait StoreType: 'static + Send + Sync {
-    type KeyInput: serde::Serialize;
     type Slot: Slot;
+    type KeyInput<'s>: serde::Serialize;
     type Input<'s>;
     type Output<'s>;
 
@@ -260,7 +260,7 @@ impl SlotKeyGeneratorTypeMap {
         }
     }
 
-    pub fn allocate<ST>(&mut self, key_input: &ST::KeyInput) -> StorageKey<ST>
+    pub fn allocate<ST>(&mut self, key_input: &ST::KeyInput<'_>) -> StorageKey<ST>
     where
         ST: StoreType,
     {
