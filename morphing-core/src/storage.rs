@@ -217,18 +217,18 @@ dyn_hash::hash_trait_object!(DynKey);
 pub trait StoreType: 'static + Send + Sync {
     type Slot: Slot;
     type KeyInput<'s>;
-    type KeyOutput<'s>: serde::Serialize;
+    // type KeyOutput<'s>: serde::Serialize;
     type Input<'s>;
-    type Output<'s>;
+    // type Output<'s>;
 
-    fn key<'k, 's>(key_input: &'k Self::KeyInput<'s>) -> &'k Self::KeyOutput<'s>;
+    fn key<'s>(key_input: &'s Self::KeyInput<'_>) -> &'s dyn serde_traitobject::Serialize;
     fn insert(input: Self::Input<'_>) -> <Self::Slot as Slot>::Value;
     fn update(
         input: Self::Input<'_>,
         value: &mut <Self::Slot as Slot>::Value,
         reuse: &mut ResourceReuseResult,
     );
-    fn fetch(value: &<Self::Slot as Slot>::Value) -> Self::Output<'_>;
+    // fn fetch(value: &<Self::Slot as Slot>::Value) -> Self::Output<'_>;
 }
 
 #[derive(Clone)]
@@ -344,18 +344,16 @@ impl StorageTypeMap {
             .update_or_insert(&storage_key.slot_key, reuse, input, ST::insert, ST::update);
     }
 
-    pub fn read<ST>(&self, storage_key: &StorageKey<ST>) -> ST::Output<'_>
+    pub fn read<ST>(&self, storage_key: &StorageKey<ST>) -> &<ST::Slot as Slot>::Value
     where
         ST: StoreType,
     {
-        ST::fetch(
-            self.type_map
-                .get::<StorageWrapper<ST::Slot>>()
-                .unwrap()
-                .get(&storage_key.storable_key)
-                .unwrap()
-                .get_and_unwrap(&storage_key.slot_key),
-        )
+        self.type_map
+            .get::<StorageWrapper<ST::Slot>>()
+            .unwrap()
+            .get(&storage_key.storable_key)
+            .unwrap()
+            .get_and_unwrap(&storage_key.slot_key)
     }
 
     pub fn expire(&mut self) {
