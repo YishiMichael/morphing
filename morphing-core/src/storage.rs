@@ -215,11 +215,9 @@ dyn_eq::eq_trait_object!(DynKey);
 dyn_hash::hash_trait_object!(DynKey);
 
 pub trait StoreType: 'static + Send + Sync {
-    type Slot: Slot;
     type KeyInput<'s>;
-    // type KeyOutput<'s>: serde::Serialize;
     type Input<'s>;
-    // type Output<'s>;
+    type Slot: Slot;
 
     fn key<'s>(key_input: &'s Self::KeyInput<'_>) -> &'s dyn serde_traitobject::Serialize;
     fn insert(input: Self::Input<'_>) -> <Self::Slot as Slot>::Value;
@@ -228,7 +226,6 @@ pub trait StoreType: 'static + Send + Sync {
         value: &mut <Self::Slot as Slot>::Value,
         reuse: &mut ResourceReuseResult,
     );
-    // fn fetch(value: &<Self::Slot as Slot>::Value) -> Self::Output<'_>;
 }
 
 #[derive(Clone)]
