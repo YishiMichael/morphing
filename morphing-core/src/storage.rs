@@ -216,10 +216,12 @@ dyn_hash::hash_trait_object!(DynKey);
 
 pub trait StoreType: 'static + Send + Sync {
     type Slot: Slot;
-    type KeyInput<'s>: serde::Serialize;
+    type KeyInput<'s>;
+    type KeyOutput<'s>: serde::Serialize;
     type Input<'s>;
     type Output<'s>;
 
+    fn key<'k, 's>(key_input: &'k Self::KeyInput<'s>) -> &'k Self::KeyOutput<'s>;
     fn insert(input: Self::Input<'_>) -> <Self::Slot as Slot>::Value;
     fn update(
         input: Self::Input<'_>,
@@ -264,7 +266,7 @@ impl SlotKeyGeneratorTypeMap {
     where
         ST: StoreType,
     {
-        let storable_key = (self.storable_key_fn)(key_input);
+        let storable_key = (self.storable_key_fn)(ST::key(key_input));
         StorageKey {
             storable_key: storable_key.clone(),
             slot_key: self
