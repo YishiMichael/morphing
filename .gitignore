@@ -21,5 +21,3 @@ Cargo.lock
 #.idea/
 
 /playground/
-/winit-egui-wgpu-template/
-/workflow_draft.md

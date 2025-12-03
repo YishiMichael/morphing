@@ -1,4 +1,12 @@
-use super::RateArgs;
+use darling::FromMeta;
+
+#[derive(FromMeta)]
+pub(crate) struct RateArgs {
+    normalized: darling::util::Flag,
+    denormalized: darling::util::Flag,
+    increasing: darling::util::Flag,
+    assert: Option<syn::LitStr>,
+}
 
 // External crate dependencies:
 // - serde

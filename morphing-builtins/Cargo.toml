@@ -2,28 +2,28 @@
 name = "morphing-builtins"
 version = "0.1.0"
 authors = ["YishiMichael"]
-edition = "2021"
+edition = "2025"
 
 [dependencies]
-bezier-rs = { version = "0.4.0", features = ["serde"] }
-comemo = "0.4.0"
-encase = { version = "0.10.0", features = ["nalgebra"] }
-geometric_algebra = "0.3.0"
-glam = "0.24.2"
-inventory = "0.3.17"
-itertools = "0.13.0"
-lyon = { version = "1.0.1", features = ["serialization"] }
+# bezier-rs = { version = "0.4.0", features = ["serde"] }
+# comemo = "0.4.0"
+# encase = { version = "0.10.0", features = ["nalgebra"] }
+# geometric_algebra = "0.3.0"
+# glam = "0.24.2"
+# inventory = "0.3.17"
+# itertools = "0.13.0"
+# lyon = { version = "1.0.1", features = ["serialization"] }
 morphing-core = { path = "../morphing-core" }
-morphing-macros = { path = "../morphing-macros" }
-nalgebra = { version = "0.33.2", features = ["serde-serialize"] }
-palette = { version = "0.7.6", features = ["serializing"] }
-serde = "1.0.217"
-serde_traitobject = "0.2.8"
-strum = { version = "0.27.0", features = ["derive"] }
-toml = "0.8.20"
-ttf-parser = "0.24.1"
-type-map = "0.5.0"
-typst = "0.12.0"
-typst-kit = { version = "0.12.0", features = ["embed-fonts"] }
-typst-svg = "0.12.0" # to be removed
-wgpu = "0.19.4"
+# morphing-macros = { path = "../morphing-macros" }
+# nalgebra = { version = "0.33.2", features = ["serde-serialize"] }
+# palette = { version = "0.7.6", features = ["serializing"] }
+# serde = "1.0.217"
+# serde_traitobject = "0.2.8"
+# strum = { version = "0.27.0", features = ["derive"] }
+# toml = "0.8.20"
+# ttf-parser = "0.24.1"
+# type-map = "0.5.0"
+# typst = "0.12.0"
+# typst-kit = { version = "0.12.0", features = ["embed-fonts"] }
+# typst-svg = "0.12.0" # to be removed
+# wgpu = "0.19.4"

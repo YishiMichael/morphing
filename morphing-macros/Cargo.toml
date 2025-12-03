@@ -2,12 +2,14 @@
 name = "morphing-macros"
 version = "0.1.0"
 authors = ["YishiMichael"]
-edition = "2021"
+edition = "2025"
 
 [lib]
 proc-macro = true
 
 [dependencies]
+const-fnv1a-hash = "1.1.0"
+convert_case = "0.10.0"
 darling = "0.20.10"
 proc-macro2 = "1.0.94"
 quote = "1.0.38"
