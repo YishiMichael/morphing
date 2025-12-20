@@ -1,9 +1,11 @@
 [package]
 name = "hello_morphing"
-version = "0.1.0"
-edition = "2025"
+version = "0.0.1"
+edition = "2024"
 
 [dependencies]
+encase = "0.12.0"
+geometric_algebra = "0.3.0"
 morphing-builtins = { path = "../../morphing-builtins" }
 morphing-core = { path = "../../morphing-core" }
-nalgebra = "0.33.2"
+nalgebra = { version = "0.34.1", features = ["encase"] }

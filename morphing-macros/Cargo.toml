@@ -1,16 +1,21 @@
 [package]
 name = "morphing-macros"
-version = "0.1.0"
+version = "0.0.1"
 authors = ["YishiMichael"]
-edition = "2025"
+edition = "2024"
 
 [lib]
 proc-macro = true
 
 [dependencies]
+config = "0.15.19"
 const-fnv1a-hash = "1.1.0"
 convert_case = "0.10.0"
 darling = "0.20.10"
+inventory = "0.3.21"
+libloading = "0.9.0"
 proc-macro2 = "1.0.94"
 quote = "1.0.38"
+serde = { version = "1.0.228", features = ["serde_derive"] }
 syn = "2.0.96"
+wgpu = "27.0.1"

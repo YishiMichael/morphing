@@ -1,12 +1,23 @@
 // TODO: rate, world, layer, scene, wgpu_struct, wgpu_shader_types, pipeline?,
 
-mod get_field;
+mod field_index;
 mod link;
 mod rate;
 mod structure;
 mod wgpu;
 
 use proc_macro::TokenStream;
+
+#[allow(non_camel_case_types)]
+struct root;
+
+impl quote::ToTokens for root {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        tokens.extend(quote::quote! {
+            ::morphing
+        });
+    }
+}
 
 fn delegate_macro<T>(f: fn(T) -> proc_macro2::TokenStream, tokens: TokenStream) -> TokenStream
 where
@@ -61,9 +72,12 @@ pub fn chapter(input: TokenStream, tokens: TokenStream) -> TokenStream {
     delegate_macro_attribute(link::chapter, input, tokens)
 }
 
-#[proc_macro_derive(GetField)]
-pub fn get_field_derive(tokens: TokenStream) -> TokenStream {
-    delegate_macro_derive(get_field::get_field, tokens)
+#[proc_macro]
+pub fn fp(tokens: TokenStream) -> TokenStream {
+    delegate_macro(field_index::field_path, tokens)
 }
 
-// #[proc_macro]
+#[proc_macro_derive(FieldIndex)]
+pub fn get_field_derive(tokens: TokenStream) -> TokenStream {
+    delegate_macro_derive(field_index::field_index_derive, tokens)
+}

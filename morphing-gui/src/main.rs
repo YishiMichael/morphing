@@ -1,12 +1,97 @@
-#![feature(option_get_or_insert_default)]
+// use morphing_core::{};
+use std::sync::Arc;
 
-mod message;
-mod state;
-mod update;
-mod view;
+struct SceneSlice {
+    time: f32,
+    lifecycles: Arc<[Box<dyn Lifecycle>]>,
+}
 
-fn main() -> iced::Result {
-    iced::application("Morphing GUI", update::update, view::view)
-        .theme(view::theme)
-        .run()
+impl egui_wgpu::CallbackTrait for SceneSlice {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        screen_descriptor: &egui_wgpu::ScreenDescriptor,
+        egui_encoder: &mut wgpu::CommandEncoder,
+        callback_resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        // let (lifecycles, duration) = self;
+        // for lifecycle in lifecycles.iter() {
+        //     let resource_hashmap: &mut HashMap<TriangleLifecycle, Resource> =
+        //         callback_resources.entry().or_insert_with(HashMap::new);
+        //     let resource = resource_hashmap.entry()
+        // }
+        Vec::new()
+    }
+
+    fn paint(
+        &self,
+        info: epaint::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+
+        // let code = /*toml*/ r#"
+        //     [a.b.c]
+        //     d = 32
+        // "#;
+        // let code = /*typst*/ r#"
+        //     #set page(numbering: "1")
+        //     #set par(spacing: 1em)
+        // "#;
+        // let code = /*typst.math*/ r#"
+        //     $a a = b$
+        // "#;
+    }
+}
+
+pub struct MyApp {
+    chapter_symbol: ChapterSymbol,
+    clock: Clock,
+    lifecycles: Arc<[Box<dyn Lifecycle>]>,
+}
+
+impl MyApp {
+    fn new(cc: &eframe::CreationContext<'_>, chapter_path: &str) -> Self {
+        let mut supervisor = Supervisor {
+            time: 0.0,
+            lifecycles: Vec::new(),
+            config: MyConfig {},
+        };
+        my_scene(&mut supervisor);
+        Self {
+            chapter_symbol: call_entrypoint(chapter_path),
+            clock: Clock::now(),
+            lifecycles: supervisor.lifecycles.into(),
+        }
+    }
+
+    fn custom_painting(&mut self, ui: &mut egui::Ui) {
+        let (rect, _response) =
+            ui.allocate_exact_size(egui::Vec2::new(960.0, 540.0), egui::Sense::drag());
+
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
+            rect,
+            SceneSlice {
+                time: self.clock.elapsed().unwrap().as_secs_f32(),
+                lifecycles: self.lifecycles.clone(),
+            },
+        ));
+    }
+}
+
+impl eframe::App for MyApp {
+    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            self.custom_painting(ui);
+        });
+    }
+}
+
+fn main() -> eframe::Result {
+    eframe::run_native(
+        "Morphing App",
+        Default::default(),
+        Box::new(|cc| Ok(Box::new(MyApp::new(cc, "../examples/hello_morphing")))),
+    )
 }

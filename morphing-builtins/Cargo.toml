@@ -1,8 +1,8 @@
 [package]
 name = "morphing-builtins"
-version = "0.1.0"
+version = "0.0.1"
 authors = ["YishiMichael"]
-edition = "2025"
+edition = "2024"
 
 [dependencies]
 # bezier-rs = { version = "0.4.0", features = ["serde"] }

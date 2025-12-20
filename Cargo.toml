@@ -1,9 +1,9 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "examples/hello_morphing",
+    "litconfig",
     "morphing-core",
     "morphing-builtins",
     "morphing-gui",
-    "morphing-macros",
 ]

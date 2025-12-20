@@ -1,5 +1,91 @@
+pub use config;
+pub use inventory;
+
+use super::root;
 use convert_case::Casing;
 use darling::FromMeta;
+
+pub struct Symbol<T> {
+    pub(crate) name: String,
+    pub(crate) config: Vec<config::File<config::FileSourceString, config::FileFormat>>,
+    pub(crate) content: T,
+}
+
+inventory::collect!(SceneSymbol);
+
+fn f(i: u32) -> () {
+    i
+}
+
+pub type SceneSymbol = Symbol<
+    Box<
+        dyn Fn(config::ConfigBuilder<config::builder::DefaultState>) -> Vec<Box<dyn Lifecycle>>
+            + Sync,
+    >,
+>;
+
+pub fn scene_symbol<C: 'static + serde::de::DeserializeOwned, const N: usize>(
+    name: &str,
+    config: [config::File<config::FileSourceString, config::FileFormat>; N],
+    scene: fn(&mut Supervisor<C>),
+) -> SceneSymbol {
+    Symbol {
+        name: name.into(),
+        config: config.into(),
+        content: Box::new(move |config_builder| {
+            let configuration = config_builder.build().unwrap().try_deserialize().unwrap();
+            let mut supervisor = Supervisor {
+                time: 0.0,
+                lifecycles: Vec::new(),
+                config: configuration,
+            };
+            scene(&mut supervisor);
+            supervisor.lifecycles
+        }),
+    }
+}
+
+pub type ChapterSymbol = Symbol<std::collections::HashMap<String, &'static SceneSymbol>>;
+
+pub fn chapter_symbol<const N: usize>(
+    name: &str,
+    config: [config::File<config::FileSourceString, config::FileFormat>; N],
+    scenes: inventory::iter<SceneSymbol>,
+) -> ChapterSymbol {
+    Symbol {
+        name: name.into(),
+        config: config.into(),
+        content: scenes
+            .into_iter()
+            .map(|symbol| (symbol.name.clone(), symbol))
+            .collect(),
+    }
+}
+
+pub(crate) fn call_entrypoint(chapter_path: &str) -> ChapterSymbol {
+    let func: libloading::Symbol<extern "Rust" fn() -> ChapterSymbol> = unsafe {
+        let lib = libloading::Library::new(chapter_path).unwrap();
+        lib.get(b"__morphing_entrypoint__\0").unwrap(); // expecting #[chapter] invocation
+    };
+    func()
+}
+
+// pub mod config_formats {
+//     macro_rules! config_format {
+//         ($name:ident = $format:expr) => {
+//             pub fn $name(s: &str) -> config::File<config::FileSourceString, config::FileFormat> {
+//                 config::File::from_str(s, $format)
+//             }
+//         };
+//     }
+
+//     config_format!(toml = config::FileFormat::Toml);
+//     config_format!(json = config::FileFormat::Json);
+//     config_format!(yaml = config::FileFormat::Yaml);
+//     config_format!(ini = config::FileFormat::Ini);
+//     config_format!(ron = config::FileFormat::Ron);
+//     config_format!(json5 = config::FileFormat::Json5);
+// }
 
 #[derive(Default)]
 struct NameValueList(Vec<syn::MetaNameValue>);
@@ -40,7 +126,7 @@ pub(crate) struct ConfigArgs {
 }
 
 fn expand_configs(config: NameValueList) -> proc_macro2::TokenStream {
-    let (formats, literals): (Vec<_>, Vec<_>) = config
+    let items: Vec::<_> = config
         .iter()
         .map(|name_value| {
             let format = name_value
@@ -52,12 +138,15 @@ fn expand_configs(config: NameValueList) -> proc_macro2::TokenStream {
                 format.span(),
             );
             let literal = &name_value.value;
-            (format, literal)
+
+            quote::quote! {
+            	#root::__macros::link::config::File::from_str(#literal, #root::__macros::link::config::FileFormat::#format)
+            }
         })
-        .unzip();
+        .collect();
 
     quote::quote! {
-        [#(::morphing_core::link::config::File::from_str(#literals, ::morphing_core::link::config::FileFormat::#formats)),*]
+        [#(#items),*]
     }
 }
 
@@ -69,8 +158,8 @@ pub(crate) fn scene(args: ConfigArgs, item_fn: syn::ItemFn) -> proc_macro2::Toke
     quote::quote! {
         #item_fn
 
-        ::morphing_core::link::inventory::submit! {
-            ::morphing_core::link::scene_symbol(
+        #root::__macros::link::inventory::submit! {
+            #root::__macros::link::scene_symbol(
                 concat!(module_path!(), "::", #name),
                 #config_expanded,
                 #ident,
@@ -84,6 +173,7 @@ pub(crate) fn chapter(
     item_extern_crate: syn::ItemExternCrate,
 ) -> proc_macro2::TokenStream {
     assert_eq!(item_extern_crate.ident.to_string(), "self");
+    let root = root;
     let name = item_extern_crate
         .rename
         .as_ref()
@@ -93,11 +183,11 @@ pub(crate) fn chapter(
 
     quote::quote! {
         #[no_mangle]
-        pub extern "Rust" fn __morphing_entrypoint__() -> ::morphing_core::link::ChapterSymbol {
-            ::morphing_core::link::chapter_symbol(
+        pub extern "Rust" fn __morphing_entrypoint__() -> #root::__macros::link::ChapterSymbol {
+            #root::__macros::link::chapter_symbol(
                 #name,
                 #config_expanded,
-                ::morphing_core::link::inventory::iter,
+                #root::__macros::link::inventory::iter,
             )
         }
     }

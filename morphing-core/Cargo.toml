@@ -1,20 +1,8 @@
 [package]
 name = "morphing-core"
-version = "0.1.0"
+version = "0.0.1"
 authors = ["YishiMichael"]
-edition = "2025"
+edition = "2024"
 
 [dependencies]
-config = "0.15.19"
-eframe = "0.33.2"
-egui = "0.33.2"
-egui-wgpu = "0.33.2"
-encase = "0.12.0"
-epaint = "0.33.2"
-geometric_algebra = "0.3.0"
-inventory = "0.3.21"
-libloading = "0.9.0"
 morphing-macros = { path = "../morphing-macros" }
-nalgebra = { version = "0.34.1", features = ["encase"] }
-serde = { version = "1.0.228", features = ["serde_derive"] }
-wgpu = "27.0.1"
