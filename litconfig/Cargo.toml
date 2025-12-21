@@ -1,14 +1,8 @@
 [package]
-name = "litconfig"
+name = "litconfig-macros"
 version = "0.0.1"
 authors = ["YishiMichael"]
 edition = "2024"
 
-[lib]
-proc-macro = true
-
 [dependencies]
-config = "0.15.19"
-proc-macro-error = "1.0.4"
-proc-macro2 = { version = "1.0.103", features = ["span-locations"] }
-syn = "2.0.111"
+litconfig-macros = { path = "../litconfig-macros" }

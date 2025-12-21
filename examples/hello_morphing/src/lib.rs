@@ -4,7 +4,7 @@
 // use morphing_core::timeline::Supervisor;
 // use morphing_gizmos::mobjects::shape::Rect;
 
-use morphing_core::{chapter, scene, GetField, Supervisor};
+// use morphing_core::{chapter, scene, GetField, Supervisor};
 
 // #[scene]
 // fn demo_scene(sv: &Supervisor<'_>) {
@@ -24,8 +24,18 @@ use morphing_core::{chapter, scene, GetField, Supervisor};
 //     sv.wait(10.0);
 // }
 
-#[chapter(config(toml = "", toml = "", yamla = ""))]
-extern crate self;
+// #[chapter(config(toml = "", toml = "", yamla = ""))]
+// extern crate self;
+
+litconfig::config! {
+    static C = "Cargo.toml" + toml(r#"
+        name = "override"
+    "#) + json(r#"
+        {
+            "name": "json_override",
+        }
+    "#);
+}
 
 #[derive(Clone, Debug)]
 pub struct Motor2D(pub geometric_algebra::ppga2d::Motor);
