@@ -1,5 +1,5 @@
 [package]
-name = "litconfig-macros"
+name = "litconfig"
 version = "0.0.1"
 authors = ["YishiMichael"]
 edition = "2024"

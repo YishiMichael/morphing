@@ -1,5 +1,5 @@
 [package]
-name = "litconfig"
+name = "litconfig-macros"
 version = "0.0.1"
 authors = ["YishiMichael"]
 edition = "2024"
@@ -11,6 +11,6 @@ proc-macro = true
 config = { version = "0.15.19", features = ["preserve_order"] }
 const-fnv1a-hash = "1.1.0"
 proc-macro-error = "1.0.4"
-proc-macro2 = { version = "1.0.103", features = ["span-locations"] }
+proc-macro2 = "1.0.103"
 quote = "1.0.42"
 syn = "2.0.111"

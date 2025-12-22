@@ -1,3 +1,4 @@
+mod convert;
 mod key;
 mod parse;
 
@@ -23,12 +24,17 @@ pub fn config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 #[proc_macro_error::proc_macro_error]
 #[proc_macro]
 pub fn key(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(parse::Key::value_ts, input)
+    delegate_macro(key::Key::value_ts, input)
 }
 
 #[proc_macro_error::proc_macro_error]
 #[proc_macro]
 #[allow(non_snake_case)]
 pub fn Key(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(parse::Key::type_ts, input)
+    delegate_macro(key::Key::type_ts, input)
+}
+
+#[proc_macro_derive(ConfigData)]
+pub fn config_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    delegate_macro(convert::config_data, input)
 }
